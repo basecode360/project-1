@@ -1,0 +1,147 @@
+// api/app.js
+import express from 'express';
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+import morgan from 'morgan';
+import axios from 'axios';
+import qs from 'qs';
+
+import ebayRoutes from './routes/ebayRoutes.js';
+
+dotenv.config();
+
+const app = express();
+app.use(express.json());
+app.use(morgan('short'));
+
+// ── 1) eBay OAuth Login Redirect ─────────────────────────────────────────────
+app.get('/auth/login', (req, res) => {
+  const clientId = process.env.CLIENT_ID;
+  const redirect = encodeURIComponent(process.env.REDIRECT_URI);
+  const scopes = encodeURIComponent(
+    [
+      'https://api.ebay.com/oauth/api_scope',
+      'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    ].join(' ')
+  );
+
+  const authUrl =
+    `https://auth.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
+    `ebay.com/oauth2/authorize` +
+    `?client_id=${clientId}` +
+    `&response_type=code` +
+    `&redirect_uri=${redirect}` +
+    `&scope=${scopes}`;
+
+  res.redirect(authUrl);
+});
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── 2) Handle eBay’s Callback & Exchange Code for Tokens ────────────────────
+app.get('/auth/success', async (req, res) => {
+  const { code } = req.query;
+  if (!code) {
+    return res.status(400).send('Missing authorization code');
+  }
+
+  const creds = Buffer.from(
+    `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+  ).toString('base64');
+
+  const body = qs.stringify({
+    grant_type: 'authorization_code',
+    code: decodeURIComponent(code),
+    redirect_uri: process.env.REDIRECT_URI,
+  });
+
+  try {
+    const { data } = await axios.post(
+      `https://api.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
+        `ebay.com/identity/v1/oauth2/token`,
+      body,
+      {
+        headers: {
+          Authorization: `Basic ${creds}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    const { access_token, refresh_token, expires_in } = data;
+
+    // Persist the new refresh token in your .env (dev) or DB/vault (prod)
+    process.env.REFRESH_TOKEN = refresh_token;
+
+    return res.json({ access_token, refresh_token, expires_in });
+  } catch (err) {
+    console.error('Token exchange failed:', err.response?.data || err);
+    return res.status(500).send('Failed to exchange authorization code');
+  }
+});
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── 3) Refresh Access Token via Stored Refresh Token ─────────────────────────
+app.get('/auth/refresh_token', async (req, res) => {
+  if (!process.env.REFRESH_TOKEN) {
+    return res.status(400).json({ error: 'No refresh token configured' });
+  }
+
+  const creds = Buffer.from(
+    `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+  ).toString('base64');
+
+  const body = qs.stringify({
+    grant_type: 'refresh_token',
+    refresh_token: process.env.REFRESH_TOKEN,
+    scope: [
+      'https://api.ebay.com/oauth/api_scope',
+      'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    ].join(' '),
+  });
+
+  try {
+    const { data } = await axios.post(
+      `https://api.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
+        `ebay.com/identity/v1/oauth2/token`,
+      body,
+      {
+        headers: {
+          Authorization: `Basic ${creds}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    const { access_token, refresh_token: newRt, expires_in } = data;
+
+    // Overwrite with the newly rotated refresh token
+    process.env.REFRESH_TOKEN = newRt;
+
+    return res.json({ access_token, refresh_token: newRt, expires_in });
+  } catch (err) {
+    console.error('Refresh-token HTTP status:', err.response?.status);
+    console.error('Refresh-token error body:', err.response?.data);
+    return res.status(500).send('Failed to refresh access token');
+  }
+});
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ✅ Basic Test Route
+app.get('/', (req, res) => {
+  res.send('Hello World, server is working properly!');
+});
+
+// ✅ MongoDB Connection
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch((error) => console.error('MongoDB connection error:', error));
+
+// ── Mount your eBay API routes ────────────────────────────────────────────────
+app.use('/api/ebay', ebayRoutes);
+// ──────────────────────────────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server is running at http://localhost:${PORT}`);
+});
