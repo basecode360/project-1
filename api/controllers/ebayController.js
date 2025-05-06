@@ -1,7 +1,7 @@
 // controllers/ebayController.js
 import { fetchEbayListings } from '../services/ebayService.js';
 
-export const getEbayListings = async (req, res) => {
+const getEbayListings = async (req, res) => {
   try {
     const listings = await fetchEbayListings();
     return res.status(200).json({
@@ -17,3 +17,10 @@ export const getEbayListings = async (req, res) => {
   }
 };
 
+
+
+
+
+
+
+export default getEbayListings;

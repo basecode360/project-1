@@ -1,10 +1,212 @@
-// routes/ebayRoutes.js
 import express from 'express';
-import { getEbayListings } from '../controllers/ebayController.js';
+import ebayService from '../services/ebayService.js'
+import getEbayListings from '../controllers/ebayController.js'
+import { createAllPolicies } from '../services/createPolicy.js';
+import { getFulfillmentPolicies } from '../services/getPolicy.js';
 
 const router = express.Router();
 
-// Route to get eBay listings
+/**
+ * @swagger
+ * /listings:
+ *   get:
+ *     description: Retrieve a list of eBay listings
+ *     responses:
+ *       200:
+ *         description: A list of eBay listings
+ *       500:
+ *         description: Internal server error
+ */
 router.get('/listings', getEbayListings);
+
+/**
+ * @swagger
+ * /inventory:
+ *   get:
+ *     description: Get the inventory from eBay
+ *     responses:
+ *       200:
+ *         description: List of inventory items
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/inventory', ebayService.getInventory);
+
+/**
+ * @swagger
+ * /add-product:
+ *   post:
+ *     description: Add a new product to eBay
+ *     parameters:
+ *       - in: body
+ *         name: product
+ *         description: Product to be added
+ *         schema:
+ *           type: object
+ *           required:
+ *             - name
+ *             - price
+ *           properties:
+ *             name:
+ *               type: string
+ *               example: "Product Name"
+ *             price:
+ *               type: number
+ *               example: 99.99
+ *     responses:
+ *       201:
+ *         description: Product added successfully
+ *       400:
+ *         description: Bad request
+ */
+router.post('/add-product', ebayService.addProduct);
+
+/**
+ * @swagger
+ * /getSingleItem/{id}:
+ *   get:
+ *     description: Get a single eBay item by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         description: ID of the eBay item to fetch
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Single item retrieved
+ *       404:
+ *         description: Item not found
+ */
+router.get('/getSingleItem/:id', ebayService.getInventoryItem);
+
+/**
+ * @swagger
+ * /add-multiple-products:
+ *   post:
+ *     description: Add multiple products to eBay
+ *     parameters:
+ *       - in: body
+ *         name: products
+ *         description: List of products to be added
+ *         schema:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "Product Name"
+ *               price:
+ *                 type: number
+ *                 example: 99.99
+ *     responses:
+ *       201:
+ *         description: Products added successfully
+ *       400:
+ *         description: Bad request
+ */
+router.post('/add-multiple-products', ebayService.addMultipleProducts);
+
+/**
+ * @swagger
+ * /editPrice:
+ *   put:
+ *     description: Edit the price of an eBay product
+ *     parameters:
+ *       - in: body
+ *         name: price
+ *         description: New price for the product
+ *         schema:
+ *           type: object
+ *           required:
+ *             - id
+ *             - price
+ *           properties:
+ *             id:
+ *               type: string
+ *               example: "123456789"
+ *             price:
+ *               type: number
+ *               example: 79.99
+ *     responses:
+ *       200:
+ *         description: Price updated successfully
+ *       404:
+ *         description: Product not found
+ */
+router.put('/editPrice', ebayService.editPrice);
+
+/**
+ * @swagger
+ * /deleteProduct:
+ *   delete:
+ *     description: Delete a product from eBay
+ *     parameters:
+ *       - in: query
+ *         name: id
+ *         description: ID of the product to delete
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product deleted successfully
+ *       404:
+ *         description: Product not found
+ */
+router.delete('/deleteProduct', ebayService.deleteProduct);
+
+/**
+ * @swagger
+ * /add-Offeres-forProduct:
+ *   post:
+ *     description: Add offers for a product
+ *     parameters:
+ *       - in: body
+ *         name: offer
+ *         description: Offer details
+ *         schema:
+ *           type: object
+ *           required:
+ *             - productId
+ *             - offerDetails
+ *           properties:
+ *             productId:
+ *               type: string
+ *               example: "123456789"
+ *             offerDetails:
+ *               type: string
+ *               example: "Discount offer for the product"
+ *     responses:
+ *       201:
+ *         description: Offer added successfully
+ *       400:
+ *         description: Bad request
+ */
+router.post('/add-Offeres-forProduct', ebayService.createOfferForInventoryItem);
+
+/**
+ * @swagger
+ * /create-ebay-policies:
+ *   post:
+ *     description: Create eBay policies
+ *     responses:
+ *       201:
+ *         description: Policies created successfully
+ */
+router.post('/create-ebay-policies', createAllPolicies);
+
+/**
+ * @swagger
+ * /get-ebay-policies:
+ *   get:
+ *     description: Get all eBay policies
+ *     responses:
+ *       200:
+ *         description: List of eBay policies
+ */
+router.get('/get-ebay-policies', getFulfillmentPolicies);
 
 export default router;

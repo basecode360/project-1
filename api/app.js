@@ -1,18 +1,42 @@
 // api/app.js
 import express from 'express';
-import mongoose from 'mongoose';
+import mongoose, { get } from 'mongoose';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
 import axios from 'axios';
 import qs from 'qs';
+import swaggerJSDoc from 'swagger-jsdoc';
+import swaggerUi from 'swagger-ui-express'
 
 import ebayRoutes from './routes/ebayRoutes.js';
+
+
+const swaggerOptions = {
+  swaggerDefinition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'eBay Inventory API',
+      version: '1.0.0',
+      description: 'API for eBay Inventory',
+    },
+    servers: [
+      {
+        url: 'http://localhost:5000/api/ebay',  // Ensure this is pointing to your local server
+      },
+    ],
+  },
+  apis: ['./routes/*.js'],
+};
+const swaggerSpec = swaggerJSDoc(swaggerOptions);
+
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(morgan('short'));
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ── 1) eBay OAuth Login Redirect ─────────────────────────────────────────────
 app.get('/auth/login', (req, res) => {
@@ -130,6 +154,7 @@ app.get('/auth/refresh_token', async (req, res) => {
 app.get('/', (req, res) => {
   res.send('Hello World, server is working properly!');
 });
+
 
 // ✅ MongoDB Connection
 mongoose
