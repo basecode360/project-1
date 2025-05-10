@@ -42,22 +42,27 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/auth/login', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirect = encodeURIComponent(process.env.REDIRECT_URI);
-  const scopes = encodeURIComponent(
-    [
-      'https://api.ebay.com/oauth/api_scope',
-      'https://api.ebay.com/oauth/api_scope/sell.inventory',
-    ].join(' ')
-  );
+ try {
+  const scopes = encodeURIComponent([
+    'https://api.ebay.com/oauth/api_scope',
+    'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    'https://api.ebay.com/oauth/api_scope/sell.account',
+    'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+    'https://api.ebay.com/oauth/api_scope/sell.fulfillment'
+  ].join(' '));
 
   const authUrl =
-    `https://auth.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
-    `ebay.com/oauth2/authorize` +
+    `https://auth.ebay.com/oauth2/authorize` +
     `?client_id=${clientId}` +
     `&response_type=code` +
     `&redirect_uri=${redirect}` +
     `&scope=${scopes}`;
 
   res.redirect(authUrl);
+ } catch (error) {
+  const errorMessage = error.response ? error.response.data : error.message;
+  return res.status(500).json({ error: 'Authorization URL generation failed', details: errorMessage });
+ }
 });
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -74,14 +79,13 @@ app.get('/auth/success', async (req, res) => {
 
   const body = qs.stringify({
     grant_type: 'authorization_code',
-    code: decodeURIComponent(code),
+    code: code,
     redirect_uri: process.env.REDIRECT_URI,
   });
 
   try {
     const { data } = await axios.post(
-      `https://api.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
-        `ebay.com/identity/v1/oauth2/token`,
+      `https://api.ebay.com/identity/v1/oauth2/token`,
       body,
       {
         headers: {
@@ -125,8 +129,7 @@ app.get('/auth/refresh_token', async (req, res) => {
 
   try {
     const { data } = await axios.post(
-      `https://api.${process.env.NODE_ENV === 'production' ? '' : 'sandbox.'}` +
-        `ebay.com/identity/v1/oauth2/token`,
+      `https://api.ebay.com/identity/v1/oauth2/token`,
       body,
       {
         headers: {

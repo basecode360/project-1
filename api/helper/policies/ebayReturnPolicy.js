@@ -23,7 +23,7 @@ export const createReturnPolicy = async () => {
       };
   
       // Make the API call
-      const url = "https://api.sandbox.ebay.com/sell/account/v1/return_policy";
+      const url = "https://api.ebay.com/sell/account/v1/return_policy";
       const response = await ebayApi({
         method: "POST",
         url,

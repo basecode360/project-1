@@ -41,7 +41,7 @@ async function getAccessToken() {
   });
 
   const resp = await axios.post(
-    'https://api.sandbox.ebay.com/identity/v1/oauth2/token',
+    'https://api.ebay.com/identity/v1/oauth2/token',
     body,
     {
       headers: {

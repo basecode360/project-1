@@ -28,7 +28,7 @@ export const createPaymentPolicy = async () => {
       };
   
       // Make the API call
-      const url = "https://api.sandbox.ebay.com/sell/account/v1/payment_policy";
+      const url = "https://api.ebay.com/sell/account/v1/payment_policy";
       const response = await ebayApi({
         method: "POST",
         url,

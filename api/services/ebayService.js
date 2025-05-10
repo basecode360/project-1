@@ -13,11 +13,10 @@ export const fetchEbayListings = async () => {
 };
 
 
-const singleItem = `https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/`
-const allInventory = "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item"
+const singleItem = `https://api.ebay.com/sell/inventory/v1/inventory_item/`
 // Example: Get all inventory items from your eBay store
 const getInventory = async (req, res) => {
-  const url = allInventory;
+  const url = singleItem;
   try {
     // This is the correct inventory endpoint
 
@@ -94,7 +93,7 @@ const addProduct = async (req, res) => {
       },
       "imageUrls": ["http://example.com/photo.jpg"]
     },
-    "sku": "MySku1631123",
+    "sku": "MySku1bmw",
     "packageWeightAndSize": {
       "dimensions": {
         "height": 6,
@@ -277,7 +276,7 @@ const editPrice = async (req, res) => {
 
 const deleteProduct = async (req, res) => {
   try {
-    const url = allInventory;
+    const url = singleItem;
     const inventoryItemsData = await ebayApi({
       url
     })
@@ -358,7 +357,7 @@ const createOfferForInventoryItem = async (req, res) => {
       });
     }
     
-    const createOfferUrl = "https://api.sandbox.ebay.com/sell/inventory/v1/offer";
+    const createOfferUrl = "https://api.ebay.com/sell/inventory/v1/offer";
     
     // Create the offer data
     const i = 0;
