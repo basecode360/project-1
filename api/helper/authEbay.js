@@ -67,13 +67,13 @@ export default async function ebayApi({
     const accessToken = await getAccessToken();
     
     // Make the axios request
-    const config = {
-      headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'Content-Language': 'en-US' // Add this line
-    },
-  }
+  //   const config = {
+  //     headers: {
+  //     Authorization: `Bearer ${accessToken}`,
+  //     'Content-Type': 'application/json',
+  //     'Content-Language': 'en-US' // Add this line
+  //   },
+  // }
     const response = await axios({
       method,
       url,

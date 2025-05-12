@@ -3,33 +3,28 @@ import ebayApi from "../authEbay.js";
 export const createFulfillmentPolicy = async () => {
   try {
     const fulfillmentPolicyData = {
-      name: "Simple Shipping Policy",
-      description: "Basic shipping policy for all items",
-      marketplaceId: "EBAY_US",
-      categoryTypes: [
+      "name": "Standard Shipping Policy",
+      "marketplaceId": "EBAY_US",
+      "categoryTypes": [
         {
-          name: "ALL_EXCLUDING_MOTORS_VEHICLES"
+          "name": "ALL_EXCLUDING_MOTORS_VEHICLES"
         }
       ],
-      handlingTime: {
-        value: 3,
-        unit: "DAY"
+      "handlingTime": {
+        "value": 1,
+        "unit": "DAY"
       },
-      shippingOptions: [
+      "shippingOptions": [
         {
-          optionType: "DOMESTIC",
-          costType: "FLAT_RATE",
-          shippingServices: [
+          "optionType": "DOMESTIC",
+          "costType": "FLAT_RATE",
+          "shippingServices": [
             {
-              sortOrder: 1,
-              shippingServiceCode: "USPSPriority",
-              shippingCost: {
-                value: "9.99",
-                currency: "USD"
-              },
-              additionalShippingCost: {
-                value: "1.99",
-                currency: "USD"
+              "sortOrder": 1,
+              "shippingServiceCode": "USPSPriority",
+              "shippingCost": {
+                "value": "9.99",
+                "currency": "USD"
               }
             }
           ]

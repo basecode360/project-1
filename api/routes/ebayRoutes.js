@@ -2,7 +2,7 @@ import express from 'express';
 import ebayService from '../services/ebayService.js'
 import getEbayListings from '../controllers/ebayController.js'
 import { createAllPolicies } from '../services/createPolicy.js';
-import { getFulfillmentPolicies } from '../services/getPolicy.js';
+import { getPolicy } from '../services/getPolicy.js';
 
 const router = express.Router();
 
@@ -30,7 +30,7 @@ router.get('/listings', getEbayListings);
  *       500:
  *         description: Internal server error
  */
-router.get('/inventory', ebayService.getInventory);
+router.get('/inventory', ebayService.getInventory); 
 
 /**
  * @swagger
@@ -79,7 +79,7 @@ router.post('/add-product', ebayService.addProduct);
  *       404:
  *         description: Item not found
  */
-router.get('/getSingleItem/:id', ebayService.getInventoryItem);
+router.get('/getSingleItem', ebayService.getInventoryItem);
 
 /**
  * @swagger
@@ -207,6 +207,49 @@ router.post('/create-ebay-policies', createAllPolicies);
  *       200:
  *         description: List of eBay policies
  */
-router.get('/get-ebay-policies', getFulfillmentPolicies);
+// Correct way
+router.get('/get-fullfilment-policies', async (req, res) => {
+    try {
+      const policies = await getPolicy("fulfillment");
+      res.json(policies);
+    } catch (error) {
+      console.error("Error in fulfillment policies route:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch fulfillment policies",
+        details: error.message 
+      });
+    }
+  });
+// Correct way
+router.get('/get-payment-policies', async (req, res) => {
+    try {
+      const policies = await getPolicy("payment");
+      res.json(policies);
+    } catch (error) {
+      console.error("Error in payment policies route:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch payment policies",
+        details: error.message 
+      });
+    }
+  });
+
+
+  router.get('/get-return-policies', async (req, res) => {
+    try {
+      const policies = await getPolicy("return");
+      res.json(policies);
+    } catch (error) {
+      console.error("Error in return policies route:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch return policies",
+        details: error.message 
+      });
+    }
+  });
+
+
+  router.post('/add-merchant-key', ebayService.createMerchantLocation);
+  router.get('/get-Merchant-key', ebayService.getMerchantKey);
 
 export default router;

@@ -7,8 +7,8 @@ export const createAllPolicies = async (req,res) => {
     try {
       // Create all three policies
       const fulfillmentPolicyId = await createFulfillmentPolicy();
-      const paymentPolicyId = await createPaymentPolicy();
-      const returnPolicyId = await createReturnPolicy();
+      // const paymentPolicyId = await createPaymentPolicy();
+      // const returnPolicyId = await createReturnPolicy();
   
       return res.status(200).json({
         "fullfilment":fulfillmentPolicyId,
