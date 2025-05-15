@@ -65,23 +65,17 @@ export default async function ebayApi({
 }) {
   try {
     const accessToken = await getAccessToken();
-    
-    // Make the axios request
-    const config = {
-      headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'Content-Language': 'en-US' // Add this line
-    },
-  }
+
+    const fullUrl = url.startsWith('http') ? url : `https://api.ebay.com${url}`;
+
     const response = await axios({
       method,
-      url,
+      url: fullUrl,
       params,
       data,
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json', // Changed from 'application/xml'
+        'Content-Type': 'application/json',
         'Content-Language': 'en-US',
       },
     });
@@ -89,14 +83,37 @@ export default async function ebayApi({
     return response.data;
   } catch (error) {
     console.error('Error in eBay API request:', error.response ? error.response.data : error.message);
-
-    if (error.response) {
-      console.error('Response error status:', error.response.status);
-      console.error('Response data:', error.response.data);
-    }
-
-    throw error; // Throw the actual error for better debugging
+    throw error;
   }
 }
 
 
+export const getActiveListings = async () => {
+  // Step 1: Get all inventory items (SKUs)
+  const inventoryResponse = await ebayApi({
+    method: 'GET',
+    url: '/sell/inventory/v1/inventory_item',
+  });
+
+  const inventoryItems = inventoryResponse.inventoryItems || [];
+
+  // Step 2: For each SKU, fetch active offers
+  let allOffers = [];
+  for (const item of inventoryItems) {
+    try {
+      const offersResponse = await ebayApi({
+        method: 'GET',
+        url: '/sell/inventory/v1/offer',
+        params: { sku: item.sku },
+      });
+
+      const offers = offersResponse.offers || [];
+      allOffers = allOffers.concat(offers);
+    } catch (err) {
+      console.error(`Failed to fetch offers for SKU ${item.sku}:`, err.message);
+      // Optionally continue with next SKU
+    }
+  }
+
+  return allOffers;
+};

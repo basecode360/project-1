@@ -4,6 +4,7 @@ import getEbayListings from '../controllers/ebayController.js'
 import { createAllPolicies } from '../services/createPolicy.js';
 import { getFulfillmentPolicies } from '../services/getPolicy.js';
 
+
 const router = express.Router();
 
 /**
@@ -208,5 +209,31 @@ router.post('/create-ebay-policies', createAllPolicies);
  *         description: List of eBay policies
  */
 router.get('/get-ebay-policies', getFulfillmentPolicies);
+
+/**
+ * @swagger
+ * /active-listings:
+ *   get:
+ *     description: Get all active selling listings from your eBay inventory
+ *     responses:
+ *       200:
+ *         description: A list of active selling listings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 listings:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/active-listings', ebayService.getActiveListings);
+
+
 
 export default router;

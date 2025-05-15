@@ -12,31 +12,28 @@ export const fetchEbayListings = async () => {
   }
 };
 
-
-const singleItem = `https://api.ebay.com/sell/inventory/v1/inventory_item/`
+const singleItem = 'https://api.ebay.com/sell/inventory/v1/inventory_item/';
+const inventoryUrl = 'https://api.ebay.com/sell/inventory/v1/inventory_item';
 // Example: Get all inventory items from your eBay store
 const getInventory = async (req, res) => {
-  const url = singleItem;
   try {
-    // This is the correct inventory endpoint
-
     const data = await ebayApi({
-      method: "GET",
-      url,
+      method: 'GET',
+      url: '/sell/inventory/v1/inventory_item',
     });
-    console.log("Inventory:", data);
-    return res.status(200).json({
+        return res.status(200).json({
       success: true,
-      data
+      data,
     });
   } catch (error) {
-    console.error(
-      "Error fetching inventory:",
-      error.response?.data || error.message
-    );
-    throw error;
+    console.error('Error fetching inventory:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching inventory',
+      error: error.response?.data || error.message,
+    });
   }
-}
+};
 
 
 const getInventoryItem = async (req, res) => {
@@ -417,9 +414,52 @@ const createOfferForInventoryItem = async (req, res) => {
     });
   }
 };
+export const getActiveListings = async (req, res) => {
+  try {
+    // 1. Fetch all inventory items (SKUs)
+    const inventoryResponse = await ebayApi({
+      method: 'GET',
+      url: '/sell/inventory/v1/inventory_item',
+    });
+
+    const inventoryItems = inventoryResponse.inventoryItems || [];
+
+    // 2. For each SKU, fetch active offers/listings
+    let allOffers = [];
+    for (const item of inventoryItems) {
+      try {
+        const offersResponse = await ebayApi({
+          method: 'GET',
+          url: '/sell/inventory/v1/offer',
+          params: { sku: item.sku },
+        });
+
+        const offers = offersResponse.offers || [];
+        allOffers = allOffers.concat(offers);
+      } catch (err) {
+        console.error(`Failed to fetch offers for SKU ${item.sku}:`, err.message);
+        // Continue with next SKU even if error occurs
+      }
+    }
+
+    // 3. Return all active offers
+    return res.status(200).json({
+      success: true,
+      listings: allOffers,
+    });
+  } catch (error) {
+    console.error('Error fetching active listings:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching active listings',
+      error: error.response?.data || error.message,
+    });
+  }
+};
 
 
 
 
-export default { getInventory, addProduct, getInventoryItem, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem};
+
+export default { getInventory, addProduct, getInventoryItem, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem, getActiveListings };
 
