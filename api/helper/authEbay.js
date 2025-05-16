@@ -17,8 +17,11 @@ const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.account',
   'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.inventory',
-  'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly'
+  'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
+  'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'
 ].join(' ');
+
 
 // 1) Only call the token‐endpoint if no static token is provided
 async function getAccessToken() {
@@ -65,8 +68,10 @@ export default async function ebayApi({
 }) {
   try {
     const accessToken = await getAccessToken();
-
     const fullUrl = url.startsWith('http') ? url : `https://api.ebay.com${url}`;
+    if (!accessToken) {
+      throw new Error('Access token is empty');
+    }
 
     const response = await axios({
       method,

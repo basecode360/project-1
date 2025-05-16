@@ -3,13 +3,14 @@ import ebayService from '../services/ebayService.js'
 import getEbayListings from '../controllers/ebayController.js'
 import { createAllPolicies } from '../services/createPolicy.js';
 import { getFulfillmentPolicies } from '../services/getPolicy.js';
+import  inventoryServicer from '../services/getInventory.js';
 
 
 const router = express.Router();
 
 /**
  * @swagger
- * /listings:
+ * /listings-from-mongo:
  *   get:
  *     description: Retrieve a list of eBay listings
  *     responses:
@@ -18,7 +19,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.get('/listings', getEbayListings);
+router.get('/listings-from-mongo', getEbayListings);
 
 /**
  * @swagger
@@ -31,7 +32,7 @@ router.get('/listings', getEbayListings);
  *       500:
  *         description: Internal server error
  */
-router.get('/inventory', ebayService.getInventory);
+router.get('/inventory', inventoryServicer.getInventory);
 
 /**
  * @swagger
@@ -80,7 +81,7 @@ router.post('/add-product', ebayService.addProduct);
  *       404:
  *         description: Item not found
  */
-router.get('/getSingleItem/:id', ebayService.getInventoryItem);
+router.get('/getSingleItem/:id', inventoryServicer.getInventoryItem);
 
 /**
  * @swagger
@@ -232,7 +233,10 @@ router.get('/get-ebay-policies', getFulfillmentPolicies);
  *       500:
  *         description: Internal server error
  */
-router.get('/active-listings', ebayService.getActiveListings);
+router.get('/active-listings', inventoryServicer.getActiveListings);
+
+
+router.get('/active-listingsviaFeed', inventoryServicer.getActiveListingsViaFeed);
 
 
 

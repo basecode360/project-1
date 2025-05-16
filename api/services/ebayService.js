@@ -1,6 +1,11 @@
 import EbayListing from '../models/ebayListing.js';
 import { inventoryItemsArray } from '../productadded.js';
 import ebayApi from "../helper/authEbay.js"
+import axios from 'axios';
+import xml2js from 'xml2js';
+import dotenv from 'dotenv';
+dotenv.config();
+
 // Function to fetch eBay listings from MongoDB
 export const fetchEbayListings = async () => {
   try {
@@ -13,59 +18,6 @@ export const fetchEbayListings = async () => {
 };
 
 const singleItem = 'https://api.ebay.com/sell/inventory/v1/inventory_item/';
-const inventoryUrl = 'https://api.ebay.com/sell/inventory/v1/inventory_item';
-// Example: Get all inventory items from your eBay store
-const getInventory = async (req, res) => {
-  try {
-    const data = await ebayApi({
-      method: 'GET',
-      url: '/sell/inventory/v1/inventory_item',
-    });
-        return res.status(200).json({
-      success: true,
-      data,
-    });
-  } catch (error) {
-    console.error('Error fetching inventory:', error.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching inventory',
-      error: error.response?.data || error.message,
-    });
-  }
-};
-
-
-const getInventoryItem = async (req, res) => {
-  try {
-    const sku = req.params.id;
-    console.log('sku => ', sku)
-    const url = `${singleItem}${sku}`;
-
-    const itemData = await ebayApi({
-      url: url,
-    })
-
-    console.log("fetched single product form ebay", itemData)
-    return res.status(200).json({
-      success: true,
-      itemData
-    })
-
-  } catch (error) {
-    const errorMessage = error.response ? error.response.data : error.message;
-    const statusCode = error.response ? error.response.status : 500; // Default to 500 if no response status
-
-    console.log(`Error occurred while fetching the product: ${errorMessage}`);
-    return res.status(statusCode).json({
-      success: false,
-      message: "Error fetching product",
-      error: error.response ? error.response.data : error.message
-    })
-  }
-}
-
-
 
 const addProduct = async (req, res) => {
   // Inventory API expects JSON, not XML
@@ -211,64 +163,93 @@ const addMultipleProducts = async (req, res) => {
 
 const editPrice = async (req, res) => {
   try {
-    const sku = req.params.id
-    const { price, currency = 'USD' } = req.body;
+    const {itemId, price, currency = 'USD' } = req.body;
 
-    if (!sku || !price) {
+    if (!itemId || !price) {
       return res.status(400).json({
         success: false,
-        message: "Required fileds are not given"
-      })
+        message: "Required fields are missing (itemId and price required)"
+      });
     }
 
     if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Price is not in correct format"
-      })
+        message: "Price must be a positive number"
+      });
     }
 
-    console.log("Sku of product => ", sku)
-    const url = `${singleItem}${sku}`;
+    console.log(`Updating price for item ${itemId} to ${price} ${currency}`);
+    console.log(`eBay Auth Token: ${process.env.AUTH_TOKEN}`);
+    const authToken = process.env.AUTH_TOKEN;
+    // For Trading API, we need to use XML
+    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${price}</StartPrice>
+    <Currency>${currency}</Currency>
+  </Item>
+</ReviseItemRequest>`;
 
-    const itemData = await ebayApi({
-      url: url,
-    })
+    // Make the API call
+    const response = await axios({
+      method: 'POST',
+      url: process.env.NODE_ENV === 'production' 
+        ? 'https://api.ebay.com/ws/api.dll' 
+        : 'https://api.sandbox.ebay.com/ws/api.dll',
+      headers: {
+        'Content-Type': 'text/xml',
+        'X-EBAY-API-CALL-NAME': 'ReviseItem',
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+        'X-EBAY-API-APP-NAME': process.env.CLIENT_ID
+      },
+      data: xmlRequest
+    });
 
-
-    console.log("fetched single product form ebay", itemData)
-    const updatedProduct = {
-      ...itemData,
-      availability: {
-        shipToLocationAvailability: {
-          allocationByFormat: {
-            fixedPrice: price
-          }
+    // Parse the XML response
+    const parser = new xml2js.Parser({ 
+      explicitArray: false, 
+      ignoreAttrs: true 
+    });
+    
+    const result = await new Promise((resolve, reject) => {
+      parser.parseString(response.data, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
         }
-      }
+      });
+    });
+
+    // Check if the update was successful
+    const reviseItemResponse = result.ReviseItemResponse;
+    
+    if (reviseItemResponse.Ack === 'Success' || reviseItemResponse.Ack === 'Warning') {
+      return res.status(200).json({
+        success: true,
+        message: `Price updated successfully to ${price} ${currency}`,
+        data: reviseItemResponse
+      });
+    } else {
+      throw new Error(JSON.stringify(reviseItemResponse.Errors));
     }
-
-    // const updatedPrice = await ebayApi({
-    //   method: "PUT",
-    //   url,
-    //   data: updatedProduct
-    // })
-
-    return res.status(200).json({
-      success: true,
-      updatedProduct
-    })
-
   } catch (error) {
-    const status = error.response ? error.response.status : 500;
-    const errorMessage = error.response ? error.response.status : error.response.data;
-    return res.status(status).json({
+    
+    const errorMessage = error.response?.data || error.message;
+    console.error('Error updating price:', errorMessage);
+    return res.status(error.response?.status || 500).json({
       success: false,
-      message: "Error edit price ",
+      message: "Error updating price",
       error: errorMessage
-    })
+    });
   }
-}
+};
 
 
 const deleteProduct = async (req, res) => {
@@ -414,52 +395,8 @@ const createOfferForInventoryItem = async (req, res) => {
     });
   }
 };
-export const getActiveListings = async (req, res) => {
-  try {
-    // 1. Fetch all inventory items (SKUs)
-    const inventoryResponse = await ebayApi({
-      method: 'GET',
-      url: '/sell/inventory/v1/inventory_item',
-    });
-
-    const inventoryItems = inventoryResponse.inventoryItems || [];
-
-    // 2. For each SKU, fetch active offers/listings
-    let allOffers = [];
-    for (const item of inventoryItems) {
-      try {
-        const offersResponse = await ebayApi({
-          method: 'GET',
-          url: '/sell/inventory/v1/offer',
-          params: { sku: item.sku },
-        });
-
-        const offers = offersResponse.offers || [];
-        allOffers = allOffers.concat(offers);
-      } catch (err) {
-        console.error(`Failed to fetch offers for SKU ${item.sku}:`, err.message);
-        // Continue with next SKU even if error occurs
-      }
-    }
-
-    // 3. Return all active offers
-    return res.status(200).json({
-      success: true,
-      listings: allOffers,
-    });
-  } catch (error) {
-    console.error('Error fetching active listings:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching active listings',
-      error: error.response?.data || error.message,
-    });
-  }
-};
 
 
 
-
-
-export default { getInventory, addProduct, getInventoryItem, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem, getActiveListings };
+export default { addProduct, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem };
 
