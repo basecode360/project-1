@@ -3,12 +3,13 @@ import ebayService from '../services/ebayService.js'
 import getEbayListings from '../controllers/ebayController.js'
 import { createAllPolicies } from '../services/createPolicy.js';
 import { getPolicy } from '../services/getPolicy.js';
+import fetchProducts from '../services/getInventory.js';
 
 const router = express.Router();
 
 /**
  * @swagger
- * /listings:
+ * /listings-from-mongo:
  *   get:
  *     description: Retrieve a list of eBay listings
  *     responses:
@@ -17,7 +18,7 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.get('/listings', getEbayListings);
+router.get('/listings-from-mongo', getEbayListings);
 
 /**
  * @swagger
@@ -30,7 +31,7 @@ router.get('/listings', getEbayListings);
  *       500:
  *         description: Internal server error
  */
-router.get('/inventory', ebayService.getInventory); 
+router.get('/inventory', fetchProducts.getInventory);
 
 /**
  * @swagger
@@ -79,7 +80,7 @@ router.post('/add-product', ebayService.addProduct);
  *       404:
  *         description: Item not found
  */
-router.get('/getSingleItem', ebayService.getInventoryItem);
+router.get('/getSingleItem/:id', fetchProducts.getInventoryItem);
 
 /**
  * @swagger
@@ -251,5 +252,34 @@ router.get('/get-payment-policies', async (req, res) => {
 
   router.post('/add-merchant-key', ebayService.createMerchantLocation);
   router.get('/get-Merchant-key', ebayService.getMerchantKey);
+
+/**
+ * @swagger
+ * /active-listings:
+ *   get:
+ *     description: Get all active selling listings from your eBay inventory
+ *     responses:
+ *       200:
+ *         description: A list of active selling listings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 listings:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/active-listings', inventoryService.getActiveListings);
+
+
+router.get('/active-listingsviaFeed', inventoryService.getActiveListingsViaFeed);
+
+
 
 export default router;
