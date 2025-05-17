@@ -19,7 +19,9 @@ const SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory',
   'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
-  'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly'
+  'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.item',
+  'https://api.ebay.com/oauth/api_scope/sell.item.readonly'
 ].join(' ');
 
 

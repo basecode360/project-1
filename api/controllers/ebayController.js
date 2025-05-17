@@ -18,9 +18,4 @@ const getEbayListings = async (req, res) => {
 };
 
 
-
-
-
-
-
 export default getEbayListings;

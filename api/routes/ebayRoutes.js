@@ -275,10 +275,10 @@ router.get('/get-payment-policies', async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.get('/active-listings', inventoryService.getActiveListings);
+router.get('/active-listings', fetchProducts.getActiveListings);
 
 
-router.get('/active-listingsviaFeed', inventoryService.getActiveListingsViaFeed);
+router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
 
 
 

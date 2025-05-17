@@ -20,11 +20,6 @@ export const fetchEbayListings = async () => {
 
 const singleItem = `https://api.ebay.com/sell/inventory/v1/inventory_item/`
 
-
-
-
-
-
 const inventoryItemData = {
   "availability": {
     "shipToLocationAvailability": {
@@ -353,18 +348,19 @@ const editPrice = async (req, res) => {
     console.log(`eBay Auth Token: ${process.env.AUTH_TOKEN}`);
     const authToken = process.env.AUTH_TOKEN;
     // For Trading API, we need to use XML
-    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
   <Item>
     <ItemID>${itemId}</ItemID>
     <StartPrice>${price}</StartPrice>
     <Currency>${currency}</Currency>
   </Item>
 </ReviseItemRequest>`;
-
     // Make the API call
     const response = await axios({
       method: 'POST',
@@ -375,7 +371,7 @@ const editPrice = async (req, res) => {
         'Content-Type': 'text/xml',
         'X-EBAY-API-CALL-NAME': 'ReviseItem',
         'X-EBAY-API-SITEID': '0',
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1319',
         'X-EBAY-API-APP-NAME': process.env.CLIENT_ID
       },
       data: xmlRequest
@@ -409,17 +405,6 @@ const editPrice = async (req, res) => {
     } else {
       throw new Error(JSON.stringify(reviseItemResponse.Errors));
     }
-
-    // const updatedPrice = await ebayApi({
-    //   method: "PUT",
-    //   url,
-    //   data: updatedProduct
-    // })
-    console.log("product updated =>" , updatedProduct)
-    return res.status(200).json({
-      success: true,
-      updatedProduct
-    })
 
   } catch (error) {
     
@@ -669,5 +654,5 @@ const getCategorySuggestions = async () => {
 
 
 
-export default { getInventory, addProduct, getInventoryItem, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem, getMerchantKey, createMerchantLocation};
+export default { addProduct, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem, getMerchantKey, createMerchantLocation};
 
