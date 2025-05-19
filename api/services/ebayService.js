@@ -325,10 +325,9 @@ const addMultipleProducts = async (req, res) => {
   }
 };
 
-
 const editPrice = async (req, res) => {
   try {
-    const {itemId, price, currency = 'USD' } = req.body;
+    const {itemId, price, currency = 'USD', sku } = req.body;
 
     if (!itemId || !price) {
       return res.status(400).json({
@@ -337,47 +336,38 @@ const editPrice = async (req, res) => {
       });
     }
 
-    if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Price must be a positive number"
-      });
-    }
-
-    console.log(`Updating price for item ${itemId} to ${price} ${currency}`);
-    console.log(`eBay Auth Token: ${process.env.AUTH_TOKEN}`);
     const authToken = process.env.AUTH_TOKEN;
-    // For Trading API, we need to use XML
-const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+
+    // For ReviseInventoryStatus API
+    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
-  <ErrorLanguage>en_US</ErrorLanguage>
-  <WarningLevel>High</WarningLevel>
-  <Item>
+  <InventoryStatus>
     <ItemID>${itemId}</ItemID>
     <StartPrice>${price}</StartPrice>
-    <Currency>${currency}</Currency>
-  </Item>
-</ReviseItemRequest>`;
-    // Make the API call
+    ${sku ? `<SKU>${sku}</SKU>` : ''}
+  </InventoryStatus>
+</ReviseInventoryStatusRequest>`;
+
+    // Make the API call with CORRECT headers
     const response = await axios({
       method: 'POST',
-      url: process.env.NODE_ENV === 'production' 
-        ? 'https://api.ebay.com/ws/api.dll' 
-        : 'https://api.sandbox.ebay.com/ws/api.dll',
+      url:
+'https://api.ebay.com/ws/api.dll',
+
       headers: {
         'Content-Type': 'text/xml',
-        'X-EBAY-API-CALL-NAME': 'ReviseItem',
+        'X-EBAY-API-CALL-NAME': 'ReviseInventoryStatus', // Changed from 'ReviseItem'
         'X-EBAY-API-SITEID': '0',
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1319',
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
         'X-EBAY-API-APP-NAME': process.env.CLIENT_ID
       },
       data: xmlRequest
     });
 
-    // Parse the XML response
+    // Parse response...
     const parser = new xml2js.Parser({ 
       explicitArray: false, 
       ignoreAttrs: true 
@@ -393,21 +383,20 @@ const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
       });
     });
 
-    // Check if the update was successful
-    const reviseItemResponse = result.ReviseItemResponse;
+    // Check response
+    const reviseResponse = result.ReviseInventoryStatusResponse;
     
-    if (reviseItemResponse.Ack === 'Success' || reviseItemResponse.Ack === 'Warning') {
+    if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
       return res.status(200).json({
         success: true,
         message: `Price updated successfully to ${price} ${currency}`,
-        data: reviseItemResponse
+        data: reviseResponse
       });
     } else {
-      throw new Error(JSON.stringify(reviseItemResponse.Errors));
+      throw new Error(JSON.stringify(reviseResponse.Errors));
     }
 
   } catch (error) {
-    
     const errorMessage = error.response?.data || error.message;
     console.error('Error updating price:', errorMessage);
     return res.status(error.response?.status || 500).json({
@@ -417,7 +406,6 @@ const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
     });
   }
 };
-
 
 const deleteProduct = async (req, res) => {
   try {

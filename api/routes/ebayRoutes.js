@@ -2,8 +2,10 @@ import express from 'express';
 import ebayService from '../services/ebayService.js'
 import getEbayListings from '../controllers/ebayController.js'
 import { createAllPolicies } from '../services/createPolicy.js';
-import { getPolicy } from '../services/getPolicy.js';
+import { getPolicy, checkAuthToken } from '../services/getPolicy.js';
 import fetchProducts from '../services/getInventory.js';
+import editRoute from '../services/editProduct.js';
+import strategy from '../services/pricingStrategy.js' 
 
 const router = express.Router();
 
@@ -279,6 +281,42 @@ router.get('/active-listings', fetchProducts.getActiveListings);
 
 
 router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
+
+router.post('/check-token-status', checkAuthToken);
+
+
+
+
+
+
+
+router.get('/item-variations/:itemId', editRoute.getItemVariations);
+
+// Update specific variation price
+router.post('/edit-variation-price', editRoute.editVariationPrice);
+
+// Update all variations to same price
+router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
+
+
+
+
+
+
+
+
+
+
+// Get current pricing strategy
+router.get('/pricing-strategy/:itemId', strategy.getPricingStrategy);
+
+// Set pricing strategy for single item
+router.post('/pricing-strategy', strategy.setPricingStrategy);
+
+// Set pricing strategy for multiple items
+router.post('/pricing-strategy/bulk', strategy.setBulkPricingStrategy);
+
+
 
 
 

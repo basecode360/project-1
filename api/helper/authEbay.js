@@ -124,3 +124,7 @@ export const getActiveListings = async () => {
 
   return allOffers;
 };
+
+
+
+
