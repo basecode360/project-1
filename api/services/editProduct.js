@@ -5,7 +5,7 @@ import xml2js from 'xml2js';
 // Us
 const getItemVariations = async (req, res) => {
   try {
-    const {itemId } = req.params;
+    const { itemId } = req.params;
     const authToken = process.env.AUTH_TOKEN;
     console.log(`item id = > ${itemId}`)
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -20,8 +20,8 @@ const getItemVariations = async (req, res) => {
 
     const response = await axios({
       method: 'POST',
-      url: process.env.NODE_ENV === 'development' 
-        ? 'https://api.ebay.com/ws/api.dll' 
+      url: process.env.NODE_ENV === 'development'
+        ? 'https://api.ebay.com/ws/api.dll'
         : 'https://api.sandbox.ebay.com/ws/api.dll',
       headers: {
         'Content-Type': 'text/xml',
@@ -33,7 +33,10 @@ const getItemVariations = async (req, res) => {
       data: xmlRequest
     });
 
-    const parser = new xml2js.Parser({ explicitArray: false, ignoreAttrs: true });
+    const parser = new xml2js.Parser({
+      explicitArray: false,
+      ignoreAttrs: true 
+    });
     const result = await new Promise((resolve, reject) => {
       parser.parseString(response.data, (err, result) => {
         if (err) reject(err);
@@ -42,25 +45,25 @@ const getItemVariations = async (req, res) => {
     });
 
     const getItemResponse = result.GetItemResponse;
-    
+
     if (getItemResponse.Ack === 'Success') {
       const item = getItemResponse.Item;
       const variations = item.Variations?.Variation || [];
-      
+
       // Extract variation info
-      const variationInfo = Array.isArray(variations) 
+      const variationInfo = Array.isArray(variations)
         ? variations.map(variation => ({
-            sku: variation.SKU,
-            startPrice: variation.StartPrice,
-            quantity: variation.Quantity,
-            variationSpecifics: variation.VariationSpecifics?.NameValueList || []
-          }))
+          sku: variation.SKU,
+          startPrice: variation.StartPrice,
+          quantity: variation.Quantity,
+          variationSpecifics: variation.VariationSpecifics?.NameValueList || []
+        }))
         : [{
-            sku: variations.SKU,
-            startPrice: variations.StartPrice,
-            quantity: variations.Quantity,
-            variationSpecifics: variations.VariationSpecifics?.NameValueList || []
-          }];
+          sku: variations.SKU,
+          startPrice: variations.StartPrice,
+          quantity: variations.Quantity,
+          variationSpecifics: variations.VariationSpecifics?.NameValueList || []
+        }];
 
       return res.status(200).json({
         success: true,
@@ -114,8 +117,8 @@ const editVariationPrice = async (req, res) => {
 
     const response = await axios({
       method: 'POST',
-      url: process.env.NODE_ENV === 'development' 
-        ? 'https://api.ebay.com/ws/api.dll' 
+      url: process.env.NODE_ENV === 'development'
+        ? 'https://api.ebay.com/ws/api.dll'
         : 'https://api.sandbox.ebay.com/ws/api.dll',
       headers: {
         'Content-Type': 'text/xml',
@@ -136,7 +139,7 @@ const editVariationPrice = async (req, res) => {
     });
 
     const reviseResponse = result.ReviseInventoryStatusResponse;
-    
+
     if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
       return res.status(200).json({
         success: true,
@@ -176,21 +179,21 @@ const editAllVariationsPrices = async (req, res) => {
 
     // First get all variations
     const authToken = process.env.AUTH_TOKEN;
-    
+
     // Get item variations
     const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
-<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
-  </RequesterCredentials>
-  <ItemID>${itemId}</ItemID>
-  <IncludeVariations>true</IncludeVariations>
-</GetItemRequest>`;
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <IncludeVariations>true</IncludeVariations>
+      </GetItemRequest>`;
 
     const getResponse = await axios({
       method: 'POST',
-      url: process.env.NODE_ENV === 'development' 
-        ? 'https://api.ebay.com/ws/api.dll' 
+      url: process.env.NODE_ENV === 'development'
+        ? 'https://api.ebay.com/ws/api.dll'
         : 'https://api.sandbox.ebay.com/ws/api.dll',
       headers: {
         'Content-Type': 'text/xml',
@@ -216,38 +219,38 @@ const editAllVariationsPrices = async (req, res) => {
 
     // Update each variation with delay to avoid rate limiting
     const updateResults = [];
-    
+
     for (let i = 0; i < variationList.length; i++) {
       const variation = variationList[i];
       const sku = variation.SKU;
-      
+
       // Add delay between requests to avoid rate limiting (except for first request)
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
       }
-      
+
       // Fresh auth token for each request
       const currentAuthToken = process.env.AUTH_TOKEN;
-      
+
       const updateXml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${currentAuthToken}</eBayAuthToken>
-  </RequesterCredentials>
-  <InventoryStatus>
-    <ItemID>${itemId}</ItemID>
-    <SKU>${sku}</SKU>
-    <StartPrice>${price}</StartPrice>
-  </InventoryStatus>
-</ReviseInventoryStatusRequest>`;
+        <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${currentAuthToken}</eBayAuthToken>
+          </RequesterCredentials>
+          <InventoryStatus>
+            <ItemID>${itemId}</ItemID>
+            <SKU>${sku}</SKU>
+            <StartPrice>${price}</StartPrice>
+          </InventoryStatus>
+        </ReviseInventoryStatusRequest>`;
 
       try {
         console.log(`Updating variation ${i + 1}/${variationList.length}: SKU ${sku}`);
-        
+
         const updateResponse = await axios({
           method: 'POST',
-          url: process.env.NODE_ENV === 'production' 
-            ? 'https://api.ebay.com/ws/api.dll' 
+          url: process.env.NODE_ENV === 'production'
+            ? 'https://api.ebay.com/ws/api.dll'
             : 'https://api.sandbox.ebay.com/ws/api.dll',
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
@@ -269,8 +272,8 @@ const editAllVariationsPrices = async (req, res) => {
           });
         });
 
-        const isSuccess = updateResult.ReviseInventoryStatusResponse.Ack === 'Success' || 
-                         updateResult.ReviseInventoryStatusResponse.Ack === 'Warning';
+        const isSuccess = updateResult.ReviseInventoryStatusResponse.Ack === 'Success' ||
+          updateResult.ReviseInventoryStatusResponse.Ack === 'Warning';
 
         updateResults.push({
           sku: sku,
@@ -279,7 +282,7 @@ const editAllVariationsPrices = async (req, res) => {
         });
 
         console.log(`SKU ${sku} update: ${isSuccess ? 'SUCCESS' : 'FAILED'}`);
-        
+
       } catch (error) {
         console.error(`Error updating SKU ${sku}:`, error.message);
         updateResults.push({

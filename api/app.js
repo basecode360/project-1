@@ -7,8 +7,9 @@ import axios from 'axios';
 import qs from 'qs';
 import swaggerJSDoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express'
-
+import syncRoutes from './routes/syncRoute.js'
 import ebayRoutes from './routes/ebayRoutes.js';
+import cors from 'cors';
 
 
 const swaggerOptions = {
@@ -30,11 +31,18 @@ const swaggerOptions = {
 const swaggerSpec = swaggerJSDoc(swaggerOptions);
 
 
+
 dotenv.config();
 
 const app = express();
+
+
 app.use(express.json());
 app.use(morgan('short'));
+app.use(cors({
+  origin: '*',
+  credentials:true
+}))
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
@@ -167,6 +175,7 @@ mongoose
 
 // ── Mount your eBay API routes ────────────────────────────────────────────────
 app.use('/api/ebay', ebayRoutes);
+app.use('/api/sync', syncRoutes);
 // ──────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 5000;
