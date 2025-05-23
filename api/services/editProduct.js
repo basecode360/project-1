@@ -93,7 +93,7 @@ const getItemVariations = async (req, res) => {
 const editVariationPrice = async (req, res) => {
   try {
     const { itemId, price, sku, currency = 'USD' } = req.body;
-
+    console.log(`itemId => ${itemId}, price => ${price}, sku => ${sku}`)
     if (!itemId || !price || !sku) {
       return res.status(400).json({
         success: false,

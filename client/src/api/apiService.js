@@ -17,7 +17,24 @@ const inventory = {
       console.error('API error:', error);
       return { success: false, error: error.message };
     }
+  },
+  editPrice: async (requestData) => {
+    try {
+      const response = await apiClient.post(
+        '/edit-variation-price',
+        requestData
+      );
+      console.log('API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error('API error:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
 
+
 export default { inventory };
+
+
+

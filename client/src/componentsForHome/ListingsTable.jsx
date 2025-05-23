@@ -12,9 +12,12 @@ import {
   Link,
   Box,
   Container,
-  CircularProgress
+  CircularProgress,
+  AlertTitle,
+  Alert
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
+import { useProductStore } from "../store/productStore";
 
 // Import your API service
 import apiService from "../api/apiService";
@@ -24,11 +27,18 @@ export default function ListingsTable() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId} = useProductStore()
 
   // Fetch data from eBay when component mounts
   useEffect(() => {
     fetchEbayListings();
   }, []);
+
+
+useEffect(() => {
+  console.log("AllProducts updated:", AllProducts);
+  console.log(`Item id =>  ${ItemId}`)
+}, [AllProducts]);
 
   const fetchEbayListings = async () => {
     try {
@@ -57,52 +67,56 @@ export default function ListingsTable() {
         }
         
         // Transform the eBay data to match your table structure
-        const formattedListings = ebayListings.map(item => ({
-          productTitle: item.Title || 'No Title',
-          productId: item.ItemID,
-          status: [
-            item.ConditionDisplayName || 'New',
-            item.SellingStatus?.ListingStatus || 'Active'
-          ],
-          qty: parseInt(item.Quantity || '0', 10),
-          myPrice: `USD${parseFloat(item.CurrentPrice?.Value || 0).toFixed(2)}`,
-          competition: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 0.01).toFixed(2)}`,
-          strategy: "0.01", // Default strategy
-          minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
-          maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
-          competitors: Math.floor(Math.random() * 15) + 1 // Random value for testing
-        }));
+      const formattedListings = ebayListings.flatMap((item) => {
+  const hasVariations = Array.isArray(item.Variations?.Variation);
+
+  if (hasVariations) {
+    // Add an entry per variation
+    return item.Variations.Variation.map((variation) => ({
+      productTitle: variation.VariationTitle,
+      productId: item.ItemID,
+      sku: variation.SKU,
+      status: [
+        item.ConditionDisplayName || 'New',
+        item.SellingStatus?.ListingStatus || 'Active'
+      ],
+      qty: parseInt(variation.Quantity || item.Quantity || '0', 10),
+      myPrice: `USD ${parseFloat(variation.StartPrice || item.BuyItNowPrice || 0).toFixed(2)}`,
+      competition: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 0.01).toFixed(2)}`,
+      strategy: "0.01",
+      minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
+      maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
+      competitors: Math.floor(Math.random() * 15) + 1
+    }));
+  } else {
+    // Single product entry without variations
+    return [{
+      productTitle: item.Title,
+      productId: item.ItemID,
+      sku: item.SKU || "N/A",
+      status: [
+        item.ConditionDisplayName || 'New',
+        item.SellingStatus?.ListingStatus || 'Active'
+      ],
+      qty: parseInt(item.Quantity || '0', 10),
+      myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
+      competition: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 0.01).toFixed(2)}`,
+      strategy: "0.01",
+      minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
+      maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
+      competitors: Math.floor(Math.random() * 15) + 1
+    }];
+  }
+});
+
         
         if (formattedListings.length > 0) {
           setRows(formattedListings);
+          modifyProductsArray(formattedListings)
+          console.log("modufy pr  => ", formattedListings)
         } else {
           // Fall back to sample data if no listings found
-          setRows([
-            {
-              productTitle: "Front Fog Light Cover Right Passenger Side Textured For 2013-2015 Nissan Altima",
-              productId: "186855612214",
-              status: ["New", "Active"],
-              qty: 9,
-              myPrice: "USD7.74",
-              competition: "USD7.75",
-              strategy: "0.01",
-              minPrice: "USD7.00",
-              maxPrice: "USD25.00",
-              competitors: 13,
-            },
-            {
-              productTitle: "Fog Light Cover Left & Right Side Textured For 2013-2015 Nissan Altima Sedan",
-              productId: "186871987525",
-              status: ["New", "Active"],
-              qty: 11,
-              myPrice: "USD17.99",
-              competition: "USD18.00",
-              strategy: "0.01",
-              minPrice: "USD14.00",
-              maxPrice: "USD30.00",
-              competitors: 7,
-            }
-          ]);
+          setError('There are no products')
         }
       } else {
         console.error("API error:", response.error);
@@ -172,6 +186,7 @@ export default function ListingsTable() {
 
   return (
     <Container sx={{ mt: 4, mb: 2 }}>
+     
       <TableContainer
         component={Paper}
         sx={{ borderRadius: 2, border: "1px solid #ddd" }}
@@ -199,6 +214,7 @@ export default function ListingsTable() {
                 "Min Price",
                 "Max Price",
                 "Competitors",
+                "Actions"
               ].map((header) => (
                 <TableCell
                   key={header}
@@ -308,7 +324,9 @@ export default function ListingsTable() {
                       textDecoration: "underline",
                       fontSize: "16px",
                     }}
-                    onClick={() => navigate("/home/edit-listing")}
+                    onClick={() => {
+                      navigate("/home/edit-listing")
+                    }}
                   >
                     Assign Rule
                   </Typography>
@@ -404,6 +422,31 @@ export default function ListingsTable() {
                     onClick={() => navigate("/home/edit-listing")}
                   >
                     {row.competitors}
+                  </Typography>
+                </TableCell>
+                 <TableCell
+                  sx={{
+                    border: "1px solid #ddd",
+                    padding: "16px",
+                    backgroundColor: "#fff",
+                  }}
+                >
+                  <Typography
+                    color="primary"
+                    sx={{
+                      cursor: "pointer",
+                      fontSize: "16px",
+                      "&:hover": {
+                        textDecoration: "underline",
+                      },
+                    }}
+                    onClick={() => {
+                      modifyProductsId(row.sku ? row.sku: row.productId)
+                      navigate("/home/edit-price")
+                    }
+                  }
+                  >
+                    Edit Price
                   </Typography>
                 </TableCell>
               </TableRow>

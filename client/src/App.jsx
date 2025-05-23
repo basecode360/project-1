@@ -9,10 +9,11 @@ import "./App.css";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import EditListing from "./pages/EditListing";
+import EditPrice from "./componentsForEditListing/PriceForm";
 
 function App() {
   // State to manage login status
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(true);
 
   const handleLogin = () => {
     setIsLoggedIn(true); // Set login state to true when the user logs in
@@ -41,6 +42,7 @@ function App() {
           }
         >
           <Route path="edit-listing" element={<EditListing />} />
+          <Route path="edit-price" element={<EditPrice />} />
         </Route>
       </Routes>
     </Router>

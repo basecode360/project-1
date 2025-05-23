@@ -35,7 +35,7 @@ export default function EntriesAndSearchBar() {
               </MenuItem>
             ))}
           </Select>
-          <Typography variant="body2">entries</Typography>
+          <Typography variant="body2">Entries</Typography>
         </Box>
 
         {/* Search bar */}
