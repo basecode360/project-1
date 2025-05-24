@@ -27,7 +27,7 @@ export default function ListingsTable() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId} = useProductStore()
+  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId, modifySku} = useProductStore()
 
   // Fetch data from eBay when component mounts
   useEffect(() => {
@@ -93,7 +93,7 @@ useEffect(() => {
     return [{
       productTitle: item.Title,
       productId: item.ItemID,
-      sku: item.SKU || "N/A",
+      sku: item.SKU || " ",
       status: [
         item.ConditionDisplayName || 'New',
         item.SellingStatus?.ListingStatus || 'Active'
@@ -325,6 +325,8 @@ useEffect(() => {
                       fontSize: "16px",
                     }}
                     onClick={() => {
+                        modifyProductsId(row.productId)
+                      modifySku(row.sku ? row.sku: "")
                       navigate("/home/edit-listing")
                     }}
                   >
@@ -441,7 +443,8 @@ useEffect(() => {
                       },
                     }}
                     onClick={() => {
-                      modifyProductsId(row.sku ? row.sku: row.productId)
+                      modifyProductsId(row.productId)
+                      modifySku(row.sku ? row.sku: "")
                       navigate("/home/edit-price")
                     }
                   }

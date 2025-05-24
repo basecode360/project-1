@@ -30,6 +30,21 @@ const inventory = {
       console.error('API error:', error);
       return { success: false, error: error.message };
     }
+  },
+  assignPricingStrategy: async (requestData) => {
+    console.log(`request data  => ${requestData.targetPrice}
+      `)
+    try {
+      const response = await apiClient.post(
+        '/pricing-strategy',
+        requestData
+      );
+      console.log('API response:', response);
+      return response.data;
+    } catch (error) {
+      console.error('API error:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
 

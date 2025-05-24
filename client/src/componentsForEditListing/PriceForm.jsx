@@ -13,7 +13,7 @@ import apiService from "../api/apiService";
 import { useNavigate } from "react-router-dom";
 
 export default function EditPrice() {
-  const { ItemId, AllProducts, modifyProductsObj } = useProductStore();
+  const { ItemId, AllProducts, modifyProductsObj, sku } = useProductStore();
   const [product, setProduct] = useState([]);
   const [newPrice, setNewPrice] = useState(0);
   const [oldPrice, setOldPrice] = useState(0);
@@ -35,7 +35,7 @@ export default function EditPrice() {
 
   useEffect(() => {
     const productObj = AllProducts.filter((item) =>
-      item.sku ? item.sku === ItemId : item.productId === ItemId
+      item.sku ? item.sku === sku : item.productId === ItemId
     );
     setProduct(productObj);
     modifyProductsObj(productObj);
@@ -102,32 +102,7 @@ export default function EditPrice() {
 
           {/* Form */}
           <Box component="form" display="flex" flexDirection="column" gap={3}>
-            {/* Pricing Strategy */}
-            {/* <TextField
-              select
-              label="Pricing Strategy"
-              defaultValue="0.04"
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            >
-              <MenuItem value="0.01">0.01</MenuItem>
-              <MenuItem value="0.04">0.04</MenuItem>
-            </TextField>
-
-            {/* Competitor Rule */}
-            {/* <TextField
-              select
-              label="Competitor Rule"
-              defaultValue=""
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            >
-              <MenuItem value="">--------</MenuItem>
-            </TextField>  */}
+           
 
             {/* Landed Price */}
             {oldPrice && (
@@ -141,26 +116,7 @@ export default function EditPrice() {
               />
             )}
 
-            {/* Lowest Price
-            <TextField
-              label="Lowest Price"
-              defaultValue="414.77"
-              disabled
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />
-
-            {/* Min Price */}
-            {/* <TextField
-              label="Min Price (Landed)"
-              defaultValue="413.00"
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />  */}
+           
 
             {/* Max Price */}
             <TextField

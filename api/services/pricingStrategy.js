@@ -82,19 +82,28 @@ const getPricingStrategy = async (req, res) => {
   }
 };
 // Modified setPricingStrategy function
+// Modified setPricingStrategy function with time-based strategy support
 const setPricingStrategy = async (req, res) => {
   try {
     const { 
       itemId, 
       strategy,
+      // Fixed strategy parameters
       minPrice,
       maxPrice,
       targetPrice,
+      // Competitive strategy parameters
       repriceFrequency = 'daily',
       competitorAdjustment = 0,
+      // Best Offer parameters
       enableBestOffer = false,
       bestOfferAutoAccept,
-      bestOfferAutoDecline
+      bestOfferAutoDecline,
+      // Time-based strategy parameters
+      basePrice,
+      weekendBoost,
+      holidayBoost,
+      clearanceThreshold
     } = req.body;
 
     if (!itemId || !strategy) {
@@ -157,7 +166,8 @@ const setPricingStrategy = async (req, res) => {
           PricingStrategy: 'competitive',
           MinPrice: minPrice,
           MaxPrice: maxPrice,
-          RepricingFrequency: repriceFrequency
+          RepricingFrequency: repriceFrequency,
+          CompetitorAdjustment: competitorAdjustment
         };
         
         // For competitive pricing, set initial price and store strategy in item specifics
@@ -189,18 +199,59 @@ const setPricingStrategy = async (req, res) => {
           ${generateItemSpecificsXML(dynamicSpecifics)}
         `;
         break;
+      
+      case 'time-based':
+        if (!basePrice) {
+          return res.status(400).json({
+            success: false,
+            message: "Base price is required for time-based strategy"
+          });
+        }
+        
+        // Set default values if not provided
+        const weekendBoostValue = weekendBoost || 1.0;
+        const holidayBoostValue = holidayBoost || 1.0;
+        const clearanceThresholdValue = clearanceThreshold || 0;
+        
+        // Add time-based pricing strategy to existing specifics
+        const timeBasedSpecifics = {
+          ...existingSpecifics,
+          PricingStrategy: 'time-based',
+          BasePrice: basePrice,
+          WeekendBoost: weekendBoostValue,
+          HolidayBoost: holidayBoostValue,
+          ClearanceThreshold: clearanceThresholdValue
+        };
+        
+        // For time-based pricing, calculate current price based on day of week/holidays
+        const currentPrice = calculateTimeBasedPrice(
+          parseFloat(basePrice), 
+          parseFloat(weekendBoostValue), 
+          parseFloat(holidayBoostValue),
+          parseInt(clearanceThresholdValue, 10)
+        );
+        
+        pricingXML = `
+          <StartPrice>${currentPrice}</StartPrice>
+          ${generateItemSpecificsXML(timeBasedSpecifics)}
+        `;
+        break;
         
       default:
         return res.status(400).json({
           success: false,
-          message: "Invalid strategy. Use 'fixed', 'competitive', or 'dynamic'"
+          message: "Invalid strategy. Use 'fixed', 'competitive', 'dynamic', or 'time-based'"
         });
     }
 
     // Handle variations if they exist
     let variationsXML = '';
     if (currentItem.data.hasVariations && currentItem.data.variations) {
-      variationsXML = generateVariationsXML(currentItem.data.variations, strategy, targetPrice);
+      variationsXML = generateVariationsXML(
+        currentItem.data.variations, 
+        strategy, 
+        strategy === 'time-based' ? basePrice : targetPrice
+      );
     }
 
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -270,6 +321,74 @@ const setPricingStrategy = async (req, res) => {
     });
   }
 };
+
+// Helper function to calculate time-based price
+function calculateTimeBasedPrice(basePrice, weekendBoost, holidayBoost, clearanceThreshold) {
+  const now = new Date();
+  const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  
+  // Check if today is a holiday (simplified approach)
+  const isHoliday = isHolidayToday();
+  
+  // Check if item should be on clearance
+  const daysToConsiderClearance = clearanceThreshold || 0;
+  const shouldApplyClearance = daysToConsiderClearance > 0 && shouldBeOnClearance(daysToConsiderClearance);
+  
+  let finalPrice = basePrice;
+  
+  // Apply weekend boost if applicable
+  if (isWeekend && weekendBoost) {
+    finalPrice *= weekendBoost;
+  }
+  
+  // Apply holiday boost if applicable (takes precedence over weekend)
+  if (isHoliday && holidayBoost) {
+    finalPrice *= holidayBoost;
+  }
+  
+  // Apply clearance discount if applicable (overrides all other boosts)
+  if (shouldApplyClearance) {
+    // Apply a 20% discount for clearance
+    finalPrice *= 0.8;
+  }
+  
+  // Round to two decimal places
+  return parseFloat(finalPrice.toFixed(2));
+}
+
+// Helper function to check if today is a holiday
+function isHolidayToday() {
+  const now = new Date();
+  const month = now.getMonth(); // 0-11
+  const date = now.getDate(); // 1-31
+  
+  // US holidays (simplified)
+  const holidays = [
+    { month: 0, date: 1 },    // New Year's Day
+    { month: 1, date: 14 },   // Valentine's Day
+    { month: 6, date: 4 },    // Independence Day
+    { month: 10, date: 25 },  // Thanksgiving (approximation)
+    { month: 11, date: 25 },  // Christmas
+  ];
+  
+  return holidays.some(holiday => holiday.month === month && holiday.date === date);
+}
+
+// Helper function to determine if an item should be on clearance
+function shouldBeOnClearance(daysThreshold) {
+  // In a real implementation, you would check:
+  // 1. How long the item has been listed
+  // 2. Current stock levels
+  // 3. Sales velocity
+  
+  // This is a simplified placeholder - in a real implementation,
+  // you would query item metrics from your database
+  
+  // Placeholder: 20% chance of putting item on clearance if clearance is enabled
+  return Math.random() < 0.2;
+}
+
 
 // Helper function to get full item details
 async function getItemDetails(itemId, authToken) {
@@ -440,9 +559,23 @@ function generateVariationSpecificsXML(variationSpecifics) {
   return specXML;
 }
 
+
 // Helper function for single item pricing strategy update in bulk operations
 async function setSingleItemPricingStrategy(params) {
-  const { itemId, strategy, minPrice, maxPrice, targetPrice, repriceFrequency, competitorAdjustment } = params;
+  const { 
+    itemId, 
+    strategy, 
+    minPrice, 
+    maxPrice, 
+    targetPrice, 
+    repriceFrequency, 
+    competitorAdjustment,
+    basePrice,
+    weekendBoost,
+    holidayBoost,
+    clearanceThreshold
+  } = params;
+  
   const authToken = process.env.AUTH_TOKEN;
 
   try {
@@ -464,6 +597,7 @@ async function setSingleItemPricingStrategy(params) {
           ${generateItemSpecificsXML(existingSpecifics)}
         `;
         break;
+        
       case 'competitive':
         // Add pricing strategy to existing specifics
         const competitiveSpecifics = {
@@ -471,7 +605,8 @@ async function setSingleItemPricingStrategy(params) {
           PricingStrategy: 'competitive',
           MinPrice: minPrice,
           MaxPrice: maxPrice,
-          RepricingFrequency: repriceFrequency
+          RepricingFrequency: repriceFrequency,
+          CompetitorAdjustment: competitorAdjustment
         };
         
         pricingXML = `
@@ -479,6 +614,7 @@ async function setSingleItemPricingStrategy(params) {
           ${generateItemSpecificsXML(competitiveSpecifics)}
         `;
         break;
+        
       case 'dynamic':
         // Add pricing strategy to existing specifics
         const dynamicSpecifics = {
@@ -494,12 +630,41 @@ async function setSingleItemPricingStrategy(params) {
           ${generateItemSpecificsXML(dynamicSpecifics)}
         `;
         break;
+        
+      case 'time-based':
+        // Add time-based pricing strategy to existing specifics
+        const timeBasedSpecifics = {
+          ...existingSpecifics,
+          PricingStrategy: 'time-based',
+          BasePrice: basePrice,
+          WeekendBoost: weekendBoost || 1.0,
+          HolidayBoost: holidayBoost || 1.0,
+          ClearanceThreshold: clearanceThreshold || 0
+        };
+        
+        // For time-based pricing, calculate current price based on day of week/holidays
+        const currentPrice = calculateTimeBasedPrice(
+          parseFloat(basePrice), 
+          parseFloat(weekendBoost || 1.0), 
+          parseFloat(holidayBoost || 1.0),
+          parseInt(clearanceThreshold || 0, 10)
+        );
+        
+        pricingXML = `
+          <StartPrice>${currentPrice}</StartPrice>
+          ${generateItemSpecificsXML(timeBasedSpecifics)}
+        `;
+        break;
     }
 
     // Handle variations if they exist
     let variationsXML = '';
     if (currentItem.data.hasVariations && currentItem.data.variations) {
-      variationsXML = generateVariationsXML(currentItem.data.variations, strategy, targetPrice);
+      variationsXML = generateVariationsXML(
+        currentItem.data.variations, 
+        strategy, 
+        strategy === 'time-based' ? basePrice : targetPrice
+      );
     }
 
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -556,11 +721,17 @@ const setBulkPricingStrategy = async (req, res) => {
     const { 
       itemIds, 
       strategy,
+      // Fixed, Competitive, Dynamic strategy parameters
       minPrice,
       maxPrice,
       targetPrice,
       repriceFrequency = 'daily',
-      competitorAdjustment = 0
+      competitorAdjustment = 0,
+      // Time-based strategy parameters
+      basePrice,
+      weekendBoost,
+      holidayBoost,
+      clearanceThreshold
     } = req.body;
 
     if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -574,6 +745,28 @@ const setBulkPricingStrategy = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Strategy is required"
+      });
+    }
+
+    // Validate strategy-specific required parameters
+    if (strategy === 'fixed' && !targetPrice) {
+      return res.status(400).json({
+        success: false,
+        message: "Target price is required for fixed strategy"
+      });
+    }
+    
+    if ((strategy === 'competitive' || strategy === 'dynamic') && (!minPrice || !maxPrice)) {
+      return res.status(400).json({
+        success: false,
+        message: `Min and max prices are required for ${strategy} strategy`
+      });
+    }
+    
+    if (strategy === 'time-based' && !basePrice) {
+      return res.status(400).json({
+        success: false,
+        message: "Base price is required for time-based strategy"
       });
     }
 
@@ -598,7 +791,11 @@ const setBulkPricingStrategy = async (req, res) => {
           maxPrice,
           targetPrice,
           repriceFrequency,
-          competitorAdjustment
+          competitorAdjustment,
+          basePrice,
+          weekendBoost,
+          holidayBoost,
+          clearanceThreshold
         });
 
         results.push({
@@ -656,7 +853,11 @@ function extractPricingStrategy(item) {
     minPrice: null,
     maxPrice: null,
     repricingFrequency: null,
-    competitorAdjustment: null
+    competitorAdjustment: null,
+    basePrice: null,
+    weekendBoost: null,
+    holidayBoost: null,
+    clearanceThreshold: null
   };
 
   specificsArray.forEach(specific => {
@@ -670,10 +871,40 @@ function extractPricingStrategy(item) {
       strategy.repricingFrequency = specific.Value;
     } else if (specific.Name === 'CompetitorAdjustment') {
       strategy.competitorAdjustment = specific.Value;
+    } else if (specific.Name === 'BasePrice') {
+      strategy.basePrice = specific.Value;
+    } else if (specific.Name === 'WeekendBoost') {
+      strategy.weekendBoost = specific.Value;
+    } else if (specific.Name === 'HolidayBoost') {
+      strategy.holidayBoost = specific.Value;
+    } else if (specific.Name === 'ClearanceThreshold') {
+      strategy.clearanceThreshold = specific.Value;
     }
   });
 
+  // Add additional properties based on strategy type
+  if (strategy.type === 'time-based') {
+    // For time-based, calculate next price update date
+    const nextUpdate = calculateNextPriceUpdateDate();
+    strategy.nextScheduledUpdate = nextUpdate;
+  } else if (strategy.type === 'competitive' || strategy.type === 'dynamic') {
+    // For competitive/dynamic pricing, add market position info if available
+    strategy.marketPosition = 'competitive'; // Example value, would be determined by analysis
+  }
+
   return strategy;
+}
+
+// Helper function to calculate next price update date
+function calculateNextPriceUpdateDate() {
+  const now = new Date();
+  
+  // Check upcoming weekends and holidays to determine next price change
+  const nextFriday = new Date(now);
+  nextFriday.setDate(now.getDate() + ((5 + 7 - now.getDay()) % 7));
+  
+  // Format date as ISO string
+  return nextFriday.toISOString();
 }
 
 export default {
@@ -681,3 +912,60 @@ export default {
   setPricingStrategy,
   setBulkPricingStrategy
 };
+
+
+
+/*
+POST /api/pricing-strategy
+{
+  "itemId": "314851424639",
+  "strategy": "fixed",
+  "targetPrice": "80.00",
+  "enableBestOffer": true,
+  "bestOfferAutoAccept": "75.00",
+  "bestOfferAutoDecline": "60.00"
+}
+
+POST /api/pricing-strategy
+{
+  "itemId": "314851424639",
+  "strategy": "competitive", 
+  "minPrice": "50.00",
+  "maxPrice": "100.00",
+  "targetPrice": "75.00",
+  "repriceFrequency": "daily",
+  "competitorAdjustment": -5
+}
+
+
+POST /api/pricing-strategy
+{
+  "itemId": "314851424639",
+  "strategy": "dynamic",
+  "minPrice": "45.00",
+  "maxPrice": "95.00",
+  "competitorAdjustment": 0
+  "demandMultiplier": 1.2,        // Increase price when high demand
+  "inventoryThreshold": 10       // Raise price when low stock
+}
+
+
+POST /api/pricing-strategy/bulk
+{
+  "itemIds": ["314851424639", "314851424640", "314851424641"],
+  "strategy": "competitive",
+  "minPrice": "50.00",
+  "maxPrice": "100.00",
+  "targetPrice": "75.00",
+  "repriceFrequency": "daily"
+}
+
+{
+  "itemId": "314851424639",
+  "strategy": "time-based",
+  "basePrice": 75.00,
+  "weekendBoost": 1.1,
+  "holidayBoost": 1.25,
+  "clearanceThreshold": 30
+}
+*/

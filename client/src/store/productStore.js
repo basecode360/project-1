@@ -7,10 +7,11 @@ export const useProductStore = create(
   ItemId: "", 
   AllProducts: [],
   productObj: {},
-
+  sku: "",
   modifyProductsObj: (productObj) => set({ productObj }),
   modifyProductsArray: (AllProducts) => set({ AllProducts }),
   modifyProductsId: (ItemId) => set({ ItemId}),
+  modifySku: (sku) => set({sku}),
 }),
 {
     name: 'product-store'
