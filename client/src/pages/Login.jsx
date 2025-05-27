@@ -11,10 +11,11 @@ import { useNavigate } from "react-router-dom";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import apiService from "../api/apiService"; 
 
-const allowedUsers = [
-  { email: "teampartstunt@gmail.com", password: "Dodge@#124578~" },
-];
+// const allowedUsers = [
+//   { email: "teampartstunt@gmail.com", password: "Dodge@#124578~" },
+// ];
 
 export default function Login({ handleLogin }) {
   const [email, setEmail] = useState("");
@@ -23,11 +24,14 @@ export default function Login({ handleLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
-  const handleLoginClick = () => {
-    const user = allowedUsers.find(
-      (u) => u.email === email && u.password === password
-    );
-    if (user) {
+  const handleLoginClick = async () => {
+    // const user = allowedUsers.find(
+    //   (u) => u.email === email && u.password === password
+    // );
+    console.log("Login attempt with email:", email, "and password:", password);
+    const response = await apiService.auth.login({ email, password });
+    console.log("API response:", response);
+    if (response.success) {
       handleLogin(); // Call the handleLogin function passed from App.js
       navigate("/home"); // Redirect to home on successful login
     } else {

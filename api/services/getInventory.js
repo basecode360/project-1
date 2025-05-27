@@ -7,57 +7,59 @@ dotenv.config();
 
 
 
-const singleItem = 'https://api.ebay.com/sell/inventory/v1/inventory_item/';
 // Example: Get all inventory items from your eBay store
-const getInventory = async (req, res) => {
+
+const getInventoryItem = async (req, res) => {
   try {
-    const data = await ebayApi({
-      method: 'GET',
-      url: '/sell/inventory/v1/inventory_item',
-    });
-        return res.status(200).json({
+    const itemId = req.params.id;
+    console.log(`item id = > ${itemId}`)
+
+    const xmlPayload = `<?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${process.env.AUTH_TOKEN}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <WarningLevel>High</WarningLevel>
+      </GetItemRequest>`;
+
+    const { data: xmlResponse } = await axios.post(
+      'https://api.ebay.com/ws/api.dll',
+      xmlPayload,
+      {
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-DEV-NAME': process.env.DEV_ID,
+          'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
+          'X-EBAY-API-CERT-NAME': process.env.CLIENT_SECRET,
+          'X-EBAY-API-CALL-NAME': 'GetItem',
+          'X-EBAY-API-SITEID': '0',
+        },
+      }
+    );
+
+    // Convert XML to JS object
+    const itemData = await xml2js.parseStringPromise(xmlResponse, { explicitArray: false });
+
+    return res.status(200).json({
       success: true,
-      data,
+      itemData,
     });
+
   } catch (error) {
-    console.error('Error fetching inventory:', error.response?.data || error.message);
-    return res.status(500).json({
+    const errorMessage = error.response ? error.response.data : error.message;
+    const statusCode = error.response ? error.response.status : 500;
+
+    console.log(`Error occurred while fetching the product: ${errorMessage}`);
+    return res.status(statusCode).json({
       success: false,
-      message: 'Error fetching inventory',
-      error: error.response?.data || error.message,
+      message: "Error fetching product",
+      error: errorMessage,
     });
   }
 };
-
-
-const getInventoryItem = async (req, res) => {
-    try {
-      const sku = req.params.id;
-      console.log('sku => ', sku)
-      const url = `${singleItem}${sku}`;
-  
-      const itemData = await ebayApi({
-        url: url,
-      })
-  
-      console.log("fetched single product form ebay", itemData)
-      return res.status(200).json({
-        success: true,
-        itemData
-      })
-  
-    } catch (error) {
-      const errorMessage = error.response ? error.response.data : error.message;
-      const statusCode = error.response ? error.response.status : 500; // Default to 500 if no response status
-  
-      console.log(`Error occurred while fetching the product: ${errorMessage}`);
-      return res.status(statusCode).json({
-        success: false,
-        message: "Error fetching product",
-        error: error.response ? error.response.data : error.message
-      })
-    }
-  }
 
 
 
@@ -165,8 +167,36 @@ const getInventoryItem = async (req, res) => {
     }
   };
 
-
+//   const singleItem = 'https://api.ebay.com/sell/inventory/v1/inventory_item/';
+// const getInventoryItem = async (req, res) => {
+//     try {
+//       const sku = req.params.id;
+//       console.log('sku => ', sku)
+//       const url = `${singleItem}${sku}`;
+  
+//       const itemData = await ebayApi({
+//         url: url,
+//       })
+  
+//       console.log("fetched single product form ebay", itemData)
+//       return res.status(200).json({
+//         success: true,
+//         itemData
+//       })
+  
+//     } catch (error) {
+//       const errorMessage = error.response ? error.response.data : error.message;
+//       const statusCode = error.response ? error.response.status : 500; // Default to 500 if no response status
+  
+//       console.log(`Error occurred while fetching the product: ${errorMessage}`);
+//       return res.status(statusCode).json({
+//         success: false,
+//         message: "Error fetching product",
+//         error: error.response ? error.response.data : error.message
+//       })
+//     }
+//   }
 
   
 
-export default { getInventory, getInventoryItem, getActiveListings, getActiveListingsViaFeed };
+export default { getInventoryItem, getActiveListings, getActiveListingsViaFeed };

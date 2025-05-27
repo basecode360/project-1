@@ -6,6 +6,7 @@ import xml2js from 'xml2js'
  * Main endpoint for starting the sync process
  */
 const triggerAutoSync = async (req, res) => {
+  console.log('🔄 Triggering auto-sync with parameters:');
   try {
     const {
       syncType = 'all',           // all, price, inventory, description
@@ -13,7 +14,7 @@ const triggerAutoSync = async (req, res) => {
       delayBetweenBatches = 2000, // Delay in milliseconds between batches
       forceUpdate = false,        // Force update even if no changes detected
       dryRun = false             // Preview changes without applying them
-    } = req.body;
+    } = req.query;
 
     console.log(`🚀 Starting auto-sync: ${syncType} | Batch size: ${batchSize} | Dry run: ${dryRun}`);
 

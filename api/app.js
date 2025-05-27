@@ -10,6 +10,8 @@ import swaggerUi from 'swagger-ui-express'
 import syncRoutes from './routes/syncRoute.js'
 import ebayRoutes from './routes/ebayRoutes.js';
 import cors from 'cors';
+import authRoutes from './routes/authRoute.js';
+import pricingRoute from "./routes/pricingEngine.js"  
 
 
 const swaggerOptions = {
@@ -176,6 +178,9 @@ mongoose
 // ── Mount your eBay API routes ────────────────────────────────────────────────
 app.use('/api/ebay', ebayRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/pricing', pricingRoute);
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 5000;

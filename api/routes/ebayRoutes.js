@@ -33,7 +33,7 @@ router.get('/listings-from-mongo', getEbayListings);
  *       500:
  *         description: Internal server error
  */
-router.get('/inventory', fetchProducts.getInventory);
+// router.get('/inventory', fetchProducts.getInventory);
 
 /**
  * @swagger
@@ -278,6 +278,7 @@ router.get('/get-payment-policies', async (req, res) => {
  *         description: Internal server error
  */
 router.get('/active-listings', fetchProducts.getActiveListings);
+
 
 
 router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);

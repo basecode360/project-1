@@ -13,7 +13,7 @@ import EditPrice from "./componentsForEditListing/PriceForm";
 
 function App() {
   // State to manage login status
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const handleLogin = () => {
     setIsLoggedIn(true); // Set login state to true when the user logs in

@@ -7,7 +7,8 @@ const router = express.Router();
 // Middleware for API key authentication
 const authenticateAPI = (req, res, next) => {
   const apiKey = req.headers['x-api-key'] || req.headers['authorization'];
-  
+
+  console.log(`🔑 API Key Check: ${apiKey}`);
   if (!apiKey || apiKey !== process.env.API_KEY) {
     return res.status(401).json({
       success: false,
