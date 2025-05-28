@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Box,
   InputBase,
@@ -7,10 +7,17 @@ import {
   Typography,
   Container,
 } from "@mui/material";
+import { useProductStore } from "../store/productStore";
 
 export default function EntriesAndSearchBar() {
   const [entries, setEntries] = React.useState(25);
   const [search, setSearch] = React.useState("");
+  const {modifySearch, searchProduct} = useProductStore()
+
+useEffect(() => {
+  modifySearch(search)
+  console.log(`search => ${searchProduct}`)
+},[search])
 
   return (
     <Container sx={{ mt: 4, mb: 2 }}>

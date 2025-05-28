@@ -1,11 +1,20 @@
 import express from "express";
 import xml2js from "xml2js";
 import axios from "axios";
+import Bottleneck from "bottleneck";
 
 // Initialize Express app
 const route = express.Router();
 
 // Middleware
+const limiter = new Bottleneck({
+  minTime: 333, // Min 333ms between requests (3/second max)
+  maxConcurrent: 1 // Only 1 request at a time
+});
+
+// Wrap your API functions
+const throttledFetchCompetitorPrices = limiter.wrap(fetchCompetitorPrices);
+
 
 /**
  * Fetch competitor prices from eBay (or simulation)
@@ -77,106 +86,195 @@ const route = express.Router();
 // }
 
 /**
- * Fetch competitor prices using eBay's Finding Service API
- * @param {string} itemId - Your eBay item ID (used to get title/keywords)
- * @param {string} apiKey - eBay API key (App ID)
+ * Fetch competitor prices using eBay's Finding API
+ * @param {string} itemId - The eBay item ID 
+ * @param {string} appId - eBay App ID for Finding API
+ * @param {string} title - Item title (already fetched)
+ * @param {string} categoryId - Item category ID (already fetched)
  * @returns {Promise<Array<number>>} - Array of competitor prices
  */
-async function fetchCompetitorPrices(itemId, apiKey) {
-  try {
-    // Step 1: First get the item details to use for searching similar items
-    const itemDetails = await getItemDetails(itemId, apiKey);
-    const { title, category } = itemDetails;
 
-    // Step 2: Use the Finding API to find similar items
-    const xmlRequestBody = `
-      <?xml version="1.0" encoding="utf-8"?>
-      <findItemsAdvancedRequest xmlns="http://www.ebay.com/marketplace/search/v1/services">
-        <keywords>${title}</keywords>
-        ${category ? `<categoryId>${category}</categoryId>` : ""}
-        <itemFilter>
-          <name>ListingType</name>
-          <value>FixedPrice</value>
-        </itemFilter>
-        <sortOrder>PricePlusShippingLowest</sortOrder>
-        <paginationInput>
-          <entriesPerPage>10</entriesPerPage>
-        </paginationInput>
-      </findItemsAdvancedRequest>
-    `;
-
-    const response = await axios({
-      method: "post",
-      url: "https://svcs.ebay.com/services/search/FindingService/v1",
-      headers: {
-        "Content-Type": "text/xml",
-        "X-EBAY-SOA-SECURITY-APPNAME": apiKey,
-        "X-EBAY-SOA-OPERATION-NAME": "findItemsAdvanced",
-        "X-EBAY-SOA-SERVICE-VERSION": "1.13.0",
-        "X-EBAY-SOA-GLOBAL-ID": "EBAY-US",
-      },
-      data: xmlRequestBody,
-    });
-
-    // Parse the XML response
-    const parser = new xml2js.Parser({
-      explicitArray: false,
-      tagNameProcessors: [xml2js.processors.stripPrefix],
-    });
-
-    const result = await parser.parseStringPromise(response.data);
-
-    // Extract competitor prices
-    const searchResult = result.findItemsAdvancedResponse.searchResult;
-
-    if (searchResult.count === "0") {
-      console.log(`No similar items found for item ${itemId}`);
-      return [];
-    }
-
-    // Handle items (convert to array if needed)
-    const items = Array.isArray(searchResult.item)
-      ? searchResult.item
-      : [searchResult.item];
-
-    // Extract prices and filter out our own item
-    const competitorPrices = items
-      .filter((item) => item.itemId !== itemId) // Exclude our own item
-      .map((item) => {
-        // Get the current price
-        const price = parseFloat(
-          item.sellingStatus?.currentPrice?.__value__ ||
-            item.sellingStatus?.currentPrice?.value
-        );
-
-        // Add shipping cost if available
-        const shippingCost = parseFloat(
-          item.shippingInfo?.shippingServiceCost?.__value__ ||
-            item.shippingInfo?.shippingServiceCost?.value ||
-            0
-        );
-
-        // Return total price
-        return +(price + shippingCost).toFixed(2);
-      })
-      .filter((price) => !isNaN(price) && price > 0);
-
-    console.log(
-      `Found ${competitorPrices.length} competitor prices for item ${itemId}`
-    );
-    return competitorPrices;
-  } catch (error) {
-    console.error(
-      `Error fetching competitor prices for item ${itemId}:`,
-      error.message
-    );
-
-    if (error.response) {
-      console.error("API response:", error.response.data);
-    }
-
-    throw new Error(`Failed to fetch competitor prices: ${error.message}`);
+async function fetchCompetitorPrices(itemId, appId, title, categoryId) {
+  // Track retry attempts
+  let attempts = 0;
+  const maxAttempts = 3;
+  
+  // Implement exponential backoff
+  const backoff = (attempt) => Math.pow(2, attempt) * 1000; // 1s, 2s, 4s...
+  
+  // Try to get from cache first
+  const cacheKey = `${itemId}_prices`;
+  const cachedData = await getCachedData(cacheKey);
+  if (cachedData) {
+    console.log(`Using cached prices for item ${itemId}`);
+    return cachedData;
   }
+  
+  async function attemptFetch() {
+    try {
+      console.log(`Attempt ${attempts + 1}/${maxAttempts + 1} to fetch competitor prices for ${itemId}`);
+      
+      // Use the Finding API to find similar items
+      const xmlRequestBody = `
+        <?xml version="1.0" encoding="utf-8"?>
+        <findItemsAdvancedRequest xmlns="http://www.ebay.com/marketplace/search/v1/services">
+          <keywords>${title}</keywords>
+          ${categoryId ? `<categoryId>${categoryId}</categoryId>` : ""}
+          <itemFilter>
+            <name>ListingType</name>
+            <value>FixedPrice</value>
+          </itemFilter>
+          <sortOrder>PricePlusShippingLowest</sortOrder>
+          <paginationInput>
+            <entriesPerPage>10</entriesPerPage>
+          </paginationInput>
+        </findItemsAdvancedRequest>
+      `;
+
+      const response = await axios({
+        method: "post",
+        url: "https://svcs.ebay.com/services/search/FindingService/v1",
+        headers: {
+          "Content-Type": "text/xml",
+          "X-EBAY-SOA-SECURITY-APPNAME": appId,
+          "X-EBAY-SOA-OPERATION-NAME": "findItemsAdvanced",
+          "X-EBAY-SOA-SERVICE-VERSION": "1.13.0",
+          "X-EBAY-SOA-GLOBAL-ID": "EBAY-US",
+        },
+        data: xmlRequestBody,
+        timeout: 10000, // 10 seconds timeout
+      });
+
+      // Parse the XML response
+      const parser = new xml2js.Parser({
+        explicitArray: false,
+        tagNameProcessors: [xml2js.processors.stripPrefix],
+      });
+
+      const result = await parser.parseStringPromise(response.data);
+      
+      // Check for API errors in the response
+      if (result.findItemsAdvancedResponse.ack !== "Success") {
+        const error = result.findItemsAdvancedResponse.errorMessage?.error;
+        if (error) {
+          throw new Error(`eBay API Error: ${error.message}`);
+        }
+      }
+
+      // Extract competitor prices
+      const searchResult = result.findItemsAdvancedResponse.searchResult;
+
+      if (searchResult.count === "0") {
+        console.log(`No similar items found for item ${itemId}`);
+        return [];
+      }
+
+      // Handle items (convert to array if needed)
+      const items = Array.isArray(searchResult.item)
+        ? searchResult.item
+        : [searchResult.item];
+
+      // Extract prices and filter out our own item
+      const competitorPrices = items
+        .filter((item) => item.itemId !== itemId) // Exclude our own item
+        .map((item) => {
+          const price = parseFloat(
+            item.sellingStatus?.currentPrice?.__value__ ||
+              item.sellingStatus?.currentPrice?.value
+          );
+          const shippingCost = parseFloat(
+            item.shippingInfo?.shippingServiceCost?.__value__ ||
+              item.shippingInfo?.shippingServiceCost?.value ||
+              0
+          );
+          return +(price + shippingCost).toFixed(2);
+        })
+        .filter((price) => !isNaN(price) && price > 0);
+
+      console.log(`Found ${competitorPrices.length} competitor prices for item ${itemId}`);
+      
+      // Cache the results for future use (1 hour)
+    setCachedData(cacheKey, competitorPrices, 24 * 60 * 60); 
+      
+      return competitorPrices;
+
+    } catch (error) {
+      // Handle rate limiting errors specifically
+      if (
+        error.response && 
+        error.response.status === 500 &&
+        error.response.data && 
+        error.response.data.includes("RateLimiter")
+      ) {
+        // If we haven't exceeded max attempts, wait and retry
+        if (attempts < maxAttempts) {
+          attempts++;
+          const waitTime = backoff(attempts);
+          console.log(`Rate limit hit. Retrying in ${waitTime/1000} seconds (attempt ${attempts}/${maxAttempts})...`);
+          
+          // Wait using setTimeout wrapped in a promise
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          
+          // Try again recursively
+          return attemptFetch();
+        } else {
+          // If we've exhausted our retries, use fallback strategy
+          console.error(`Rate limit exceeded after ${maxAttempts} attempts. Using fallback.`);
+          
+          // Option 1: Return empty array as fallback
+          console.error(`Rate limit exceeded after ${maxAttempts} attempts. Using mock data.`);
+const mockPrices = generateMockCompetitorPrices(itemId);
+setCachedData(cacheKey, mockPrices, 24 * 60 * 60, true); // Set isMock flag to true
+return mockPrices;
+        }
+      }
+      
+      // For other errors, just propagate them
+      throw error;
+    }
+  }
+  
+  // Start the first attempt
+  return attemptFetch();
+}
+
+// Simple in-memory cache
+const cache = {};
+
+function getCachedData(key) {
+  if (cache[key] && cache[key].expires > Date.now()) {
+    return cache[key].data;
+  }
+  return null;
+}
+
+function setCachedData(key, data, ttlSeconds = 3600, isMock = false) {
+  cache[key] = {
+    data,
+    expires: Date.now() + (ttlSeconds * 1000),
+    isMock
+  };
+}
+
+// Optional: Generate mock data for testing when rate limited
+// Make sure this function is present and not commented out
+function generateMockCompetitorPrices(itemId) {
+  console.log(`Generating mock data for item ${itemId} due to rate limits`);
+  
+  // Use itemId as seed for consistent mock data
+  const seed = parseInt(itemId.slice(-6), 10);
+  const basePrice = (seed % 100) + 20; // between $20 and $119
+  
+  const count = 3 + (seed % 5); // 3-7 competitor prices
+  const prices = [];
+  
+  for (let i = 0; i < count; i++) {
+    // Vary prices within ±15% of base price
+    const variation = 0.85 + ((seed * (i+1) % 30) / 100);
+    prices.push(+(basePrice * variation).toFixed(2));
+  }
+  
+  return prices;
 }
 
 /**
@@ -519,47 +617,85 @@ function validatePriceResult(result, constraints = {}) {
   return result;
 }
 
+
+// Example with MongoDB (pseudo-code)
+async function getCachedDataFromDB(key) {
+  const cachedItem = await CacheCollection.findOne({ key });
+  if (cachedItem && cachedItem.expires > Date.now()) {
+    return cachedItem.data;
+  }
+  return null;
+}
+
+async function setCachedDataInDB(key, data, ttlSeconds = 86400) {
+  await CacheCollection.updateOne(
+    { key },
+    { 
+      $set: { 
+        data, 
+        expires: Date.now() + (ttlSeconds * 1000),
+        isMock: false
+      }
+    },
+    { upsert: true }
+  );
+}
 /**
  * API Routes
  */
-
-// Get competitor prices endpoint
 route.get("/competitor-prices/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
-    const apiKey = process.env.AUTH_TOKEN;
-    const appId = process.env.CLIENT_ID;
-    console.log(`item id => ${itemId} apikey=> ${apiKey}`);
+    const oauthToken = process.env.AUTH_TOKEN;  // For Trading API
+    const appId = process.env.CLIENT_ID;       // For Finding API
+    
+    console.log(`Fetching prices for item id => ${itemId}`);
 
-    const itemDetails = await getItemDetails(itemId, apiKey);
-    const competitorPrices = await fetchCompetitorPrices( 
+    // Step 1: Get item details using OAuth token
+    const itemDetails = await getItemDetails(itemId, oauthToken);
+    
+    // Step 2: Get competitor prices using App ID and details already fetched
+    const competitorPrices = await fetchCompetitorPrices(
       itemId, 
-      appId,  // Use App ID here, not OAuth token
+      appId,
       itemDetails.title,
-      itemDetails.category?.id, 
-      );
-
-    res.json({
+      itemDetails.category?.id
+    );
+      const isMockData = competitorPrices.length === 0 || cache[`${itemId}_prices`]?.isMock;
+     res.json({
       success: true,
       itemId,
+      itemTitle: itemDetails.title,
       competitorPrices,
+      dataSource: isMockData ? "mock" : (cache[`${itemId}_prices`] ? "cached" : "live")
     });
   } catch (error) {
     console.error("Error fetching competitor prices:", error);
+    
+    // Better error handling with more specific messages
+    if (error.message.includes("Rate")) {
+      return res.status(429).json({
+        success: false,
+        message: "eBay API rate limit exceeded. Please try again later.",
+        error: error.message
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: "Failed to fetch competitor prices",
-      error: error.message,
+      error: error.message
     });
   }
-});
+}); 
+
 // 1. Match Lowest Strategy Endpoint
 route.post("/api/match-lowest", async (req, res) => {
   try {
     const {
       itemId,
       currentPrice,
-      apiKey,
+      apiKey, 
       constraints,
       useProvidedPrices = false,
       competitorPrices: providedPrices = [],

@@ -1,4 +1,4 @@
-import Form from "../componentsForEditListing/Form";
+import Form from "../componentsForEditListing/Rules";
 import React from 'react'
 import ListingsTable from "../componentsForEditListing/ListingsTable";
 

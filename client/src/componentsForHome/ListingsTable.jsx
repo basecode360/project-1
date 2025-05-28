@@ -27,7 +27,7 @@ export default function ListingsTable() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId, modifySku} = useProductStore()
+  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId, modifySku, searchProduct} = useProductStore()
 
   // Fetch data from eBay when component mounts
   useEffect(() => {
@@ -39,6 +39,23 @@ useEffect(() => {
   console.log("AllProducts updated:", AllProducts);
   console.log(`Item id =>  ${ItemId}`)
 }, [AllProducts]);
+
+useEffect(() => {
+  if (!searchProduct) {
+    setRows(AllProducts)
+    return;
+  }
+  const searchP = searchProduct.toLowerCase();
+  const filtered = rows.filter(row => 
+    row.productTitle.toLowerCase().includes(searchP) ||
+    row.sku?.toLowerCase().includes(searchP) ||
+    row.productId.toLowerCase().includes(searchP) ||
+    row.status.some(s => s.toLowerCase().includes(searchP))
+  );
+  
+  setRows(filtered);  
+}, [searchProduct]);
+
 
   const fetchEbayListings = async () => {
     try {
@@ -123,7 +140,7 @@ useEffect(() => {
         setError("Failed to fetch eBay listings");
         
         // Use sample data as fallback
-        setRows([
+        setRows([ 
           {
             productTitle: "Front Fog Light Cover Right Passenger Side Textured For 2013-2015 Nissan Altima",
             productId: "186855612214",

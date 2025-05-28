@@ -11,7 +11,9 @@ import syncRoutes from './routes/syncRoute.js'
 import ebayRoutes from './routes/ebayRoutes.js';
 import cors from 'cors';
 import authRoutes from './routes/authRoute.js';
-import pricingRoute from "./routes/pricingEngine.js"  
+import pricingRoute from "./routes/pricingEngine.js" 
+import { priceTrackerRouter, checkPriceChanges } from "./routes/priceHistory.js";
+
 
 
 const swaggerOptions = {
@@ -180,7 +182,13 @@ app.use('/api/ebay', ebayRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/pricing', pricingRoute);
+app.use("/api/price-history", priceTrackerRouter);
 
+// Start the price check interval
+setInterval(checkPriceChanges, 10 * 60 * 1000);
+
+// Initial price check at startup
+checkPriceChanges();
 // ──────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 5000;

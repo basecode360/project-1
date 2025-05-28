@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import Header from "../componentsForHome/Header";
 import NavTabs from "../componentsForHome/NavTabs";
@@ -10,11 +10,19 @@ import ListingsTable from "../componentsForHome/ListingsTable";
 import PaginationBar from "../componentsForHome/PaginationBar";
 import Footer from "../componentsForHome/Footer";
 import ScrollToTopButton from "../componentsForHome/ScrollToTopButton";
-import HelpButton from "../componentsForHome/HelpButton";
+import { userStore } from "../store/authStore";
 
 export default function Home({ handleLogout }) {
   const [page, setPage] = useState(1);
   const location = useLocation();
+  const user = userStore(store => store.user)
+  const navigate = useNavigate();
+  console.log(`user logged in ${user.email}`)
+  // useEffect(() => {
+  //   if (!user) {
+  //     navigate("/login")
+  //   }
+  // },[user])
 
   const isDashboard = location.pathname === "/home";
 
@@ -34,13 +42,12 @@ export default function Home({ handleLogout }) {
           <ListingsHeading />
           <EntriesAndSearchBar />
           <ListingsTable />
+          <PaginationBar currentPage={page} totalPages={4} onPageChange={setPage} />
         </>
       )}
 
-      <PaginationBar currentPage={page} totalPages={4} onPageChange={setPage} />
       <Footer />
       <ScrollToTopButton />
-      <HelpButton />
     </>
   );
 }

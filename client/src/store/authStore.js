@@ -5,11 +5,11 @@ export const userStore = create(
     persist(
         (set) => ({
             user: null,
-            setUser: (user) => set({ user }),
+            saveUser: (user) => set({ user }),
             clearUser: () => set({ user: null }),
         }),
         {
-            name: 'user-store', // unique name for the storage key
+            name: 'user-store' // unique name for the storage key
         }
     ),
 )

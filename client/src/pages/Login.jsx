@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   TextField,
@@ -12,7 +12,7 @@ import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import apiService from "../api/apiService"; 
-
+import { userStore } from "../store/authStore";
 // const allowedUsers = [
 //   { email: "teampartstunt@gmail.com", password: "Dodge@#124578~" },
 // ];
@@ -23,6 +23,13 @@ export default function Login({ handleLogin }) {
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+  const saveUser = userStore(store => store.saveUser)
+
+// useEffect(() => {
+//   if(user) {
+//     navigate("/home")
+//   }
+// },[])
 
   const handleLoginClick = async () => {
     // const user = allowedUsers.find(
@@ -31,9 +38,10 @@ export default function Login({ handleLogin }) {
     console.log("Login attempt with email:", email, "and password:", password);
     const response = await apiService.auth.login({ email, password });
     console.log("API response:", response);
-    if (response.success) {
+    if (response.success) {                                          
+      saveUser({email,password})
       handleLogin(); // Call the handleLogin function passed from App.js
-      navigate("/home"); // Redirect to home on successful login
+      navigate("/home")
     } else {
       setError("Invalid email or password");
     }
