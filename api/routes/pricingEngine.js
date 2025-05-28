@@ -450,6 +450,185 @@ async function getItemDetails(itemId, authToken) {
 }
 
 /**
+ * Enhanced fetchCompetitorPrices with rate limiting and retry logic
+ * @param {string} itemId - The eBay item ID
+ * @param {string} appId - eBay App ID for Finding API
+ * @param {string} title - Item title (already fetched)
+ * @param {string} categoryId - Item category ID (already fetched)
+ * @returns {Promise<Array<number>>} - Array of competitor prices
+ */
+async function fetchCompetitorPrices(itemId, appId, title, categoryId) {
+  // Track retry attempts
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  // Implement exponential backoff
+  const backoff = (attempt) => Math.pow(2, attempt) * 1000; // 1s, 2s, 4s...
+
+  async function attemptFetch() {
+    try {
+      // Use the Finding API to find similar items
+      const xmlRequestBody = `
+        <?xml version="1.0" encoding="utf-8"?>
+        <findItemsAdvancedRequest xmlns="http://www.ebay.com/marketplace/search/v1/services">
+          <keywords>${title}</keywords>
+          ${categoryId ? `<categoryId>${categoryId}</categoryId>` : ""}
+          <itemFilter>
+            <name>ListingType</name>
+            <value>FixedPrice</value>
+          </itemFilter>
+          <sortOrder>PricePlusShippingLowest</sortOrder>
+          <paginationInput>
+            <entriesPerPage>10</entriesPerPage>
+          </paginationInput>
+        </findItemsAdvancedRequest>
+      `;
+
+      const response = await axios({
+        method: "post",
+        url: "https://svcs.ebay.com/services/search/FindingService/v1",
+        headers: {
+          "Content-Type": "text/xml",
+          "X-EBAY-SOA-SECURITY-APPNAME": appId,
+          "X-EBAY-SOA-OPERATION-NAME": "findItemsAdvanced",
+          "X-EBAY-SOA-SERVICE-VERSION": "1.13.0",
+          "X-EBAY-SOA-GLOBAL-ID": "EBAY-US",
+        },
+        data: xmlRequestBody,
+      });
+
+      // Parse and process response
+      const parser = new xml2js.Parser({
+        explicitArray: false,
+        tagNameProcessors: [xml2js.processors.stripPrefix],
+      });
+
+      const result = await parser.parseStringPromise(response.data);
+
+      // Check for API errors in the response
+      if (result.findItemsAdvancedResponse.ack !== "Success") {
+        const error = result.findItemsAdvancedResponse.errorMessage?.error;
+        if (error) {
+          throw new Error(`eBay API Error: ${error.message}`);
+        }
+      }
+
+      // Extract competitor prices
+      const searchResult = result.findItemsAdvancedResponse.searchResult;
+
+      if (searchResult.count === "0") {
+        console.log(`No similar items found for item ${itemId}`);
+        return [];
+      }
+
+      // Process items
+      const items = Array.isArray(searchResult.item)
+        ? searchResult.item
+        : [searchResult.item];
+
+      const competitorPrices = items
+        .filter((item) => item.itemId !== itemId) // Exclude our own item
+        .map((item) => {
+          const price = parseFloat(
+            item.sellingStatus?.currentPrice?.__value__ ||
+              item.sellingStatus?.currentPrice?.value
+          );
+          const shippingCost = parseFloat(
+            item.shippingInfo?.shippingServiceCost?.__value__ ||
+              item.shippingInfo?.shippingServiceCost?.value ||
+              0
+          );
+          return +(price + shippingCost).toFixed(2);
+        })
+        .filter((price) => !isNaN(price) && price > 0);
+
+      console.log(
+        `Found ${competitorPrices.length} competitor prices for item ${itemId}`
+      );
+      return competitorPrices;
+    } catch (error) {
+      // Handle rate limiting errors specifically
+      if (
+        error.response &&
+        error.response.status === 500 &&
+        error.response.data &&
+        error.response.data.includes("RateLimiter")
+      ) {
+        // If we haven't exceeded max attempts, wait and retry
+        if (attempts < maxAttempts) {
+          attempts++;
+          const waitTime = backoff(attempts);
+          console.log(
+            `Rate limit hit. Retrying in ${
+              waitTime / 1000
+            } seconds (attempt ${attempts}/${maxAttempts})...`
+          );
+
+          // Wait using setTimeout wrapped in a promise
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+          // Try again recursively
+          return attemptFetch();
+        } else {
+          // If we've exhausted our retries, use cached data or fail gracefully
+          console.error(
+            `Rate limit exceeded after ${maxAttempts} attempts. Using fallback.`
+          );
+          return []; // Or return cached data if available
+        }
+      }
+
+      // For other errors, just propagate them
+      throw error;
+    }
+  }
+
+  // Start the first attempt
+  return attemptFetch();
+}
+
+/**
+ * Add caching to competitor price fetching
+ */
+async function fetchCompetitorPricesWithCache(
+  itemId,
+  appId,
+  title,
+  categoryId
+) {
+  const cacheKey = `${itemId}_${title}`;
+
+  // Check if we have a valid cache entry
+  if (cache[cacheKey] && cache[cacheKey].timestamp > Date.now() - CACHE_TTL) {
+    console.log(`Using cached prices for ${itemId}`);
+    return cache[cacheKey].prices;
+  }
+
+  // If not cached or expired, fetch fresh data
+  const prices = await fetchCompetitorPrices(itemId, appId, title, categoryId);
+
+  // Cache the result
+  cache[cacheKey] = {
+    timestamp: Date.now(),
+    prices,
+  };
+
+  return prices;
+}
+
+// Create a limiter for eBay API
+const ebayLimiter = new Bottleneck({
+  minTime: 200, // Min 200ms between requests (5/second)
+  maxConcurrent: 1, // Only 1 request at a time
+  highWater: 100, // Max 100 jobs queued
+  strategy: Bottleneck.strategy.LEAK, // Discard oldest jobs when queue is full
+});
+
+// Wrap fetch functions with the limiter
+const throttledFetchCompetitorPrices = ebayLimiter.wrap(fetchCompetitorPrices);
+const throttledGetItemDetails = ebayLimiter.wrap(getItemDetails);
+
+/**
  * Pricing Strategy Implementations
  */
 
@@ -641,28 +820,41 @@ async function setCachedDataInDB(key, data, ttlSeconds = 86400) {
   );
 }
 /**
+ * Helper function to get item details and competitor prices
+ */
+async function getItemDetailsAndPrices(itemId, oauthToken, appId) {
+  // Step 1: Get item details using OAuth token
+  const itemDetails = await throttledGetItemDetails(itemId, oauthToken);
+
+  // Step 2: Get competitor prices using App ID and details already fetched
+  const competitorPrices = await fetchCompetitorPricesWithCache(
+    itemId,
+    appId,
+    itemDetails.title,
+    itemDetails.category?.id
+  );
+
+  return { itemDetails, competitorPrices };
+}
+
+/**
  * API Routes
  */
 route.get("/competitor-prices/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
-    const oauthToken = process.env.AUTH_TOKEN;  // For Trading API
-    const appId = process.env.CLIENT_ID;       // For Finding API
-    
+    const oauthToken = process.env.AUTH_TOKEN; // For Trading API
+    const appId = process.env.CLIENT_ID; // For Finding API
+
     console.log(`Fetching prices for item id => ${itemId}`);
 
-    // Step 1: Get item details using OAuth token
-    const itemDetails = await getItemDetails(itemId, oauthToken);
-    
-    // Step 2: Get competitor prices using App ID and details already fetched
-    const competitorPrices = await fetchCompetitorPrices(
-      itemId, 
-      appId,
-      itemDetails.title,
-      itemDetails.category?.id
+    const { itemDetails, competitorPrices } = await getItemDetailsAndPrices(
+      itemId,
+      oauthToken,
+      appId
     );
-      const isMockData = competitorPrices.length === 0 || cache[`${itemId}_prices`]?.isMock;
-     res.json({
+
+    res.json({
       success: true,
       itemId,
       itemTitle: itemDetails.title,
@@ -690,7 +882,7 @@ route.get("/competitor-prices/:itemId", async (req, res) => {
 }); 
 
 // 1. Match Lowest Strategy Endpoint
-route.post("/api/match-lowest", async (req, res) => {
+route.post("/match-lowest", async (req, res) => {
   try {
     const {
       itemId,
@@ -716,9 +908,17 @@ route.post("/api/match-lowest", async (req, res) => {
     }
 
     // Use provided prices or fetch from eBay
-    const competitorPrices = useProvidedPrices
-      ? providedPrices
-      : await fetchCompetitorPrices(itemId, apiKey);
+    let competitorPrices;
+    if (useProvidedPrices) {
+      competitorPrices = providedPrices;
+    } else {
+      const oauthToken = process.env.AUTH_TOKEN;
+      const appId = process.env.CLIENT_ID;
+
+      const { itemDetails, competitorPrices: fetchedPrices } =
+        await getItemDetailsAndPrices(itemId, oauthToken, appId);
+      competitorPrices = fetchedPrices;
+    }
 
     const result = matchLowest(currentPrice, competitorPrices);
     const validatedResult = validatePriceResult(result, constraints);
@@ -736,13 +936,12 @@ route.post("/api/match-lowest", async (req, res) => {
 });
 
 // 2. Beat Lowest Strategy Endpoint
-route.post("/api/beat-lowest", async (req, res) => {
+route.post("/beat-lowest", async (req, res) => {
   try {
     const {
       itemId,
       currentPrice,
       amount,
-      apiKey,
       constraints,
       useProvidedPrices = false,
       competitorPrices: providedPrices = [],
@@ -763,9 +962,17 @@ route.post("/api/beat-lowest", async (req, res) => {
     }
 
     // Use provided prices or fetch from eBay
-    const competitorPrices = useProvidedPrices
-      ? providedPrices
-      : await fetchCompetitorPrices(itemId, apiKey);
+    let competitorPrices;
+    if (useProvidedPrices) {
+      competitorPrices = providedPrices;
+    } else {
+      const oauthToken = process.env.AUTH_TOKEN;
+      const appId = process.env.CLIENT_ID;
+
+      const { itemDetails, competitorPrices: fetchedPrices } =
+        await getItemDetailsAndPrices(itemId, oauthToken, appId);
+      competitorPrices = fetchedPrices;
+    }
 
     const result = beatLowestByAmount(currentPrice, competitorPrices, amount);
     const validatedResult = validatePriceResult(result, constraints);
@@ -783,14 +990,13 @@ route.post("/api/beat-lowest", async (req, res) => {
 });
 
 // 3. Stay Above Strategy Endpoint
-route.post("/api/stay-above", async (req, res) => {
+route.post("/stay-above", async (req, res) => {
   try {
     const {
       itemId,
       currentPrice,
       percentage,
       amount,
-      apiKey,
       constraints,
       useProvidedPrices = false,
       competitorPrices: providedPrices = [],
@@ -811,9 +1017,17 @@ route.post("/api/stay-above", async (req, res) => {
     }
 
     // Use provided prices or fetch from eBay
-    const competitorPrices = useProvidedPrices
-      ? providedPrices
-      : await fetchCompetitorPrices(itemId, apiKey);
+    let competitorPrices;
+    if (useProvidedPrices) {
+      competitorPrices = providedPrices;
+    } else {
+      const oauthToken = process.env.AUTH_TOKEN;
+      const appId = process.env.CLIENT_ID;
+
+      const { itemDetails, competitorPrices: fetchedPrices } =
+        await getItemDetailsAndPrices(itemId, oauthToken, appId);
+      competitorPrices = fetchedPrices;
+    }
 
     const params = {};
     if (typeof percentage === "number") params.percentage = percentage;
@@ -835,9 +1049,9 @@ route.post("/api/stay-above", async (req, res) => {
 });
 
 // Process batch of items with the same strategy
-route.post("/api/batch-process", async (req, res) => {
+route.post("/batch-process", async (req, res) => {
   try {
-    const { items, strategy, strategyParams, apiKey, constraints } = req.body;
+    const { items, strategy, strategyParams, constraints } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -856,6 +1070,8 @@ route.post("/api/batch-process", async (req, res) => {
       });
     }
 
+    const oauthToken = process.env.AUTH_TOKEN;
+    const appId = process.env.CLIENT_ID;
     const results = [];
 
     for (const item of items) {
@@ -871,8 +1087,12 @@ route.post("/api/batch-process", async (req, res) => {
           continue;
         }
 
-        // Fetch competitor prices
-        const competitorPrices = await fetchCompetitorPrices(itemId, apiKey);
+        // Fetch item details and competitor prices
+        const { itemDetails, competitorPrices } = await getItemDetailsAndPrices(
+          itemId,
+          oauthToken,
+          appId
+        );
 
         // Apply the selected strategy
         let result;
@@ -896,6 +1116,7 @@ route.post("/api/batch-process", async (req, res) => {
         results.push({
           ...validatedResult,
           itemId,
+          itemTitle: itemDetails.title,
         });
       } catch (error) {
         results.push({
