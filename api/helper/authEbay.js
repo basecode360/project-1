@@ -4,6 +4,8 @@ import qs from 'qs';
 import dotenv from 'dotenv';
 dotenv.config();
 
+let cachedToken = null;
+let tokenExpiry = 0;
 // OAuth credentials
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
@@ -27,17 +29,17 @@ const SCOPES = [
 
 // 1) Only call the token‐endpoint if no static token is provided
 async function getAccessToken() {
-  // if (STATIC_TOKEN) {
-  //   return STATIC_TOKEN;
-  // }
-  
+  const now = Date.now();
+
+  if (cachedToken && tokenExpiry - now > 60_000) {
+    return cachedToken; // return if not about to expire (60s buffer)
+  }
+
   if (!REFRESH_TOKEN || !CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Missing REFRESH_TOKEN or OAuth credentials in your .env');
   }
 
-  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
-    'base64'
-  );
+  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
 
   const body = qs.stringify({
     grant_type: 'refresh_token',
@@ -45,19 +47,17 @@ async function getAccessToken() {
     scope: SCOPES,
   });
 
-  const resp = await axios.post(
-    'https://api.ebay.com/identity/v1/oauth2/token',
-    body,
-    {
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    }
-  );
-  // eBay sometimes rotates the refresh token
-  // You can inspect resp.data.refresh_token and persist it if you want
-  return resp.data.access_token;
+  const resp = await axios.post('https://api.ebay.com/identity/v1/oauth2/token', body, {
+    headers: {
+      Authorization: `Basic ${basicAuth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  });
+
+  cachedToken = resp.data.access_token;
+  tokenExpiry = now + resp.data.expires_in * 1000;
+
+  return cachedToken;
 }
 
 

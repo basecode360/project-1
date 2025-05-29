@@ -10,6 +10,7 @@ import Login from "./pages/Login";
 import Home from "./pages/Home";
 import EditListing from "./pages/EditListing";
 import EditPrice from "./componentsForEditListing/PriceForm";
+import CompetitorDetails from "./componentsForEditListing/CompetitorDetails";
 import { userStore } from "./store/authStore";
 
 function App() {
@@ -45,6 +46,8 @@ function App() {
         >
           <Route path="edit-listing" element={<EditListing />} />
           <Route path="edit-price" element={<EditPrice />} />
+          <Route path="competitors/:itemId" element={<CompetitorDetails />} />
+
         </Route>
       </Routes>
     </Router>

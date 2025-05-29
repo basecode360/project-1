@@ -57,57 +57,64 @@ useEffect(() => {
 }, [searchProduct]);
 
 
+
+  // Helper to fetch competitor price
+  const fetchCompetitorPrice = async (itemId) => {
+    const result = await apiService.inventory.getCompetitorPrice(itemId);
+    if (result.success && result.competitorPrices.length > 0) {
+      return `USD${parseFloat(result.competitorPrices[0]).toFixed(2)}`;
+    }
+    return "N/A";
+  };
+
   const fetchEbayListings = async () => {
     try {
       setLoading(true);
-      
       // Fetch active listings from eBay API
       const response = await apiService.inventory.getActiveListings();
-      
       if (response.success) {
         console.log("eBay data received:", response.data);
-        
         // Process the data for your table
         let ebayListings = [];
-        
         if (response.data.GetMyeBaySellingResponse && 
             response.data.GetMyeBaySellingResponse.ActiveList && 
             response.data.GetMyeBaySellingResponse.ActiveList.ItemArray) {
-          
           const itemArray = response.data.GetMyeBaySellingResponse.ActiveList.ItemArray;
-          
           if (Array.isArray(itemArray.Item)) {
             ebayListings = itemArray.Item;
           } else if (itemArray.Item) {
             ebayListings = [itemArray.Item];
           }
         }
-        
-        // Transform the eBay data to match your table structure
-      const formattedListings = ebayListings.flatMap((item) => {
+
+        // Transform the eBay data to match your table structure (async/await version)
+        const formattedListings = [];
+
+for (const item of ebayListings) {
   const hasVariations = Array.isArray(item.Variations?.Variation);
+  const { price, count } = await apiService.inventory.getCompetitorPrice(item.ItemID);
 
   if (hasVariations) {
-    // Add an entry per variation
-    return item.Variations.Variation.map((variation) => ({
-      productTitle: variation.VariationTitle,
-      productId: item.ItemID,
-      sku: variation.SKU,
-      status: [
-        item.ConditionDisplayName || 'New',
-        item.SellingStatus?.ListingStatus || 'Active'
-      ],
-      qty: parseInt(variation.Quantity || item.Quantity || '0', 10),
-      myPrice: `USD ${parseFloat(variation.StartPrice || item.BuyItNowPrice || 0).toFixed(2)}`,
-      competition: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 0.01).toFixed(2)}`,
-      strategy: "0.01",
-      minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
-      maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
-      competitors: Math.floor(Math.random() * 15) + 1
-    }));
+    for (const variation of item.Variations.Variation) {
+      formattedListings.push({
+        productTitle: variation.VariationTitle,
+        productId: item.ItemID,
+        sku: variation.SKU,
+        status: [
+          item.ConditionDisplayName || 'New',
+          item.SellingStatus?.ListingStatus || 'Active'
+        ],
+        qty: parseInt(variation.Quantity || item.Quantity || '0', 10),
+        myPrice: `USD ${parseFloat(variation.StartPrice || item.BuyItNowPrice || 0).toFixed(2)}`,
+        competition: price,
+        strategy: "0.01",
+        minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
+        maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
+        competitors: count
+      });
+    }
   } else {
-    // Single product entry without variations
-    return [{
+    formattedListings.push({
       productTitle: item.Title,
       productId: item.ItemID,
       sku: item.SKU || " ",
@@ -117,16 +124,15 @@ useEffect(() => {
       ],
       qty: parseInt(item.Quantity || '0', 10),
       myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
-      competition: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 0.01).toFixed(2)}`,
+      competition: price,
       strategy: "0.01",
       minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
       maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
-      competitors: Math.floor(Math.random() * 15) + 1
-    }];
+      competitors: count
+    });
   }
-});
+}
 
-        
         if (formattedListings.length > 0) {
           setRows(formattedListings);
           modifyProductsArray(formattedListings)
@@ -427,18 +433,16 @@ useEffect(() => {
                     border: "1px solid #ddd",
                     padding: "16px",
                     backgroundColor: "#fff",
+                    cursor: "pointer"
                   }}
+                  onClick={() => navigate(`/home/competitors/${row.productId}`)}
                 >
                   <Typography
                     color="primary"
                     sx={{
-                      cursor: "pointer",
                       fontSize: "16px",
-                      "&:hover": {
-                        textDecoration: "underline",
-                      },
+                      textDecoration: "underline"
                     }}
-                    onClick={() => navigate("/home/edit-listing")}
                   >
                     {row.competitors}
                   </Typography>
