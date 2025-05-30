@@ -1,10 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
-  Container, Typography, CircularProgress, Table, TableHead,
-  TableRow, TableCell, TableBody, Paper, Box, Button, Link
+  Container,
+  Typography,
+  CircularProgress,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  Paper,
+  Box,
+  Button,
+  Link,
 } from "@mui/material";
 import apiService from "../api/apiService";
+import { useProductStore } from "../store/productStore";
 
 export default function CompetitorPricesPage() {
   const { itemId } = useParams();
@@ -13,28 +24,35 @@ export default function CompetitorPricesPage() {
   const [myItemTitle, setMyItemTitle] = useState("");
   const [error, setError] = useState(null);
   const [acceptedId, setAcceptedId] = useState(null);
-
+  const competitors = useProductStore((state) => state.competitors);
+  const productObj = useProductStore((state) => state.productObj);
+  // console.log(`CompetitorPricesPage itemId: ${competitors[0].allPrices}, itemIdFromStore: ${itemIdFromStore}`);
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await apiService.inventory.getCompetitorPrice(itemId);
+        // const res = await apiService.inventory.getCompetitorPrice(itemId);
 
-        if (res.title) setMyItemTitle(res.title);
+        console.log(`Fetching competitor prices for itemId: ${competitors}`);
+        if (productObj.title) setMyItemTitle(productObj.title);
 
-        if (res.allPrices.length > 0) {
+        if (competitors.length > 0) {
           // If using mock data, generate dummy competitor metadata
-          const detailed = res.allPrices.map((p, i) => ({
-            id: i,
-            title: `Competitor Listing ${i + 1}`,
-            price: p,
-            country: "US",
-            image: "https://via.placeholder.com/100",
-            url: "#",
+          const detailed = competitors.map((p, i) => ({
+            id: p.id,
+            title: p.title,
+            imageurl: p.imageurl,
+            country: p.locale,
+            image: p.imageurl,
+            url: p.productUrl,
+            price: p.price,
+            currency: p.currency,
             mpn: "None",
             upc: "None",
             ean: "None",
-            isbn: "None"
+            isbn: "None",
           }));
+
+          console.log(detailed);
           setCompetitorData(detailed);
         } else {
           setError("No competitor listings found.");
@@ -55,7 +73,7 @@ export default function CompetitorPricesPage() {
       const response = await apiService.inventory.editPrice({
         itemId,
         newPrice: numericPrice,
-        reason: "Accepted competitor price"
+        reason: "Accepted competitor price",
       });
 
       if (response.success) {
@@ -85,7 +103,6 @@ export default function CompetitorPricesPage() {
         <Typography color="error">{error}</Typography>
       ) : (
         <>
-         
           {/* Detailed Table */}
           <Paper>
             <Typography variant="h6" sx={{ px: 2, pt: 2 }}>
@@ -109,10 +126,13 @@ export default function CompetitorPricesPage() {
                         {comp.title}
                       </Link>
                       <Typography variant="caption" color="textSecondary">
-                        MPN: {comp.mpn} | UPC: {comp.upc} | EAN: {comp.ean} | ISBN: {comp.isbn}
+                        MPN: {comp.mpn} | UPC: {comp.upc} | EAN: {comp.ean} |
+                        ISBN: {comp.isbn}
                       </Typography>
                     </TableCell>
-                    <TableCell>USD {parseFloat(comp.price).toFixed(2)}</TableCell>
+                    <TableCell>
+                      {comp.currency} {parseFloat(comp.price).toFixed(2)}
+                    </TableCell>
                     <TableCell>{comp.country}</TableCell>
                     <TableCell>
                       <img src={comp.image} alt="thumb" width={80} />

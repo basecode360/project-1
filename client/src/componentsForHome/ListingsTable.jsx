@@ -27,18 +27,29 @@ export default function ListingsTable() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const {modifyProductsArray, modifyProductsId, AllProducts, ItemId, modifySku, searchProduct} = useProductStore()
-
+  const {
+    modifyProductsArray,
+    modifyProductsId,
+    AllProducts, 
+    modifySku, 
+   searchProduct, 
+   modifyCompetitors,
+   modifyProductsObj
+  } = useProductStore()
   // Fetch data from eBay when component mounts
   useEffect(() => {
+    if (AllProducts.length > 0 && AllProducts[0].productId) {
+      setLoading(false);
+      return;
+    }
     fetchEbayListings();
   }, []);
 
 
-useEffect(() => {
-  console.log("AllProducts updated:", AllProducts);
-  console.log(`Item id =>  ${ItemId}`)
-}, [AllProducts]);
+// useEffect(() => {
+//   console.log("AllProducts updated:", AllProducts);
+//   console.log(`Item id =>  ${ItemId}`)
+// }, [AllProducts]);
 
 useEffect(() => {
   if (!searchProduct) {
@@ -58,14 +69,14 @@ useEffect(() => {
 
 
 
-  // Helper to fetch competitor price
-  const fetchCompetitorPrice = async (itemId) => {
-    const result = await apiService.inventory.getCompetitorPrice(itemId);
-    if (result.success && result.competitorPrices.length > 0) {
-      return `USD${parseFloat(result.competitorPrices[0]).toFixed(2)}`;
-    }
-    return "N/A";
-  };
+  // // Helper to fetch competitor price
+  // const fetchCompetitorPrice = async (itemId) => {
+  //   const result = await apiService.inventory.getCompetitorPrice(itemId);
+  //   if (result.success && result.competitorPrices.length > 0) {
+  //     return `USD${parseFloat(result.competitorPrices[0]).toFixed(2)}`;
+  //   }
+  //   return "N/A";
+  // };
 
   const fetchEbayListings = async () => {
     try {
@@ -92,8 +103,12 @@ useEffect(() => {
 
 for (const item of ebayListings) {
   const hasVariations = Array.isArray(item.Variations?.Variation);
-  const { price, count } = await apiService.inventory.getCompetitorPrice(item.ItemID);
-
+  const itemID = item.ItemID
+  const response = await apiService.inventory.getCompetitorPrice(itemID);
+  response.itemID = itemID;
+  const { price, count } = response;
+  modifyCompetitors(response.productInfo);
+  console.log("Competitors => ", response.productInfo)
   if (hasVariations) {
     for (const variation of item.Variations.Variation) {
       formattedListings.push({
@@ -110,7 +125,7 @@ for (const item of ebayListings) {
         strategy: "0.01",
         minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
         maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
-        competitors: count
+        competitors: count == 1 ? 0 : count
       });
     }
   } else {
@@ -128,7 +143,7 @@ for (const item of ebayListings) {
       strategy: "0.01",
       minPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) - 10).toFixed(2)}`,
       maxPrice: `USD${(parseFloat(item.CurrentPrice?.Value || 0) + 20).toFixed(2)}`,
-      competitors: count
+      competitors: count == 1 ? 0 : count
     });
   }
 }
@@ -266,7 +281,7 @@ for (const item of ebayListings) {
           </TableHead>
 
           <TableBody>
-            {rows.map((row, idx) => (
+            {AllProducts.map((row, idx) => (
               <TableRow
                 key={idx}
                 sx={{
@@ -435,7 +450,10 @@ for (const item of ebayListings) {
                     backgroundColor: "#fff",
                     cursor: "pointer"
                   }}
-                  onClick={() => navigate(`/home/competitors/${row.productId}`)}
+                  onClick={() => {
+                    modifyProductsObj(row)
+                    navigate(`/home/competitors/${row.productId}`)
+                  }}
                 >
                   <Typography
                     color="primary"

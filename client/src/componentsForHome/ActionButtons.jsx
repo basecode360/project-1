@@ -5,6 +5,11 @@ import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import apiService from "../api/apiService";
 
 export default function ActionButtons() {
+
+  setInterval(() => {
+    triggerAutoSync();
+  }, 1800000);
+  
   const triggerAutoSync = async () => {
     // Logic to trigger auto-sync of listings
     console.log("Auto-sync of listings triggered");

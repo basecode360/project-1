@@ -9,6 +9,8 @@ export const useProductStore = create(
   productObj: {},
   sku: "",
   searchProduct: "",
+  competitors: [],
+  modifyCompetitors: (competitors) => set({ competitors }),
   modifySearch : (searchProduct) => set({searchProduct}),
   modifyProductsObj: (productObj) => set({ productObj }),
   modifyProductsArray: (AllProducts) => set({ AllProducts }),

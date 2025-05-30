@@ -75,12 +75,15 @@ getCompetitorPrice: async (itemId) => {
   try {
     const response = await axios.get(`${backend_url}/api/pricing/competitor-prices/${itemId}`);
     const data = response.data?.competitorPrices || {};
+    const productInfo = data.allData;
+    console.log(`Competitor price data for ${itemId}:`, productInfo);
     const prices = Array.isArray(data.allPrices) ? data.allPrices : [];
-
     return {
       price: prices.length > 0 ? `USD${parseFloat(Math.min(...prices)).toFixed(2)}` : "USD0.00",
       count: prices.length,
       allPrices: prices,
+      productInfo
+
     };
   } catch (error) {
     console.error(`Error fetching competitor price for ${itemId}:`, error);
