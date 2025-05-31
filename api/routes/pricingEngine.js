@@ -6,6 +6,10 @@ import Bottleneck from "bottleneck";
 // Initialize Express app
 const route = express.Router();
 
+// In-memory storage for strategies (replace with your database)
+let strategies = [];
+let strategyIdCounter = 1;
+
 // Middleware
 const limiter = new Bottleneck({
   minTime: 333, // Min 333ms between requests (3/second max)
@@ -413,8 +417,14 @@ function matchLowest(currentPrice, competitorPrices) {
     competitorPrices,
   };
 }
+
 // 2. Beat Lowest Strategy
 function beatLowestByAmount(currentPrice, competitorPrices, amount) {
+  if (!Array.isArray(competitorPrices)) {
+    console.warn('competitorPrices is not an array:', competitorPrices);
+    return { success: false, message: 'Invalid competitor prices data' };
+  }
+
   if (!competitorPrices || competitorPrices.length === 0) {
     return {
       success: false,
@@ -431,7 +441,22 @@ function beatLowestByAmount(currentPrice, competitorPrices, amount) {
     };
   }
 
-  const lowestPrice = Math.min(...competitorPrices);
+  // Extract prices safely
+  const prices = competitorPrices.map(item => {
+    if (typeof item === 'number') return item;
+    if (typeof item === 'object') return item.price || item.value || item.amount || 0;
+    return parseFloat(item) || 0;
+  }).filter(price => price > 0);
+
+  if (prices.length === 0) {
+    return {
+      success: false,
+      message: "No valid competitor prices found",
+      newPrice: currentPrice,
+    };
+  }
+
+  const lowestPrice = Math.min(...prices);
   const newPrice = lowestPrice - amount;
 
   // Don't allow negative prices
@@ -442,7 +467,7 @@ function beatLowestByAmount(currentPrice, competitorPrices, amount) {
       oldPrice: currentPrice,
       calculatedPrice: newPrice,
       newPrice: currentPrice,
-      competitorPrices,
+      competitorPrices: prices,
     };
   }
 
@@ -453,7 +478,7 @@ function beatLowestByAmount(currentPrice, competitorPrices, amount) {
     newPrice: newPrice,
     strategy: "BEAT_LOWEST",
     strategyParams: { amount },
-    competitorPrices,
+    competitorPrices: prices,
   };
 }
 
@@ -570,28 +595,6 @@ function validatePriceResult(result, constraints = {}) {
   return result;
 }
 
-// Example with MongoDB (pseudo-code)
-async function getCachedDataFromDB(key) {
-  const cachedItem = await CacheCollection.findOne({ key });
-  if (cachedItem && cachedItem.expires > Date.now()) {
-    return cachedItem.data;
-  }
-  return null;
-}
-
-async function setCachedDataInDB(key, data, ttlSeconds = 86400) {
-  await CacheCollection.updateOne(
-    { key },
-    {
-      $set: {
-        data,
-        expires: Date.now() + ttlSeconds * 1000,
-        isMock: false,
-      },
-    },
-    { upsert: true }
-  );
-}
 /**
  * Helper function to get item details and competitor prices
  */
@@ -610,9 +613,410 @@ async function getItemDetailsAndPrices(itemId, oauthToken, appId) {
   return { itemDetails, competitorPrices };
 }
 
+// ===============================
+// STRATEGY MANAGEMENT APIs
+// ===============================
+
+// 1. Create Match Lowest Strategy
+route.post("/strategies/match-lowest", async (req, res) => {
+  try {
+    const {
+      strategyName,
+      repricingRule = "MATCH_LOWEST",
+      noCompetitionAction = "USE_MAX_PRICE",
+      assignToActiveListings = false,
+      maxPrice,
+      minPrice,
+      listings = []
+    } = req.body;
+
+    if (!strategyName || strategyName.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy name is required"
+      });
+    }
+
+    const strategy = {
+      id: strategyIdCounter++,
+      strategyName: strategyName.trim(),
+      repricingRule,
+      type: "MATCH_LOWEST",
+      noCompetitionAction,
+      assignToActiveListings,
+      constraints: {
+        maxPrice: maxPrice || null,
+        minPrice: minPrice || null
+      },
+      listings,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true
+    };
+
+    strategies.push(strategy);
+
+    res.status(201).json({
+      success: true,
+      message: "Match Lowest strategy created successfully",
+      strategy
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 2. Create Beat Lowest Strategy  
+route.post("/strategies/beat-lowest", async (req, res) => {
+  try {
+    const {
+      strategyName,
+      repricingRule = "BEAT_LOWEST", 
+      beatBy, // "AMOUNT" or "PERCENTAGE"
+      value, // The actual amount or percentage value
+      noCompetitionAction = "USE_MAX_PRICE",
+      assignToActiveListings = false,
+      maxPrice,
+      minPrice,
+      listings = []
+    } = req.body;
+
+    if (!strategyName || strategyName.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy name is required"
+      });
+    }
+
+    if (!beatBy || !["AMOUNT", "PERCENTAGE"].includes(beatBy)) {
+      return res.status(400).json({
+        success: false,
+        message: "beatBy must be either 'AMOUNT' or 'PERCENTAGE'"
+      });
+    }
+
+    if (typeof value !== "number" || value <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Value must be a positive number"
+      });
+    }
+
+    const strategy = {
+      id: strategyIdCounter++,
+      strategyName: strategyName.trim(),
+      repricingRule,
+      type: "BEAT_LOWEST",
+      beatBy,
+      value,
+      noCompetitionAction,
+      assignToActiveListings,
+      constraints: {
+        maxPrice: maxPrice || null,
+        minPrice: minPrice || null
+      },
+      listings,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true
+    };
+
+    strategies.push(strategy);
+
+    res.status(201).json({
+      success: true,
+      message: "Beat Lowest strategy created successfully",
+      strategy
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 3. Create Stay Above Strategy
+route.post("/strategies/stay-above", async (req, res) => {
+  try {
+    const {
+      strategyName,
+      repricingRule = "STAY_ABOVE",
+      stayAboveBy, // "AMOUNT" or "PERCENTAGE"
+      value, // The actual amount or percentage value
+      noCompetitionAction = "USE_MAX_PRICE",
+      assignToActiveListings = false,
+      maxPrice,
+      minPrice,
+      listings = []
+    } = req.body;
+
+    if (!strategyName || strategyName.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy name is required"
+      });
+    }
+
+    if (!stayAboveBy || !["AMOUNT", "PERCENTAGE"].includes(stayAboveBy)) {
+      return res.status(400).json({
+        success: false,
+        message: "stayAboveBy must be either 'AMOUNT' or 'PERCENTAGE'"
+      });
+    }
+
+    if (typeof value !== "number" || value <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Value must be a positive number"
+      });
+    }
+
+    const strategy = {
+      id: strategyIdCounter++,
+      strategyName: strategyName.trim(),
+      repricingRule,
+      type: "STAY_ABOVE",
+      stayAboveBy,
+      value,
+      noCompetitionAction,
+      assignToActiveListings,
+      constraints: {
+        maxPrice: maxPrice || null,
+        minPrice: minPrice || null
+      },
+      listings,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true
+    };
+
+    strategies.push(strategy);
+
+    res.status(201).json({
+      success: true,
+      message: "Stay Above strategy created successfully",
+      strategy
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 4. Get all strategies
+route.get("/strategies", async (req, res) => {
+  try {
+    const { type, isActive } = req.query;
+    
+    let filteredStrategies = strategies;
+
+    if (type) {
+      filteredStrategies = filteredStrategies.filter(s => 
+        s.type.toLowerCase() === type.toLowerCase()
+      );
+    }
+
+    if (isActive !== undefined) {
+      const activeFilter = isActive === 'true';
+      filteredStrategies = filteredStrategies.filter(s => 
+        s.isActive === activeFilter
+      );
+    }
+
+    res.json({
+      success: true,
+      count: filteredStrategies.length,
+      strategies: filteredStrategies
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 5. Get strategy by ID
+route.get("/strategies/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const strategy = strategies.find(s => s.id === parseInt(id));
+
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        message: "Strategy not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      strategy
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 6. Apply strategy to items
+route.post("/apply-strategy", async (req, res) => {
+  try {
+    const {
+      strategyId,
+      items, // Array of {itemId, currentPrice}
+      useProvidedPrices = false,
+      competitorPrices: providedPrices = []
+    } = req.body;
+
+    if (!strategyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy ID is required"
+      });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Items must be a non-empty array"
+      });
+    }
+
+    // Find the strategy
+    const strategy = strategies.find(s => s.id === parseInt(strategyId));
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        message: "Strategy not found"
+      });
+    }
+
+    if (!strategy.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy is not active"
+      });
+    }
+
+    const oauthToken = process.env.AUTH_TOKEN;
+    const appId = process.env.CLIENT_ID;
+    const results = [];
+
+    for (const item of items) {
+      try {
+        const { itemId, currentPrice } = item;
+
+        if (!itemId || typeof currentPrice !== "number" || currentPrice <= 0) {
+          results.push({
+            success: false,
+            message: "Invalid item data",
+            itemId: item.itemId || "unknown",
+          });
+          continue;
+        }
+
+        // Get competitor prices
+        let competitorPrices;
+        if (useProvidedPrices) {
+          competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
+        } else {
+          const { itemDetails, competitorPrices: fetchedPrices } = await getItemDetailsAndPrices(
+            itemId,
+            oauthToken,
+            appId
+          );
+          competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
+        }
+
+        // Apply strategy based on type
+        let result;
+
+        if (strategy.type === "MATCH_LOWEST") {
+          result = matchLowest(currentPrice, competitorPrices);
+        } else if (strategy.type === "BEAT_LOWEST") {
+          if (strategy.beatBy === "AMOUNT") {
+            result = beatLowestByAmount(currentPrice, competitorPrices, strategy.value);
+          } else {
+            // Handle percentage beat lowest if needed
+            result = {
+              success: false,
+              message: "Percentage beat lowest not implemented yet",
+              newPrice: currentPrice
+            };
+          }
+        } else if (strategy.type === "STAY_ABOVE") {
+          const params = {};
+          if (strategy.stayAboveBy === "AMOUNT") {
+            params.amount = strategy.value;
+          } else if (strategy.stayAboveBy === "PERCENTAGE") {
+            params.percentage = strategy.value;
+          }
+          result = stayAbove(currentPrice, competitorPrices, params);
+        }
+
+        // Validate result with strategy constraints
+        const validatedResult = validatePriceResult(result, strategy.constraints);
+
+        results.push({
+          ...validatedResult,
+          itemId,
+          strategyApplied: strategy.strategyName,
+          strategyType: strategy.type
+        });
+
+      } catch (error) {
+        results.push({
+          success: false,
+          message: error.message,
+          itemId: item.itemId || "unknown",
+        });
+      }
+    }
+
+    // Calculate summary
+    const successful = results.filter((r) => r.success).length;
+
+    res.json({
+      success: true,
+      strategy: {
+        id: strategy.id,
+        name: strategy.strategyName,
+        type: strategy.type
+      },
+      summary: {
+        total: items.length,
+        successful,
+        failed: items.length - successful,
+      },
+      results,
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 /**
- * API Routes
+ * ORIGINAL API Routes (Updated to work with strategy system)
  */
+
 route.get("/competitor-prices/:itemId", async (req, res) => {
   try {   
     const { itemId } = req.params;
@@ -631,7 +1035,6 @@ route.get("/competitor-prices/:itemId", async (req, res) => {
     const isMock = cache[cacheKey]?.isMock || false;
 
     res.json({
-      // allData,
       success: true,
       itemId,
       itemTitle: itemDetails.title,
@@ -657,8 +1060,7 @@ route.get("/competitor-prices/:itemId", async (req, res) => {
   }
 });
 
-
-// 1. Match Lowest Strategy Endpoint
+// 1. Match Lowest Strategy Endpoint (Legacy - still supported)
 route.post("/match-lowest", async (req, res) => {
   try {
     const {
@@ -686,7 +1088,6 @@ route.post("/match-lowest", async (req, res) => {
 
     let competitorPrices;
     if (useProvidedPrices) {
-      // ✅ Ensure providedPrices is always an array
       competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
     } else {
       const oauthToken = process.env.AUTH_TOKEN;
@@ -695,11 +1096,9 @@ route.post("/match-lowest", async (req, res) => {
       const { itemDetails, competitorPrices: fetchedPrices } =
         await getItemDetailsAndPrices(itemId, oauthToken, appId);
       
-      // ✅ Ensure fetchedPrices is always an array
       competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
     }
 
-    // ✅ Add debug logging
     console.log('competitorPrices type:', typeof competitorPrices);
     console.log('competitorPrices isArray:', Array.isArray(competitorPrices));
     console.log('competitorPrices length:', competitorPrices?.length);
@@ -712,7 +1111,7 @@ route.post("/match-lowest", async (req, res) => {
       itemId,
     });
   } catch (error) {
-    console.error('Full error stack:', error); // ✅ Better error logging
+    console.error('Full error stack:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -720,9 +1119,7 @@ route.post("/match-lowest", async (req, res) => {
   }
 });
 
-
-
-// 2. Beat Lowest Strategy Endpoint
+// 2. Beat Lowest Strategy Endpoint (Legacy - still supported)
 route.post("/beat-lowest", async (req, res) => {
   try {
     const {
@@ -748,17 +1145,16 @@ route.post("/beat-lowest", async (req, res) => {
       });
     }
 
-    // Use provided prices or fetch from eBay
     let competitorPrices;
     if (useProvidedPrices) {
-      competitorPrices = providedPrices;
+      competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
     } else {
       const oauthToken = process.env.AUTH_TOKEN;
       const appId = process.env.CLIENT_ID;
 
       const { itemDetails, competitorPrices: fetchedPrices } =
         await getItemDetailsAndPrices(itemId, oauthToken, appId);
-      competitorPrices = fetchedPrices;
+      competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
     }
 
     const result = beatLowestByAmount(currentPrice, competitorPrices, amount);
@@ -776,7 +1172,7 @@ route.post("/beat-lowest", async (req, res) => {
   }
 });
 
-// 3. Stay Above Strategy Endpoint
+// 3. Stay Above Strategy Endpoint (Legacy - still supported)
 route.post("/stay-above", async (req, res) => {
   try {
     const {
@@ -803,10 +1199,8 @@ route.post("/stay-above", async (req, res) => {
       });
     }
 
-    // Use provided prices or fetch from eBay
-      let competitorPrices;
+    let competitorPrices;
     if (useProvidedPrices) {
-      // ✅ Ensure it's always an array
       competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
     } else {
       const oauthToken = process.env.AUTH_TOKEN;
@@ -815,11 +1209,9 @@ route.post("/stay-above", async (req, res) => {
       const { itemDetails, competitorPrices: fetchedPrices } =
         await getItemDetailsAndPrices(itemId, oauthToken, appId);
       
-      // ✅ Ensure fetchedPrices is always an array
       competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
     }
 
-    // ✅ Add debug logging
     console.log('competitorPrices type:', typeof competitorPrices);
     console.log('competitorPrices isArray:', Array.isArray(competitorPrices));
     console.log('competitorPrices sample:', competitorPrices?.slice(0, 3));
@@ -828,7 +1220,7 @@ route.post("/stay-above", async (req, res) => {
     if (typeof percentage === "number") params.percentage = percentage;
     if (typeof amount === "number") params.amount = amount;
 
-    console.log('params:', params); // ✅ Debug params
+    console.log('params:', params);
 
     const result = stayAbove(currentPrice, competitorPrices, params);
     const validatedResult = validatePriceResult(result, constraints);
@@ -838,7 +1230,7 @@ route.post("/stay-above", async (req, res) => {
       itemId,
     });
   } catch (error) {
-    console.error('Full error stack:', error); // ✅ Better error logging
+    console.error('Full error stack:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -846,7 +1238,7 @@ route.post("/stay-above", async (req, res) => {
   }
 });
 
-// Process batch of items with the same strategy
+// Process batch of items with the same strategy (Legacy - still supported)
 route.post("/batch-process", async (req, res) => {
   try {
     const { items, strategy, strategyParams, constraints } = req.body;
@@ -955,3 +1347,74 @@ route.use((err, req, res, next) => {
 });
 
 export default route;
+
+
+//  /strategies/match-lowest
+
+// {
+//   "strategyName": "Match Competitors Price",
+//   "repricingRule": "MATCH_LOWEST",
+//   "noCompetitionAction": "USE_MAX_PRICE",
+//   "assignToActiveListings": false,
+//   "maxPrice": 150.00,
+//   "minPrice": 50.00,
+//   "listings": ["314851424639", "314851424640"]
+// }
+
+
+// POST /strategies/beat-lowest
+// {
+//   "strategyName": "Beat by $5",
+//   "repricingRule": "BEAT_LOWEST", 
+//   "beatBy": "AMOUNT",
+//   "value": 5.00,
+//   "noCompetitionAction": "USE_MAX_PRICE",
+//   "assignToActiveListings": true,
+//   "maxPrice": 200.00,
+//   "minPrice": 75.00,
+//   "listings": []
+// }
+
+// POST /strategies/stay-above
+// {
+//   "strategyName": "Stay 15% Above",
+//   "repricingRule": "STAY_ABOVE",
+//   "stayAboveBy": "PERCENTAGE", 
+//   "value": 0.15,
+//   "noCompetitionAction": "USE_MAX_PRICE",
+//   "assignToActiveListings": false,
+//   "maxPrice": 300.00,
+//   "minPrice": 90.00,
+//   "listings": ["314851424639"]
+// }
+
+
+// Stay Above by Dollar Amount:
+// {
+//   "strategyName": "Stay $10 Above",
+//   "repricingRule": "STAY_ABOVE",
+//   "stayAboveBy": "AMOUNT",
+//   "value": 10.00,
+//   "noCompetitionAction": "USE_MAX_PRICE",
+//   "assignToActiveListings": false,
+//   "maxPrice": 250.00,
+//   "minPrice": 80.00
+// }
+
+
+// /apply-strategy
+// {
+//   "strategyId": 1,
+//   "items": [
+//     {
+//       "itemId": "314851424639",
+//       "currentPrice": 84.5
+//     },
+//     {
+//       "itemId": "314851424640", 
+//       "currentPrice": 95.0
+//     }
+//   ],
+//   "useProvidedPrices": false,
+//   "competitorPrices": []
+// }

@@ -24,7 +24,9 @@ export default function CompetitorRuleForm() {
   const { ItemId, AllProducts, modifyProductsObj, sku } = useProductStore();
   const [product, setProduct] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assignToListings, setAssignToListings] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [findByIdentifiers, setFindByIdentifiers] = useState(false);
   const [error, setError] = useState("");
   const [oldPrice, setOldPrice] = useState(0);
   const navigate = useNavigate();
@@ -333,7 +335,7 @@ export default function CompetitorRuleForm() {
   return (
     <>
       <Container>
-        <Box sx={{ px: 4, py: 5, width: "100%", maxWidth: 700 }}>
+        <Box sx={{ px: 4, py: 5, width: "100%", maxWidth: 700 }} >
           {/* Alert */}
           <Collapse in={alertOpen}>
             <Alert
@@ -517,7 +519,7 @@ export default function CompetitorRuleForm() {
           control={
             <Checkbox
               checked={findByIdentifiers}
-              onChange={handleFindByIdentifiersChange}
+              // onChange={handleFindByIdentifiersChange}
               name="findByIdentifiers"
             />
           }
@@ -541,7 +543,7 @@ export default function CompetitorRuleForm() {
           control={
             <Checkbox
               checked={assignToListings}
-              onChange={handleAssignToListingsChange}
+              // onChange={handleAssignToListingsChange}
               name="assignToListings"
             />
           }
@@ -585,9 +587,10 @@ export default function CompetitorRuleForm() {
                 handleOpen();
               }}
             >
-              Add
+              Add Rule
             </Button>
           </Box>
+        </Box>
         </Box>
       </Container>
     </>
