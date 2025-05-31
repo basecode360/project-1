@@ -396,11 +396,12 @@ for (const item of ebayListings) {
                         textDecoration: "underline",
                       },
                     }}
-                    onClick={() => navigate("/home/edit-listing")}
+                    onClick={() => navigate("/home/update-strategy")}
                   >
                     {row.strategy}
                   </Typography>
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: "1px solid #ddd",

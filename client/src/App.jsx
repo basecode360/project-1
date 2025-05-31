@@ -9,9 +9,12 @@ import "./App.css";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import EditListing from "./pages/EditListing";
-import EditPrice from "./componentsForEditListing/PriceForm";
 import CompetitorDetails from "./componentsForEditListing/CompetitorDetails";
 import { userStore } from "./store/authStore";
+import PriceStrategy from "./pages/PriceStrategy";
+import EditProductPrice from "./pages/EditPrice";
+import AddStrategy from "./pages/AddStrategy";
+import CompetitorRule from "./pages/CompetitorRule";
 
 function App() {
   // State to manage login status
@@ -45,8 +48,11 @@ function App() {
           }
         >
           <Route path="edit-listing" element={<EditListing />} />
-          <Route path="edit-price" element={<EditPrice />} />
+          <Route path="edit-price" element={<EditProductPrice />} />
+          <Route path="update-strategy" element={<PriceStrategy />} />
           <Route path="competitors/:itemId" element={<CompetitorDetails />} />
+          <Route path="update-strategy/add-strategy" element={<AddStrategy />} />
+          <Route path="add-competitor-rule" element={<CompetitorRule />} />
 
         </Route>
       </Routes>
