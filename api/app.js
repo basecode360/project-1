@@ -13,6 +13,7 @@ import cors from 'cors';
 import authRoutes from './routes/authRoute.js';
 import pricingRoute from "./routes/pricingEngine.js" 
 import { priceTrackerRouter, checkPriceChanges } from "./routes/priceHistory.js";
+import competitorRulesRouter  from "./routes/competitorRule.js";
 
 
 
@@ -183,7 +184,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/pricing', pricingRoute);
 app.use("/api/price-history", priceTrackerRouter);
-
+app.use("/api/competitor-rules", competitorRulesRouter);
 // Start the price check interval
 setInterval(checkPriceChanges, 10 * 60 * 1000);
 
