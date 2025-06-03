@@ -198,7 +198,7 @@ const pricingStrategies = {
   getAllActiveWithStrategies: async () => {
     try {
       const response = await axios.get(
-        `${backend_url}/pricing-strategies/active-listings`
+        `${backend_url}/api/pricing-strategies/active-listings`
       );
       console.log("Get all active with strategies API response:", response);
       return response.data;

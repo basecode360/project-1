@@ -12,7 +12,7 @@ import ebayRoutes from './routes/ebayRoutes.js';
 import cors from 'cors';
 import authRoutes from './routes/authRoute.js';
 import pricingRoute from "./routes/pricingEngine.js" 
-import { priceTrackerRouter, checkPriceChanges } from "./routes/priceHistory.js";
+import priceTrackerRouter from "./routes/priceHistory.js";
 import competitorRulesRouter  from "./routes/competitorRule.js";
 
 
@@ -186,10 +186,10 @@ app.use('/api/pricing-strategies', pricingRoute);
 app.use("/api/price-history", priceTrackerRouter);
 app.use("/api/competitor-rules", competitorRulesRouter);
 // Start the price check interval
-setInterval(checkPriceChanges, 10 * 60 * 3000);
+// setInterval(checkPriceChanges, 10 * 60 * 3000);
 
-// Initial price check at startup
-checkPriceChanges();
+// // Initial price check at startup
+// checkPriceChanges();
 // ──────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 5000;

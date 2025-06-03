@@ -13,7 +13,7 @@ import apiService from "../api/apiService";
 import { useNavigate } from "react-router-dom";
 
 export default function EditPrice() {
-  const { ItemId, AllProducts, modifyProductsObj, sku } = useProductStore();
+  const { ItemId, AllProducts, modifyProductsObj, sku, modifyProductsArray } = useProductStore();
   const [product, setProduct] = useState([]);
   const [newPrice, setNewPrice] = useState(0);
   const [oldPrice, setOldPrice] = useState(0);
@@ -58,7 +58,9 @@ export default function EditPrice() {
         price: newPrice,
         sku: product[0].sku,
       });
+      
       navigate("/home");
+      modifyProductsArray(null);
       console.log(newPrice);
     } catch (error) {
       console.error("Error fetching eBay data:", error);

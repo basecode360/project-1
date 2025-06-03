@@ -38,7 +38,7 @@ export default function ListingsTable() {
   } = useProductStore()
   // Fetch data from eBay when component mounts
   useEffect(() => {
-    if (AllProducts.length > 0 && AllProducts[0].productId) {
+    if (AllProducts && AllProducts.length > 0 && AllProducts[0].productId) {
       setLoading(false);
       return;
     }
@@ -396,7 +396,11 @@ for (const item of ebayListings) {
                         textDecoration: "underline",
                       },
                     }}
-                    onClick={() => navigate("/home/update-strategy")}
+                    onClick={() => {
+                        modifyProductsId(row.productId)
+                      modifySku(row.sku ? row.sku: "")
+                      navigate("/home/update-strategy")
+                    }}
                   >
                     {row.strategy}
                   </Typography>

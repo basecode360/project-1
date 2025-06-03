@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import apiService from '../api/apiService';
 
 export default function EditStrategy() {
-  const { ItemId, AllProducts, modifyProductsObj} = useProductStore();
+  const { ItemId, AllProducts, modifyProductsObj, sku} = useProductStore();
   const [product, setProduct] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -49,7 +49,8 @@ export default function EditStrategy() {
   useEffect(() => {
     const fetchProductData = async () => {
       try {
-        setLoading(true);
+        console.log("product data fetching ", sku) 
+        setLoading(true); 
         const productObj = AllProducts.filter((item) =>
           item.sku ? item.sku === sku : item.productId === ItemId
         );
@@ -99,23 +100,31 @@ export default function EditStrategy() {
   // Fetch existing strategies and competitor rules
   const fetchExistingData = async () => {
     try {
-      // Fetch strategies for this product
-      const strategyResponse = await apiService.pricingStrategies.getStrategyFromProduct(ItemId);
-      if (strategyResponse.hasPricingStrategy) {
-        setAvailableStrategies([strategyResponse.pricingStrategy]);
-        setFormData(prev => ({
-          ...prev,
-          selectedStrategy: strategyResponse.pricingStrategy.PricingStrategy
-        }));
-      }
-
+        const strategyResponse = await apiService.pricingStrategies.getStrategyFromProduct(ItemId);
+    console.log("strategyResponse", strategyResponse);
+    
+    if (strategyResponse.hasPricingStrategy) {
+      // Keep the original structure but also add a normalized property for comparison
+      const strategyWithNormalizedName = {
+        ...strategyResponse.pricingStrategy,
+        // Add this property for internal use without changing the original structure
+        _normalizedName: strategyResponse.pricingStrategy.PricingStrategy || strategyResponse.pricingStrategy.strategyName || ""
+      };
+      
+      setAvailableStrategies([strategyWithNormalizedName]);
+      setFormData(prev => ({
+        ...prev,
+        selectedStrategy: strategyWithNormalizedName._normalizedName
+      }));
+    }
       // Fetch competitor rules for this product
       const ruleResponse = await apiService.competitorRules.getRuleFromProduct(ItemId);
+      console.log("ruleResponse", ruleResponse)
       if (ruleResponse.hasCompetitorRule) {
         setAvailableRules([ruleResponse.competitorRule]);
         setFormData(prev => ({
           ...prev,
-          selectedCompetitorRule: ruleResponse.rule.name
+          selectedCompetitorRule: ruleResponse.competitorRule.ruleName
         }));
       }
 
@@ -325,25 +334,33 @@ export default function EditStrategy() {
         {/* Form */}
         <Box display="flex" flexDirection="column" gap={3}>
           
-          {/* Pricing Strategy Section */}
-          <TextField
-            select
-            label="Pricing Strategy"
-            name="selectedStrategy"
-            value={formData.selectedStrategy}
-            onChange={handleInputChange}
-            sx={{
-              "& .MuiInputLabel-root": { fontSize: "16px" },
-              "& .MuiInputBase-root": { fontSize: "16px" },
-            }}
-          >
-            <MenuItem value="">Select a strategy</MenuItem>
-            {availableStrategies.map((strategy) => (
-              <MenuItem key={strategy.strategyName} value={strategy.strategyName}>
-                {strategy.strategyName} ({strategy.repricingRule})
-              </MenuItem>
-            ))}
-          </TextField>
+         <TextField
+  select
+  label="Pricing Strategy"
+  name="selectedStrategy"
+  value={formData.selectedStrategy || ""}
+  onChange={handleInputChange}
+  sx={{
+    "& .MuiInputLabel-root": { fontSize: "16px" },
+    "& .MuiInputBase-root": { fontSize: "16px" },
+  }}
+>
+  <MenuItem value="">Select a strategy</MenuItem>
+  {availableStrategies.map((strategy) => {
+    // Determine which property to use for display and value
+    const displayName = strategy.strategyName || strategy.PricingStrategy || "";
+    const valueToUse = strategy._normalizedName || displayName;
+    
+    return (
+      <MenuItem 
+        key={valueToUse} 
+        value={valueToUse}
+      >
+        {displayName} ({strategy.repricingRule})
+      </MenuItem>
+    );
+  })}
+</TextField>
 
           <Typography
             variant="body2"

@@ -415,99 +415,87 @@ async function makeEBayAPICall(xmlRequest, callName) {
 
 
 // Parse pricing strategy data from ItemSpecifics
-// Fixed parsePricingStrategyFromSpecifics function for your data format
-
 function parsePricingStrategyFromSpecifics(itemSpecifics, itemId) {
-  const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
-  const strategyData = {};
-
-  // Extract all strategy-related data
-  specificsArray.forEach(specific => {
-    if (specific?.Name && specific?.Value) {
-      const name = specific.Name;
-      const value = specific.Value;
-
-      // Capture all strategy-related fields
-      if (name.toLowerCase().includes('pricing') || 
-          name.toLowerCase().includes('strategy') || 
-          name.toLowerCase().includes('repricing') ||
-          name.toLowerCase().includes('beat') || 
-          name.toLowerCase().includes('stay') ||
-          name.toLowerCase().includes('above') ||
-          name.toLowerCase().includes('below') ||
-          name.toLowerCase().includes('match') ||
-          name.toLowerCase().includes('lowest') ||
-          name === 'NoCompetitionAction' ||
-          name === 'MaxPrice' || 
-          name === 'MinPrice' ||
-          name === 'BasePrice' ||
-          name === 'WeekendBoost' ||
-          name === 'HolidayBoost' ||
-          name === 'ClearanceThreshold' ||
-          name === 'CompetitorAdjustment' ||
-          name === 'RepricingFrequency') {
-        strategyData[name] = value;
-      }
-    }
-  });
-
-  console.log(`Found strategy data for item ${itemId}:`, strategyData);
-
-  if (Object.keys(strategyData).length === 0) {
-    console.log(`No strategy data found for item ${itemId}`);
+  // Filter for strategy-related specifics
+  const strategyRelatedSpecifics = itemSpecifics.filter(spec => 
+    spec.Name === "PricingStrategyName" ||
+    spec.Name === "RepricingRule" ||
+    spec.Name === "IsPricingStrategy" ||
+    spec.Name === "MaxPrice" ||
+    spec.Name === "MinPrice" ||
+    spec.Name === "BeatBy" ||
+    spec.Name === "BeatValue" ||
+    spec.Name === "StayAboveBy" ||
+    spec.Name === "StayAboveValue" ||
+    spec.Name === "NoCompetitionAction"
+  );
+  
+  // Check if we have any strategy data
+  if (!strategyRelatedSpecifics.length || !itemSpecifics.some(spec => spec.Name === "IsPricingStrategy")) {
+    console.log(`[Debug] No pricing strategy found for item ${itemId}`);
     return null;
   }
 
-  // Map your actual field names to the expected format
+  // Improved findValue function that properly handles different response formats
+const findValue = (name) => {
+  const spec = itemSpecifics.find(s => s.Name === name);
+  if (!spec) return null;
+  
+  console.log(`[Debug] Finding value for ${name}:`, spec);
+  console.log(`[Debug] Value type for ${name}:`, typeof spec.Value);
+  
+  // Handle different possible value formats from eBay API
+  if (typeof spec.Value === 'string') {
+    return spec.Value;
+  } else if (Array.isArray(spec.Value)) {
+    return spec.Value[0] || '';
+  } else if (spec.Value && typeof spec.Value === 'object') {
+    // Some XML parsers might return objects
+    return spec.Value.toString();
+  }
+  return null;};
+  // Extract strategy data
+  const strategyName = findValue("PricingStrategyName");
+  const repricingRule = findValue("RepricingRule");
+  
+  if (!strategyName || !repricingRule) {
+    console.log(`[Debug] Missing required strategy fields for item ${itemId}`);
+    return null;
+  }
+
+  // Build the strategy object
   const strategy = {
-    itemId,
-    // Handle both naming conventions
-    strategyName: strategyData.PricingStrategyName || 
-                  strategyData.StrategyName || 
-                  `${strategyData.PricingStrategy || 'Unknown'} Strategy`, // Convert "time-based" to "time-based Strategy"
-    
-    // Map your strategy types to standard repricing rules
-    repricingRule: mapStrategyToRepricingRule(strategyData),
-    
-    noCompetitionAction: strategyData.NoCompetitionAction || "USE_MAX_PRICE",
-    
-    maxPrice: strategyData.MaxPrice ? parseFloat(strategyData.MaxPrice) : null,
-    minPrice: strategyData.MinPrice ? parseFloat(strategyData.MinPrice) : null,
-    
-    createdAt: strategyData.StrategyCreatedAt || 
-               strategyData.strategy_created_at ||
-               null,
-
-    // Add your specific strategy fields
-    basePrice: strategyData.BasePrice ? parseFloat(strategyData.BasePrice) : null,
-    weekendBoost: strategyData.WeekendBoost ? parseFloat(strategyData.WeekendBoost) : null,
-    holidayBoost: strategyData.HolidayBoost ? parseFloat(strategyData.HolidayBoost) : null,
-    clearanceThreshold: strategyData.ClearanceThreshold ? parseFloat(strategyData.ClearanceThreshold) : null,
-    competitorAdjustment: strategyData.CompetitorAdjustment ? parseFloat(strategyData.CompetitorAdjustment) : null,
-    repricingFrequency: strategyData.RepricingFrequency || null,
-
-    // Original strategy type for reference
-    originalStrategyType: strategyData.PricingStrategy || strategyData.RepricingRule || null
+    name: strategyName,
+    repricingRule: repricingRule,
+    noCompetitionAction: findValue("NoCompetitionAction") || "USE_MAX_PRICE"
   };
 
-  // Handle beat/stay above parameters if they exist
-  if (strategyData.BeatBy || strategyData.beat_by) {
-    strategy.beatBy = strategyData.BeatBy || strategyData.beat_by;
-  }
-  if (strategyData.BeatValue || strategyData.beat_value) {
-    strategy.beatValue = parseFloat(strategyData.BeatValue || strategyData.beat_value);
-  }
-  if (strategyData.StayAboveBy || strategyData.stay_above_by) {
-    strategy.stayAboveBy = strategyData.StayAboveBy || strategyData.stay_above_by;
-  }
-  if (strategyData.StayAboveValue || strategyData.stay_above_value) {
-    strategy.stayAboveValue = parseFloat(strategyData.StayAboveValue || strategyData.stay_above_value);
+  // Add rule-specific parameters
+  if (repricingRule === "BEAT_LOWEST") {
+    strategy.beatBy = findValue("BeatBy");
+    const beatValue = findValue("BeatValue");
+    strategy.value = beatValue ? parseFloat(beatValue) : null;
   }
 
-  console.log(`Parsed strategy for item ${itemId}:`, strategy);
+  if (repricingRule === "STAY_ABOVE") {
+    strategy.stayAboveBy = findValue("StayAboveBy");
+    const stayAboveValue = findValue("StayAboveValue");
+    strategy.value = stayAboveValue ? parseFloat(stayAboveValue) : null;
+  }
+
+  // Add price limits
+  const maxPrice = findValue("MaxPrice");
+  if (maxPrice) {
+    strategy.maxPrice = parseFloat(maxPrice);
+  }
+
+  const minPrice = findValue("MinPrice");
+  if (minPrice) {
+    strategy.minPrice = parseFloat(minPrice);
+  }
+
   return strategy;
 }
-
 // Helper function to map your strategy types to standard repricing rules
 function mapStrategyToRepricingRule(strategyData) {
   // Check if it's the new format first
@@ -542,7 +530,7 @@ function mapStrategyToRepricingRule(strategyData) {
 }
 
 // Updated API endpoint with the fixed parser
-router.get("/pricing-strategies/products/:itemId", async (req, res) => {
+router.get("/products/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
     const authToken = process.env.AUTH_TOKEN;
@@ -577,8 +565,17 @@ router.get("/pricing-strategies/products/:itemId", async (req, res) => {
 
     // Extract pricing strategy data from ItemSpecifics
     const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+    console.log(`[Debug] All item specifics for ${itemId}:`, JSON.stringify(itemSpecifics));
+    
     const pricingStrategy = parsePricingStrategyFromSpecifics(itemSpecifics, itemId);
     const hasPricingStrategy = pricingStrategy !== null;
+
+    // Add debug info
+    const strategyRelatedSpecificsCount = itemSpecifics.filter(spec => 
+      spec.Name === "PricingStrategyName" ||
+      spec.Name === "RepricingRule" ||
+      spec.Name === "IsPricingStrategy"
+    ).length;
 
     res.json({
       success: true,
@@ -591,6 +588,12 @@ router.get("/pricing-strategies/products/:itemId", async (req, res) => {
         currency: item.StartPrice?.__attributes__?.currencyID || item.Currency || "USD",
         listingType: item.ListingType,
         condition: item.ConditionDisplayName
+      },
+      debug: {
+        totalItemSpecifics: itemSpecifics.length,
+        hasAnyStrategyData: strategyRelatedSpecificsCount > 0,
+        strategyRelatedSpecificsCount,
+        allItemSpecifics: itemSpecifics.map(spec => ({ name: spec.Name, value: spec.Value }))
       }
     });
 
@@ -608,57 +611,51 @@ router.get("/pricing-strategies/products/:itemId", async (req, res) => {
 // ===============================
 
 // Updated createPricingStrategySpecifics function to match your existing data format
-function createPricingStrategySpecifics(strategyData) {
-  const {
-    strategyName,
-    repricingRule,
-    beatBy,
-    stayAboveBy,
-    value,
-    noCompetitionAction = "USE_MAX_PRICE",
-    maxPrice,
-    minPrice,
-    basePrice,
-    weekendBoost,
-    holidayBoost,
-    clearanceThreshold,
-    competitorAdjustment,
-    repricingFrequency
-  } = strategyData;
-
-  const strategySpecifics = [
-    { name: "PricingStrategyName", value: strategyName }, // Use full name for new strategies
-    { name: "PricingStrategy", value: repricingRule.toLowerCase().replace('_', '-') }, // Also add short name for compatibility
+function createPricingStrategySpecifics({
+  strategyName,
+  repricingRule,
+  beatBy,
+  stayAboveBy,
+  value,
+  noCompetitionAction = "USE_MAX_PRICE",
+  maxPrice,
+  minPrice
+}) {
+  // Create basic strategy specifics
+  const specifics = [
+    { name: "PricingStrategyName", value: strategyName },
     { name: "RepricingRule", value: repricingRule },
     { name: "NoCompetitionAction", value: noCompetitionAction }
   ];
 
-  if (maxPrice) strategySpecifics.push({ name: "MaxPrice", value: maxPrice.toString() });
-  if (minPrice) strategySpecifics.push({ name: "MinPrice", value: minPrice.toString() });
-
-  // Add strategy-specific parameters
-  if (repricingRule === "BEAT_LOWEST" && beatBy && value) {
-    strategySpecifics.push({ name: "BeatBy", value: beatBy });
-    strategySpecifics.push({ name: "BeatValue", value: value.toString() });
+  // Add rule-specific parameters
+  if (repricingRule === "BEAT_LOWEST" && beatBy) {
+    specifics.push({ name: "BeatBy", value: beatBy });
+    if (value !== undefined) {
+      specifics.push({ name: "BeatValue", value: value.toString() });
+    }
   }
 
-  if (repricingRule === "STAY_ABOVE" && stayAboveBy && value) {
-    strategySpecifics.push({ name: "StayAboveBy", value: stayAboveBy });
-    strategySpecifics.push({ name: "StayAboveValue", value: value.toString() });
+  if (repricingRule === "STAY_ABOVE" && stayAboveBy) {
+    specifics.push({ name: "StayAboveBy", value: stayAboveBy });
+    if (value !== undefined) {
+      specifics.push({ name: "StayAboveValue", value: value.toString() });
+    }
   }
 
-  // Add time-based strategy parameters
-  if (basePrice) strategySpecifics.push({ name: "BasePrice", value: basePrice.toString() });
-  if (weekendBoost) strategySpecifics.push({ name: "WeekendBoost", value: weekendBoost.toString() });
-  if (holidayBoost) strategySpecifics.push({ name: "HolidayBoost", value: holidayBoost.toString() });
-  if (clearanceThreshold) strategySpecifics.push({ name: "ClearanceThreshold", value: clearanceThreshold.toString() });
-  if (competitorAdjustment) strategySpecifics.push({ name: "CompetitorAdjustment", value: competitorAdjustment.toString() });
-  if (repricingFrequency) strategySpecifics.push({ name: "RepricingFrequency", value: repricingFrequency });
+  // Add price limits
+  if (maxPrice !== undefined) {
+    specifics.push({ name: "MaxPrice", value: maxPrice.toString() });
+  }
 
-  // Add timestamp
-  strategySpecifics.push({ name: "StrategyCreatedAt", value: new Date().toISOString() });
+  if (minPrice !== undefined) {
+    specifics.push({ name: "MinPrice", value: minPrice.toString() });
+  }
 
-  return strategySpecifics;
+  // Add a unique identifier to ensure this is recognized as a pricing strategy
+  specifics.push({ name: "IsPricingStrategy", value: "true" });
+  
+  return specifics;
 }
 /**
  * ===============================
@@ -737,9 +734,18 @@ router.post("/products/:itemId", async (req, res) => {
         <Item>
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
+            <!-- Add required Brand and Type fields to avoid eBay errors -->
+            <NameValueList>
+              <Name>Brand</Name>
+              <Value>YourBrandName</Value>
+            </NameValueList>
+            <NameValueList>
+              <Name>Type</Name>
+              <Value>YourTypeName</Value>
+            </NameValueList>
             ${strategySpecifics.map(spec => `
             <NameValueList>
-              <n>${spec.name}</n>
+              <Name>${spec.name}</Name>
               <Value>${spec.value}</Value>
             </NameValueList>
             `).join('')}
@@ -781,7 +787,6 @@ router.post("/products/:itemId", async (req, res) => {
     });
   }
 });
-
 /**
  * ===============================
  * 2. CREATE PRICING STRATEGY AND ASSIGN TO ALL ACTIVE LISTINGS

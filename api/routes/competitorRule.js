@@ -232,51 +232,46 @@ router.post("/products/:itemId", async (req, res) => {
  * ===============================
  */
 
-// POST /apply-competitor-rule/:itemId
+// Apply competitor rule while preserving pricing strategy
 router.post("/apply-competitor-rule/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
-    const {
-      ruleName,
-      minPercentOfCurrentPrice,
-      maxPercentOfCurrentPrice,
-      excludeCountries = [],
-      excludeConditions = [],
-      excludeProductTitleWords = [],
-      excludeSellers = [],
-      findCompetitorsBasedOnMPN = false
-    } = req.body;
-
+    const ruleOptions = req.body;
     const authToken = process.env.AUTH_TOKEN;
 
     if (!authToken) {
       return res.status(400).json({ success: false, message: "eBay auth token is required" });
     }
 
-    if (!ruleName) {
-      return res.status(400).json({ success: false, message: "Rule name is required" });
-    }
+    // First, retrieve existing item specifics
+    const getItemXml = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
 
-    // Validate percent inputs
-    if (minPercentOfCurrentPrice && typeof minPercentOfCurrentPrice !== "number") {
-      return res.status(400).json({ success: false, message: "Min percent must be a number" });
-    }
-    if (maxPercentOfCurrentPrice && typeof maxPercentOfCurrentPrice !== "number") {
-      return res.status(400).json({ success: false, message: "Max percent must be a number" });
-    }
+    const getItemResponse = await makeEBayAPICall(getItemXml, "GetItem");
+    const getItemResult = await parseXMLResponse(getItemResponse);
+    const item = isEBayResponseSuccessful(getItemResult, "GetItem");
 
-    // Build rule specifics
-    const ruleSpecifics = createCompetitorRuleSpecifics({
-      ruleName,
-      minPercentOfCurrentPrice,
-      maxPercentOfCurrentPrice,
-      excludeCountries,
-      excludeConditions,
-      excludeProductTitleWords,
-      excludeSellers,
-      findCompetitorsBasedOnMPN
-    });
+    // Extract existing item specifics
+    const existingSpecifics = item.Item.ItemSpecifics?.NameValueList || [];
+    
+    // Filter out competitor rule related specifics if they exist
+    const nonCompetitorRuleSpecifics = existingSpecifics.filter(spec => 
+      !isCompetitorRuleSpecific(spec.Name)
+    );
 
+    // Create new competitor rule specifics
+    const competitorRuleSpecifics = createCompetitorRuleSpecifics(ruleOptions);
+
+    // Build XML for the update with both sets of specifics
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
       <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
         <RequesterCredentials>
@@ -285,12 +280,36 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
         <Item>
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
-            ${ruleSpecifics.map(spec => `
+            <!-- Include existing non-competitor rule specifics -->
+            ${nonCompetitorRuleSpecifics.map(spec => `
               <NameValueList>
-                <name>${spec.name}</name>
+                <Name>${spec.Name}</Name>
+                <Value>${spec.Value}</Value>
+              </NameValueList>
+            `).join('')}
+            
+            <!-- Add new competitor rule specifics -->
+            ${competitorRuleSpecifics.map(spec => `
+              <NameValueList>
+                <Name>${spec.name}</Name>
                 <Value>${spec.value}</Value>
               </NameValueList>
             `).join('')}
+            
+            <!-- Ensure Brand and Type are present -->
+            ${!nonCompetitorRuleSpecifics.some(spec => spec.Name === "Brand") ? `
+              <NameValueList>
+                <Name>Brand</Name>
+                <Value>YourBrandName</Value>
+              </NameValueList>
+            ` : ''}
+            
+            ${!nonCompetitorRuleSpecifics.some(spec => spec.Name === "Type") ? `
+              <NameValueList>
+                <Name>Type</Name>
+                <Value>YourTypeName</Value>
+              </NameValueList>
+            ` : ''}
           </ItemSpecifics>
         </Item>
       </ReviseItemRequest>
@@ -302,7 +321,7 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Competitor rule applied successfully to product",
+      message: "Competitor rule applied successfully while preserving pricing strategy",
       itemId,
       ebayResponse: {
         itemId: response.ItemID,
@@ -317,6 +336,39 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
   }
 });
 
+// Helper function to identify competitor rule specifics
+function isCompetitorRuleSpecific(name) {
+  const competitorRuleSpecificNames = [
+    "RuleName", 
+    "MinPercentOfCurrentPrice", 
+    "MaxPercentOfCurrentPrice",
+    "ExcludeCountry", 
+    "ExcludeCondition",
+    "ExcludeProductTitleWord", 
+    "ExcludeSeller",
+    "FindCompetitorsBasedOnMPN"
+  ];
+  
+  return competitorRuleSpecificNames.includes(name);
+}
+
+// Similar helper for pricing strategy specifics
+function isPricingStrategySpecific(name) {
+  const pricingStrategySpecificNames = [
+    "PricingStrategyName",
+    "RepricingRule",
+    "NoCompetitionAction",
+    "BeatBy",
+    "BeatValue",
+    "StayAboveBy",
+    "StayAboveValue",
+    "MaxPrice",
+    "MinPrice",
+    "IsPricingStrategy"
+  ];
+  
+  return pricingStrategySpecificNames.includes(name);
+}
 
 router.post("/assign-to-all-active", async (req, res) => {
   try {
