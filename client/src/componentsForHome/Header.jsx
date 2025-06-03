@@ -37,7 +37,7 @@ export default function Header({ handleLogout }) {
     >
       <Toolbar sx={{justifyContent: "space-around", gap: 42, minHeight: 70, px: 4 }}>
         <Box display="flex" alignItems="center">
-          <img src={logo} alt="Logo" width="140px" height="63px" />
+          <img src={logo} alt="Logo" width="140px" height="63px" onClick={() => navigate("/home")}/>
         </Box>
 
         <Box display="flex" alignItems="center" gap={4}>

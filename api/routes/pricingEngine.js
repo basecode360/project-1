@@ -4,11 +4,8 @@ import axios from "axios";
 import Bottleneck from "bottleneck";
 
 // Initialize Express app
-const route = express.Router();
+const router = express.Router();
 
-// In-memory storage for strategies (replace with your database)
-let strategies = [];
-let strategyIdCounter = 1;
 
 // Middleware
 const limiter = new Bottleneck({
@@ -102,43 +99,9 @@ async function fetchCompetitorPrices(itemId, title, categoryId, accessToken) {
   }
 }
 
-const cache = {};
-
-function getCachedData(key) {
-  if (cache[key] && cache[key].expires > Date.now()) {
-    return cache[key].data;
-  }
-  return null;
-}
-
-function setCachedData(key, data, ttlSeconds = 3600, isMock = false) {
-  cache[key] = {
-    data,
-    expires: Date.now() + ttlSeconds * 1000,
-    isMock,
-  };
-}
 
 // Optional: Generate mock data for testing when rate limited
-// Make sure this function is present and not commented out
-function generateMockCompetitorPrices(itemId) {
-  console.log(`Generating mock data for item ${itemId} due to rate limits`);
 
-  // Use itemId as seed for consistent mock data
-  const seed = parseInt(itemId.slice(-6), 10);
-  const basePrice = (seed % 100) + 20; // between $20 and $119
-
-  const count = 3 + (seed % 5); // 3-7 competitor prices
-  const prices = [];
-
-  for (let i = 0; i < count; i++) {
-    // Vary prices within ±15% of base price
-    const variation = 0.85 + ((seed * (i + 1)) % 30) / 100;
-    prices.push(+(basePrice * variation).toFixed(2));
-  }
-
-  return prices;
-}
 
 /**
  * Get detailed information about an eBay item using the Trading API
@@ -312,34 +275,6 @@ async function getItemDetails(itemId, authToken) {
   }
 }
 
-/**
- * Add caching to competitor price fetching
- */
-async function fetchCompetitorPricesWithCache(
-  itemId,
-  appId,
-  title,
-  categoryId
-) {
-  const cacheKey = `${itemId}_${title}`;
-
-  // Check if we have a valid cache entry
-  if (cache[cacheKey] && cache[cacheKey].timestamp > Date.now() - CACHE_TTL) {
-    console.log(`Using cached prices for ${itemId}`);
-    return cache[cacheKey].prices;
-  }
-
-  // If not cached or expired, fetch fresh data
-  const prices = await fetchCompetitorPrices(itemId, appId, title, categoryId);
-
-  // Cache the result
-  cache[cacheKey] = {
-    timestamp: Date.now(),
-    prices,
-  };
-
-  return prices;
-}
 
 // Create a limiter for eBay API
 const ebayLimiter = new Bottleneck({
@@ -352,248 +287,6 @@ const ebayLimiter = new Bottleneck({
 // Wrap fetch functions with the limiter
 // const throttledFetchCompetitorPrices = ebayLimiter.wrap(fetchCompetitorPrices);
 const throttledGetItemDetails = ebayLimiter.wrap(getItemDetails);
-
-/**
- * Pricing Strategy Implementations
- */
-
-// 1. Match Lowest Strategy
-function matchLowest(currentPrice, competitorPrices) {
-  if (!Array.isArray(competitorPrices)) {
-    console.warn('competitorPrices is not an array:', competitorPrices);
-    return { success: false, message: 'Invalid competitor prices data' };
-  }
-  
-  if (!competitorPrices || competitorPrices.length === 0) {
-    return {
-      success: false,
-      message: "No competitor prices available",
-      newPrice: currentPrice,
-    };
-  }
-
-  // ✅ Handle both arrays of numbers and arrays of objects
-  let lowestPrice;
-  
-  try {
-    // Check if first element is a number or object
-    if (typeof competitorPrices[0] === 'number') {
-      // Array of numbers: [89.99, 95.50, 87.00]
-      lowestPrice = Math.min(...competitorPrices);
-    } else if (competitorPrices[0] && typeof competitorPrices[0] === 'object') {
-      // Array of objects: [{price: 89.99}, {price: 95.50}]
-      const prices = competitorPrices
-        .map(item => item.price || item.value || item.amount || 0)
-        .filter(price => price > 0);
-      
-      if (prices.length === 0) {
-        return {
-          success: false,
-          message: "No valid competitor prices found",
-          newPrice: currentPrice,
-        };
-      }
-      
-      lowestPrice = Math.min(...prices);
-    } else {
-      throw new Error('Invalid competitor price format');
-    }
-  } catch (error) {
-    console.error('Error processing competitor prices:', error);
-    console.log('competitorPrices sample:', competitorPrices.slice(0, 3));
-    return {
-      success: false,
-      message: "Error processing competitor prices: " + error.message,
-      newPrice: currentPrice,
-    };
-  }
-
-  return {
-    success: true,
-    message: "Price matched to lowest competitor",
-    oldPrice: currentPrice,
-    newPrice: lowestPrice,
-    strategy: "MATCH_LOWEST",
-    competitorPrices,
-  };
-}
-
-// 2. Beat Lowest Strategy
-function beatLowestByAmount(currentPrice, competitorPrices, amount) {
-  if (!Array.isArray(competitorPrices)) {
-    console.warn('competitorPrices is not an array:', competitorPrices);
-    return { success: false, message: 'Invalid competitor prices data' };
-  }
-
-  if (!competitorPrices || competitorPrices.length === 0) {
-    return {
-      success: false,
-      message: "No competitor prices available",
-      newPrice: currentPrice,
-    };
-  }
-
-  if (typeof amount !== "number" || amount <= 0) {
-    return {
-      success: false,
-      message: "Invalid amount: Must be a positive number",
-      newPrice: currentPrice,
-    };
-  }
-
-  // Extract prices safely
-  const prices = competitorPrices.map(item => {
-    if (typeof item === 'number') return item;
-    if (typeof item === 'object') return item.price || item.value || item.amount || 0;
-    return parseFloat(item) || 0;
-  }).filter(price => price > 0);
-
-  if (prices.length === 0) {
-    return {
-      success: false,
-      message: "No valid competitor prices found",
-      newPrice: currentPrice,
-    };
-  }
-
-  const lowestPrice = Math.min(...prices);
-  const newPrice = lowestPrice - amount;
-
-  // Don't allow negative prices
-  if (newPrice <= 0) {
-    return {
-      success: false,
-      message: "Calculated price would be zero or negative",
-      oldPrice: currentPrice,
-      calculatedPrice: newPrice,
-      newPrice: currentPrice,
-      competitorPrices: prices,
-    };
-  }
-
-  return {
-    success: true,
-    message: `Price set to $${amount.toFixed(2)} below lowest competitor`,
-    oldPrice: currentPrice,
-    newPrice: newPrice,
-    strategy: "BEAT_LOWEST",
-    strategyParams: { amount },
-    competitorPrices: prices,
-  };
-}
-
-// 3. Stay Above Strategy
-function stayAbove(currentPrice, competitorPrices, params = {}) {
-  // ✅ Guard against non-arrays
-  if (!Array.isArray(competitorPrices)) {
-    console.warn('competitorPrices is not an array:', competitorPrices);
-    return { success: false, message: 'Invalid competitor prices data' };
-  }
-
-  // ✅ Handle empty arrays
-  if (competitorPrices.length === 0) {
-    return {
-      success: false,
-      message: "No competitor prices available",
-      newPrice: currentPrice,
-    };
-  }
-
-  // ✅ Extract numeric values safely
-  const prices = competitorPrices.map(item => {
-    if (typeof item === 'number') return item;
-    if (typeof item === 'object') return item.price || item.value || item.amount || 0;
-    return parseFloat(item) || 0;
-  }).filter(price => price > 0);
-
-  if (prices.length === 0) {
-    return {
-      success: false,
-      message: "No valid competitor prices found",
-      newPrice: currentPrice,
-    };
-  }
-
-  // Find lowest competitor price
-  const lowestPrice = Math.min(...prices);
-  
-  let newPrice;
-  const { percentage, amount } = params;
-
-  if (percentage && typeof percentage === 'number') {
-    // Stay above by percentage
-    newPrice = lowestPrice * (1 + percentage);
-  } else if (amount && typeof amount === 'number') {
-    // Stay above by fixed amount
-    newPrice = lowestPrice + amount;
-  } else {
-    return {
-      success: false,
-      message: "Either percentage or amount parameter is required",
-      newPrice: currentPrice,
-    };
-  }
-
-  return {
-    success: true,
-    message: `Price set to stay above competitors`,
-    oldPrice: currentPrice,
-    newPrice: parseFloat(newPrice.toFixed(2)),
-    strategy: "STAY_ABOVE",
-    lowestCompetitorPrice: lowestPrice,
-    competitorPrices: prices,
-  };
-}
-
-// Validation helper
-function validatePriceResult(result, constraints = {}) {
-  const { newPrice } = result;
-  const { minPrice, maxPrice, maxChange } = constraints;
-
-  // Already failed
-  if (!result.success) return result;
-
-  // Check minimum price constraint
-  if (minPrice && newPrice < minPrice) {
-    return {
-      ...result,
-      success: false,
-      message: `Calculated price ${newPrice.toFixed(
-        2
-      )} is below minimum allowed ${minPrice.toFixed(2)}`,
-      calculatedPrice: newPrice,
-      newPrice: result.oldPrice,
-    };
-  }
-
-  // Check maximum price constraint
-  if (maxPrice && newPrice > maxPrice) {
-    return {
-      ...result,
-      success: false,
-      message: `Calculated price ${newPrice.toFixed(
-        2
-      )} is above maximum allowed ${maxPrice.toFixed(2)}`,
-      calculatedPrice: newPrice,
-      newPrice: result.oldPrice,
-    };
-  }
-
-  // Check maximum price change
-  if (maxChange && Math.abs(newPrice - result.oldPrice) > maxChange) {
-    return {
-      ...result,
-      success: false,
-      message: `Price change of ${Math.abs(newPrice - result.oldPrice).toFixed(
-        2
-      )} exceeds maximum allowed change of ${maxChange.toFixed(2)}`,
-      calculatedPrice: newPrice,
-      newPrice: result.oldPrice,
-    };
-  }
-
-  return result;
-}
 
 /**
  * Helper function to get item details and competitor prices
@@ -613,411 +306,12 @@ async function getItemDetailsAndPrices(itemId, oauthToken, appId) {
   return { itemDetails, competitorPrices };
 }
 
-// ===============================
-// STRATEGY MANAGEMENT APIs
-// ===============================
-
-// 1. Create Match Lowest Strategy
-route.post("/strategies/match-lowest", async (req, res) => {
-  try {
-    const {
-      strategyName,
-      repricingRule = "MATCH_LOWEST",
-      noCompetitionAction = "USE_MAX_PRICE",
-      assignToActiveListings = false,
-      maxPrice,
-      minPrice,
-      listings = []
-    } = req.body;
-
-    if (!strategyName || strategyName.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Strategy name is required"
-      });
-    }
-
-    const strategy = {
-      id: strategyIdCounter++,
-      strategyName: strategyName.trim(),
-      repricingRule,
-      type: "MATCH_LOWEST",
-      noCompetitionAction,
-      assignToActiveListings,
-      constraints: {
-        maxPrice: maxPrice || null,
-        minPrice: minPrice || null
-      },
-      listings,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      isActive: true
-    };
-
-    strategies.push(strategy);
-
-    res.status(201).json({
-      success: true,
-      message: "Match Lowest strategy created successfully",
-      strategy
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// 2. Create Beat Lowest Strategy  
-route.post("/strategies/beat-lowest", async (req, res) => {
-  try {
-    const {
-      strategyName,
-      repricingRule = "BEAT_LOWEST", 
-      beatBy, // "AMOUNT" or "PERCENTAGE"
-      value, // The actual amount or percentage value
-      noCompetitionAction = "USE_MAX_PRICE",
-      assignToActiveListings = false,
-      maxPrice,
-      minPrice,
-      listings = []
-    } = req.body;
-
-    if (!strategyName || strategyName.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Strategy name is required"
-      });
-    }
-
-    if (!beatBy || !["AMOUNT", "PERCENTAGE"].includes(beatBy)) {
-      return res.status(400).json({
-        success: false,
-        message: "beatBy must be either 'AMOUNT' or 'PERCENTAGE'"
-      });
-    }
-
-    if (typeof value !== "number" || value <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Value must be a positive number"
-      });
-    }
-
-    const strategy = {
-      id: strategyIdCounter++,
-      strategyName: strategyName.trim(),
-      repricingRule,
-      type: "BEAT_LOWEST",
-      beatBy,
-      value,
-      noCompetitionAction,
-      assignToActiveListings,
-      constraints: {
-        maxPrice: maxPrice || null,
-        minPrice: minPrice || null
-      },
-      listings,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      isActive: true
-    };
-
-    strategies.push(strategy);
-
-    res.status(201).json({
-      success: true,
-      message: "Beat Lowest strategy created successfully",
-      strategy
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// 3. Create Stay Above Strategy
-route.post("/strategies/stay-above", async (req, res) => {
-  try {
-    const {
-      strategyName,
-      repricingRule = "STAY_ABOVE",
-      stayAboveBy, // "AMOUNT" or "PERCENTAGE"
-      value, // The actual amount or percentage value
-      noCompetitionAction = "USE_MAX_PRICE",
-      assignToActiveListings = false,
-      maxPrice,
-      minPrice,
-      listings = []
-    } = req.body;
-
-    if (!strategyName || strategyName.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Strategy name is required"
-      });
-    }
-
-    if (!stayAboveBy || !["AMOUNT", "PERCENTAGE"].includes(stayAboveBy)) {
-      return res.status(400).json({
-        success: false,
-        message: "stayAboveBy must be either 'AMOUNT' or 'PERCENTAGE'"
-      });
-    }
-
-    if (typeof value !== "number" || value <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Value must be a positive number"
-      });
-    }
-
-    const strategy = {
-      id: strategyIdCounter++,
-      strategyName: strategyName.trim(),
-      repricingRule,
-      type: "STAY_ABOVE",
-      stayAboveBy,
-      value,
-      noCompetitionAction,
-      assignToActiveListings,
-      constraints: {
-        maxPrice: maxPrice || null,
-        minPrice: minPrice || null
-      },
-      listings,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      isActive: true
-    };
-
-    strategies.push(strategy);
-
-    res.status(201).json({
-      success: true,
-      message: "Stay Above strategy created successfully",
-      strategy
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// 4. Get all strategies
-route.get("/strategies", async (req, res) => {
-  try {
-    const { type, isActive } = req.query;
-    
-    let filteredStrategies = strategies;
-
-    if (type) {
-      filteredStrategies = filteredStrategies.filter(s => 
-        s.type.toLowerCase() === type.toLowerCase()
-      );
-    }
-
-    if (isActive !== undefined) {
-      const activeFilter = isActive === 'true';
-      filteredStrategies = filteredStrategies.filter(s => 
-        s.isActive === activeFilter
-      );
-    }
-
-    res.json({
-      success: true,
-      count: filteredStrategies.length,
-      strategies: filteredStrategies
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// 5. Get strategy by ID
-route.get("/strategies/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const strategy = strategies.find(s => s.id === parseInt(id));
-
-    if (!strategy) {
-      return res.status(404).json({
-        success: false,
-        message: "Strategy not found"
-      });
-    }
-
-    res.json({
-      success: true,
-      strategy
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// 6. Apply strategy to items
-route.post("/apply-strategy", async (req, res) => {
-  try {
-    const {
-      strategyId,
-      items, // Array of {itemId, currentPrice}
-      useProvidedPrices = false,
-      competitorPrices: providedPrices = []
-    } = req.body;
-
-    if (!strategyId) {
-      return res.status(400).json({
-        success: false,
-        message: "Strategy ID is required"
-      });
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Items must be a non-empty array"
-      });
-    }
-
-    // Find the strategy
-    const strategy = strategies.find(s => s.id === parseInt(strategyId));
-    if (!strategy) {
-      return res.status(404).json({
-        success: false,
-        message: "Strategy not found"
-      });
-    }
-
-    if (!strategy.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Strategy is not active"
-      });
-    }
-
-    const oauthToken = process.env.AUTH_TOKEN;
-    const appId = process.env.CLIENT_ID;
-    const results = [];
-
-    for (const item of items) {
-      try {
-        const { itemId, currentPrice } = item;
-
-        if (!itemId || typeof currentPrice !== "number" || currentPrice <= 0) {
-          results.push({
-            success: false,
-            message: "Invalid item data",
-            itemId: item.itemId || "unknown",
-          });
-          continue;
-        }
-
-        // Get competitor prices
-        let competitorPrices;
-        if (useProvidedPrices) {
-          competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
-        } else {
-          const { itemDetails, competitorPrices: fetchedPrices } = await getItemDetailsAndPrices(
-            itemId,
-            oauthToken,
-            appId
-          );
-          competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
-        }
-
-        // Apply strategy based on type
-        let result;
-
-        if (strategy.type === "MATCH_LOWEST") {
-          result = matchLowest(currentPrice, competitorPrices);
-        } else if (strategy.type === "BEAT_LOWEST") {
-          if (strategy.beatBy === "AMOUNT") {
-            result = beatLowestByAmount(currentPrice, competitorPrices, strategy.value);
-          } else {
-            // Handle percentage beat lowest if needed
-            result = {
-              success: false,
-              message: "Percentage beat lowest not implemented yet",
-              newPrice: currentPrice
-            };
-          }
-        } else if (strategy.type === "STAY_ABOVE") {
-          const params = {};
-          if (strategy.stayAboveBy === "AMOUNT") {
-            params.amount = strategy.value;
-          } else if (strategy.stayAboveBy === "PERCENTAGE") {
-            params.percentage = strategy.value;
-          }
-          result = stayAbove(currentPrice, competitorPrices, params);
-        }
-
-        // Validate result with strategy constraints
-        const validatedResult = validatePriceResult(result, strategy.constraints);
-
-        results.push({
-          ...validatedResult,
-          itemId,
-          strategyApplied: strategy.strategyName,
-          strategyType: strategy.type
-        });
-
-      } catch (error) {
-        results.push({
-          success: false,
-          message: error.message,
-          itemId: item.itemId || "unknown",
-        });
-      }
-    }
-
-    // Calculate summary
-    const successful = results.filter((r) => r.success).length;
-
-    res.json({
-      success: true,
-      strategy: {
-        id: strategy.id,
-        name: strategy.strategyName,
-        type: strategy.type
-      },
-      summary: {
-        total: items.length,
-        successful,
-        failed: items.length - successful,
-      },
-      results,
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
 
 /**
  * ORIGINAL API Routes (Updated to work with strategy system)
  */
-
-route.get("/competitor-prices/:itemId", async (req, res) => {
+const cache = {};
+router.get("/competitor-prices/:itemId", async (req, res) => {
   try {   
     const { itemId } = req.params;
     const oauthToken = process.env.AUTH_TOKEN; // For Trading API
@@ -1060,285 +354,1314 @@ route.get("/competitor-prices/:itemId", async (req, res) => {
   }
 });
 
-// 1. Match Lowest Strategy Endpoint (Legacy - still supported)
-route.post("/match-lowest", async (req, res) => {
+
+/**
+ * ===============================
+ * PRICING STRATEGIES API
+ * ===============================
+ * 
+ * This file contains all pricing strategy management APIs:
+ * - Create pricing strategy on specific product
+ * - Create pricing strategy and assign to all active listings
+ * - Fetch pricing strategies from specific product
+ * - Fetch all active listings with pricing strategies
+ * - Update pricing strategy on specific product
+ * - Delete pricing strategy from specific product
+ * - Delete pricing strategies from all active listings
+ * - Apply strategy to update product price
+ */
+
+/**
+ * Helper Functions
+ */
+
+// Parse XML response helper
+async function parseXMLResponse(xmlData) {
+  const parser = new xml2js.Parser({
+    explicitArray: false,
+    tagNameProcessors: [xml2js.processors.stripPrefix],
+  });
+  return await parser.parseStringPromise(xmlData);
+}
+
+// Check if eBay API response is successful
+function isEBayResponseSuccessful(result, operationName) {
+  const response = result[operationName + 'Response'];
+  if (response.Ack !== "Success" && response.Ack !== "Warning") {
+    const errors = response.Errors;
+    const errorMsg = Array.isArray(errors)
+      ? errors.map((e) => e.LongMessage || e.ShortMessage).join(", ")
+      : errors?.LongMessage || errors?.ShortMessage || "Unknown error";
+    throw new Error(`eBay API Error: ${errorMsg}`);
+  }
+  return response;
+}
+
+// Make eBay XML API call
+async function makeEBayAPICall(xmlRequest, callName) {
+  const response = await axios({
+    method: "post",
+    url: "https://api.ebay.com/ws/api.dll",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1155",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "0", // US site
+    },
+    data: xmlRequest,
+  });
+  return response.data;
+}
+
+
+// Parse pricing strategy data from ItemSpecifics
+// Fixed parsePricingStrategyFromSpecifics function for your data format
+
+function parsePricingStrategyFromSpecifics(itemSpecifics, itemId) {
+  const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
+  const strategyData = {};
+
+  // Extract all strategy-related data
+  specificsArray.forEach(specific => {
+    if (specific?.Name && specific?.Value) {
+      const name = specific.Name;
+      const value = specific.Value;
+
+      // Capture all strategy-related fields
+      if (name.toLowerCase().includes('pricing') || 
+          name.toLowerCase().includes('strategy') || 
+          name.toLowerCase().includes('repricing') ||
+          name.toLowerCase().includes('beat') || 
+          name.toLowerCase().includes('stay') ||
+          name.toLowerCase().includes('above') ||
+          name.toLowerCase().includes('below') ||
+          name.toLowerCase().includes('match') ||
+          name.toLowerCase().includes('lowest') ||
+          name === 'NoCompetitionAction' ||
+          name === 'MaxPrice' || 
+          name === 'MinPrice' ||
+          name === 'BasePrice' ||
+          name === 'WeekendBoost' ||
+          name === 'HolidayBoost' ||
+          name === 'ClearanceThreshold' ||
+          name === 'CompetitorAdjustment' ||
+          name === 'RepricingFrequency') {
+        strategyData[name] = value;
+      }
+    }
+  });
+
+  console.log(`Found strategy data for item ${itemId}:`, strategyData);
+
+  if (Object.keys(strategyData).length === 0) {
+    console.log(`No strategy data found for item ${itemId}`);
+    return null;
+  }
+
+  // Map your actual field names to the expected format
+  const strategy = {
+    itemId,
+    // Handle both naming conventions
+    strategyName: strategyData.PricingStrategyName || 
+                  strategyData.StrategyName || 
+                  `${strategyData.PricingStrategy || 'Unknown'} Strategy`, // Convert "time-based" to "time-based Strategy"
+    
+    // Map your strategy types to standard repricing rules
+    repricingRule: mapStrategyToRepricingRule(strategyData),
+    
+    noCompetitionAction: strategyData.NoCompetitionAction || "USE_MAX_PRICE",
+    
+    maxPrice: strategyData.MaxPrice ? parseFloat(strategyData.MaxPrice) : null,
+    minPrice: strategyData.MinPrice ? parseFloat(strategyData.MinPrice) : null,
+    
+    createdAt: strategyData.StrategyCreatedAt || 
+               strategyData.strategy_created_at ||
+               null,
+
+    // Add your specific strategy fields
+    basePrice: strategyData.BasePrice ? parseFloat(strategyData.BasePrice) : null,
+    weekendBoost: strategyData.WeekendBoost ? parseFloat(strategyData.WeekendBoost) : null,
+    holidayBoost: strategyData.HolidayBoost ? parseFloat(strategyData.HolidayBoost) : null,
+    clearanceThreshold: strategyData.ClearanceThreshold ? parseFloat(strategyData.ClearanceThreshold) : null,
+    competitorAdjustment: strategyData.CompetitorAdjustment ? parseFloat(strategyData.CompetitorAdjustment) : null,
+    repricingFrequency: strategyData.RepricingFrequency || null,
+
+    // Original strategy type for reference
+    originalStrategyType: strategyData.PricingStrategy || strategyData.RepricingRule || null
+  };
+
+  // Handle beat/stay above parameters if they exist
+  if (strategyData.BeatBy || strategyData.beat_by) {
+    strategy.beatBy = strategyData.BeatBy || strategyData.beat_by;
+  }
+  if (strategyData.BeatValue || strategyData.beat_value) {
+    strategy.beatValue = parseFloat(strategyData.BeatValue || strategyData.beat_value);
+  }
+  if (strategyData.StayAboveBy || strategyData.stay_above_by) {
+    strategy.stayAboveBy = strategyData.StayAboveBy || strategyData.stay_above_by;
+  }
+  if (strategyData.StayAboveValue || strategyData.stay_above_value) {
+    strategy.stayAboveValue = parseFloat(strategyData.StayAboveValue || strategyData.stay_above_value);
+  }
+
+  console.log(`Parsed strategy for item ${itemId}:`, strategy);
+  return strategy;
+}
+
+// Helper function to map your strategy types to standard repricing rules
+function mapStrategyToRepricingRule(strategyData) {
+  // Check if it's the new format first
+  if (strategyData.RepricingRule) {
+    return strategyData.RepricingRule; // MATCH_LOWEST, BEAT_LOWEST, STAY_ABOVE
+  }
+
+  // Map your existing strategy types to standard rules
+  const strategyType = strategyData.PricingStrategy?.toLowerCase();
+  
+  switch (strategyType) {
+    case 'time-based':
+      return 'TIME_BASED';
+    case 'competitive':
+      return 'COMPETITIVE';
+    case 'dynamic':
+      return 'DYNAMIC';
+    case 'fixed':
+      return 'FIXED';
+    case 'match-lowest':
+    case 'match_lowest':
+      return 'MATCH_LOWEST';
+    case 'beat-lowest':
+    case 'beat_lowest':
+      return 'BEAT_LOWEST';
+    case 'stay-above':
+    case 'stay_above':
+      return 'STAY_ABOVE';
+    default:
+      return strategyData.PricingStrategy || 'UNKNOWN';
+  }
+}
+
+// Updated API endpoint with the fixed parser
+router.get("/pricing-strategies/products/:itemId", async (req, res) => {
   try {
-    const {
-      itemId,
-      currentPrice,
-      apiKey,
-      constraints,
-      useProvidedPrices = false,
-      competitorPrices: providedPrices = [],
-    } = req.body;
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
 
-    if (typeof currentPrice !== "number" || currentPrice <= 0) {
+    if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "Invalid current price",
+        message: "eBay auth token is required"
       });
     }
 
-    if (!itemId && !useProvidedPrices) {
-      return res.status(400).json({
-        success: false,
-        message: "Item ID is required when not using provided prices",
-      });
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "GetItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "GetItem");
+
+    const item = response.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
     }
 
-    let competitorPrices;
-    if (useProvidedPrices) {
-      competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
-    } else {
-      const oauthToken = process.env.AUTH_TOKEN;
-      const appId = process.env.CLIENT_ID;
-
-      const { itemDetails, competitorPrices: fetchedPrices } =
-        await getItemDetailsAndPrices(itemId, oauthToken, appId);
-      
-      competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
-    }
-
-    console.log('competitorPrices type:', typeof competitorPrices);
-    console.log('competitorPrices isArray:', Array.isArray(competitorPrices));
-    console.log('competitorPrices length:', competitorPrices?.length);
-
-    const result = matchLowest(currentPrice, competitorPrices);
-    const validatedResult = validatePriceResult(result, constraints);
+    // Extract pricing strategy data from ItemSpecifics
+    const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+    const pricingStrategy = parsePricingStrategyFromSpecifics(itemSpecifics, itemId);
+    const hasPricingStrategy = pricingStrategy !== null;
 
     res.json({
-      ...validatedResult,
+      success: true,
       itemId,
+      itemTitle: item.Title,
+      hasPricingStrategy,
+      pricingStrategy,
+      itemDetails: {
+        currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
+        currency: item.StartPrice?.__attributes__?.currencyID || item.Currency || "USD",
+        listingType: item.ListingType,
+        condition: item.ConditionDisplayName
+      }
     });
+
   } catch (error) {
-    console.error('Full error stack:', error);
+    console.error("eBay Pricing Strategy Fetch Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message
     });
   }
 });
 
-// 2. Beat Lowest Strategy Endpoint (Legacy - still supported)
-route.post("/beat-lowest", async (req, res) => {
+// ===============================
+// ALSO UPDATE YOUR CREATE STRATEGY TO USE CONSISTENT FIELD NAMES
+// ===============================
+
+// Updated createPricingStrategySpecifics function to match your existing data format
+function createPricingStrategySpecifics(strategyData) {
+  const {
+    strategyName,
+    repricingRule,
+    beatBy,
+    stayAboveBy,
+    value,
+    noCompetitionAction = "USE_MAX_PRICE",
+    maxPrice,
+    minPrice,
+    basePrice,
+    weekendBoost,
+    holidayBoost,
+    clearanceThreshold,
+    competitorAdjustment,
+    repricingFrequency
+  } = strategyData;
+
+  const strategySpecifics = [
+    { name: "PricingStrategyName", value: strategyName }, // Use full name for new strategies
+    { name: "PricingStrategy", value: repricingRule.toLowerCase().replace('_', '-') }, // Also add short name for compatibility
+    { name: "RepricingRule", value: repricingRule },
+    { name: "NoCompetitionAction", value: noCompetitionAction }
+  ];
+
+  if (maxPrice) strategySpecifics.push({ name: "MaxPrice", value: maxPrice.toString() });
+  if (minPrice) strategySpecifics.push({ name: "MinPrice", value: minPrice.toString() });
+
+  // Add strategy-specific parameters
+  if (repricingRule === "BEAT_LOWEST" && beatBy && value) {
+    strategySpecifics.push({ name: "BeatBy", value: beatBy });
+    strategySpecifics.push({ name: "BeatValue", value: value.toString() });
+  }
+
+  if (repricingRule === "STAY_ABOVE" && stayAboveBy && value) {
+    strategySpecifics.push({ name: "StayAboveBy", value: stayAboveBy });
+    strategySpecifics.push({ name: "StayAboveValue", value: value.toString() });
+  }
+
+  // Add time-based strategy parameters
+  if (basePrice) strategySpecifics.push({ name: "BasePrice", value: basePrice.toString() });
+  if (weekendBoost) strategySpecifics.push({ name: "WeekendBoost", value: weekendBoost.toString() });
+  if (holidayBoost) strategySpecifics.push({ name: "HolidayBoost", value: holidayBoost.toString() });
+  if (clearanceThreshold) strategySpecifics.push({ name: "ClearanceThreshold", value: clearanceThreshold.toString() });
+  if (competitorAdjustment) strategySpecifics.push({ name: "CompetitorAdjustment", value: competitorAdjustment.toString() });
+  if (repricingFrequency) strategySpecifics.push({ name: "RepricingFrequency", value: repricingFrequency });
+
+  // Add timestamp
+  strategySpecifics.push({ name: "StrategyCreatedAt", value: new Date().toISOString() });
+
+  return strategySpecifics;
+}
+/**
+ * ===============================
+ * 1. CREATE PRICING STRATEGY ON SPECIFIC PRODUCT
+ * ===============================
+ */
+
+router.post("/products/:itemId", async (req, res) => {
   try {
+    const { itemId } = req.params;
     const {
-      itemId,
-      currentPrice,
-      amount,
-      constraints,
-      useProvidedPrices = false,
-      competitorPrices: providedPrices = [],
+      strategyName,
+      repricingRule,
+      beatBy,
+      stayAboveBy,
+      value,
+      noCompetitionAction = "USE_MAX_PRICE",
+      maxPrice,
+      minPrice
     } = req.body;
 
-    if (typeof currentPrice !== "number" || currentPrice <= 0) {
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "Invalid current price",
+        message: "eBay auth token is required"
       });
     }
 
-    if (!itemId && !useProvidedPrices) {
+    if (!strategyName || !repricingRule) {
       return res.status(400).json({
         success: false,
-        message: "Item ID is required when not using provided prices",
+        message: "Strategy name and repricing rule are required"
       });
     }
 
-    let competitorPrices;
-    if (useProvidedPrices) {
-      competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
-    } else {
-      const oauthToken = process.env.AUTH_TOKEN;
-      const appId = process.env.CLIENT_ID;
-
-      const { itemDetails, competitorPrices: fetchedPrices } =
-        await getItemDetailsAndPrices(itemId, oauthToken, appId);
-      competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
+    if (!["MATCH_LOWEST", "BEAT_LOWEST", "STAY_ABOVE"].includes(repricingRule)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid repricing rule. Must be MATCH_LOWEST, BEAT_LOWEST, or STAY_ABOVE"
+      });
     }
 
-    const result = beatLowestByAmount(currentPrice, competitorPrices, amount);
-    const validatedResult = validatePriceResult(result, constraints);
+    // Validate strategy-specific parameters
+    if (repricingRule === "BEAT_LOWEST" && (!beatBy || !value)) {
+      return res.status(400).json({
+        success: false,
+        message: "Beat by method and value are required for BEAT_LOWEST strategy"
+      });
+    }
+
+    if (repricingRule === "STAY_ABOVE" && (!stayAboveBy || !value)) {
+      return res.status(400).json({
+        success: false,
+        message: "Stay above method and value are required for STAY_ABOVE strategy"
+      });
+    }
+
+    if (value !== undefined && (typeof value !== "number" || value <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Value must be a positive number"
+      });
+    }
+
+    // Create pricing strategy specifics
+    const strategySpecifics = createPricingStrategySpecifics(req.body);
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <Item>
+          <ItemID>${itemId}</ItemID>
+          <ItemSpecifics>
+            ${strategySpecifics.map(spec => `
+            <NameValueList>
+              <n>${spec.name}</n>
+              <Value>${spec.value}</Value>
+            </NameValueList>
+            `).join('')}
+          </ItemSpecifics>
+        </Item>
+      </ReviseItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "ReviseItem");
 
     res.json({
-      ...validatedResult,
+      success: true,
+      message: "Pricing strategy created successfully on eBay product",
       itemId,
+      strategy: {
+        name: strategyName,
+        repricingRule,
+        beatBy,
+        stayAboveBy,
+        value,
+        noCompetitionAction,
+        maxPrice,
+        minPrice
+      },
+      ebayResponse: {
+        itemId: response.ItemID,
+        startTime: response.StartTime,
+        endTime: response.EndTime
+      }
     });
+
   } catch (error) {
+    console.error("eBay Pricing Strategy Creation Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message
     });
   }
 });
 
-// 3. Stay Above Strategy Endpoint (Legacy - still supported)
-route.post("/stay-above", async (req, res) => {
+/**
+ * ===============================
+ * 2. CREATE PRICING STRATEGY AND ASSIGN TO ALL ACTIVE LISTINGS
+ * ===============================
+ */
+
+router.post("/assign-to-all-active", async (req, res) => {
   try {
     const {
-      itemId,
-      currentPrice,
-      percentage,
-      amount,
-      constraints,
-      useProvidedPrices = false,
-      competitorPrices: providedPrices = [],
+      strategyName,
+      repricingRule,
+      beatBy,
+      stayAboveBy,
+      value,
+      noCompetitionAction = "USE_MAX_PRICE",
+      maxPrice,
+      minPrice
     } = req.body;
 
-    if (typeof currentPrice !== "number" || currentPrice <= 0) {
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "Invalid current price",
+        message: "eBay auth token is required"
       });
     }
 
-    if (!itemId && !useProvidedPrices) {
+    if (!strategyName || !repricingRule) {
       return res.status(400).json({
         success: false,
-        message: "Item ID is required when not using provided prices",
+        message: "Strategy name and repricing rule are required"
       });
     }
 
-    let competitorPrices;
-    if (useProvidedPrices) {
-      competitorPrices = Array.isArray(providedPrices) ? providedPrices : [];
-    } else {
-      const oauthToken = process.env.AUTH_TOKEN;
-      const appId = process.env.CLIENT_ID;
+    // Step 1: Get all active listings
+    const getActiveListingsXML = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ActiveList>
+          <Include>true</Include>
+          <Pagination>
+            <EntriesPerPage>200</EntriesPerPage>
+            <PageNumber>1</PageNumber>
+          </Pagination>
+        </ActiveList>
+        <DetailLevel>ReturnAll</DetailLevel>
+      </GetMyeBaySellingRequest>
+    `;
 
-      const { itemDetails, competitorPrices: fetchedPrices } =
-        await getItemDetailsAndPrices(itemId, oauthToken, appId);
-      
-      competitorPrices = Array.isArray(fetchedPrices) ? fetchedPrices : [];
-    }
+    console.log("Fetching active listings for pricing strategy assignment...");
+    const activeListingsResponse = await makeEBayAPICall(getActiveListingsXML, "GetMyeBaySelling");
+    const activeListingsResult = await parseXMLResponse(activeListingsResponse);
+    const activeListingsData = isEBayResponseSuccessful(activeListingsResult, "GetMyeBaySelling");
 
-    console.log('competitorPrices type:', typeof competitorPrices);
-    console.log('competitorPrices isArray:', Array.isArray(competitorPrices));
-    console.log('competitorPrices sample:', competitorPrices?.slice(0, 3));
-
-    const params = {};
-    if (typeof percentage === "number") params.percentage = percentage;
-    if (typeof amount === "number") params.amount = amount;
-
-    console.log('params:', params);
-
-    const result = stayAbove(currentPrice, competitorPrices, params);
-    const validatedResult = validatePriceResult(result, constraints);
-
-    res.json({
-      ...validatedResult,
-      itemId,
-    });
-  } catch (error) {
-    console.error('Full error stack:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-});
-
-// Process batch of items with the same strategy (Legacy - still supported)
-route.post("/batch-process", async (req, res) => {
-  try {
-    const { items, strategy, strategyParams, constraints } = req.body;
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Items must be a non-empty array",
+    const activeList = activeListingsData.ActiveList;
+    if (!activeList || !activeList.ItemArray) {
+      return res.json({
+        success: true,
+        message: "No active listings found",
+        assignedCount: 0,
+        listings: []
       });
     }
 
-    if (
-      !strategy ||
-      !["MATCH_LOWEST", "BEAT_LOWEST", "STAY_ABOVE"].includes(strategy)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid strategy",
-      });
-    }
+    const items = Array.isArray(activeList.ItemArray.Item) 
+      ? activeList.ItemArray.Item 
+      : [activeList.ItemArray.Item];
 
-    const oauthToken = process.env.AUTH_TOKEN;
-    const appId = process.env.CLIENT_ID;
+    console.log(`Found ${items.length} active listings for pricing strategy assignment`);
+
+    // Step 2: Create pricing strategy specifics
+    const strategySpecifics = createPricingStrategySpecifics(req.body);
+    strategySpecifics.push({ name: "AssignedToAllActiveListings", value: "true" });
+
+    // Step 3: Apply pricing strategy to each active listing
     const results = [];
+    const errors = [];
 
     for (const item of items) {
       try {
-        const { itemId, currentPrice } = item;
+        const itemId = item.ItemID;
+        
+        console.log(`Applying pricing strategy to item ${itemId}...`);
 
-        if (!itemId || typeof currentPrice !== "number" || currentPrice <= 0) {
-          results.push({
-            success: false,
-            message: "Invalid item data",
-            itemId: item.itemId || "unknown",
-          });
-          continue;
-        }
+        const xmlRequest = `
+          <?xml version="1.0" encoding="utf-8"?>
+          <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+            <RequesterCredentials>
+              <eBayAuthToken>${authToken}</eBayAuthToken>
+            </RequesterCredentials>
+            <Item>
+              <ItemID>${itemId}</ItemID>
+              <ItemSpecifics>
+                ${strategySpecifics.map(spec => `
+                <NameValueList>
+                  <n>${spec.name}</n>
+                  <Value>${spec.value}</Value>
+                </NameValueList>
+                `).join('')}
+              </ItemSpecifics>
+            </Item>
+          </ReviseItemRequest>
+        `;
 
-        // Fetch item details and competitor prices
-        const { itemDetails, competitorPrices } = await getItemDetailsAndPrices(
-          itemId,
-          oauthToken,
-          appId
-        );
-
-        // Apply the selected strategy
-        let result;
-
-        if (strategy === "MATCH_LOWEST") {
-          result = matchLowest(currentPrice, competitorPrices);
-        } else if (strategy === "BEAT_LOWEST") {
-          const { amount } = strategyParams || {};
-          result = beatLowestByAmount(currentPrice, competitorPrices, amount);
-        } else if (strategy === "STAY_ABOVE") {
-          const { percentage, amount } = strategyParams || {};
-          result = stayAbove(currentPrice, competitorPrices, {
-            percentage,
-            amount,
-          });
-        }
-
-        // Validate the result
-        const validatedResult = validatePriceResult(result, constraints);
+        const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+        const result = await parseXMLResponse(xmlResponse);
+        isEBayResponseSuccessful(result, "ReviseItem");
 
         results.push({
-          ...validatedResult,
           itemId,
-          itemTitle: itemDetails.title,
+          title: item.Title,
+          success: true,
+          message: "Pricing strategy applied successfully"
         });
+
+        // Add small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+
       } catch (error) {
-        results.push({
+        console.error(`Error applying pricing strategy to item ${item.ItemID}:`, error.message);
+        errors.push({
+          itemId: item.ItemID,
+          title: item.Title,
           success: false,
-          message: error.message,
-          itemId: item.itemId || "unknown",
+          error: error.message
         });
       }
     }
 
-    // Calculate summary
-    const successful = results.filter((r) => r.success).length;
+    const successCount = results.length;
+    const errorCount = errors.length;
 
     res.json({
       success: true,
-      summary: {
-        total: items.length,
-        successful,
-        failed: items.length - successful,
+      message: `Pricing strategy assigned to ${successCount} of ${items.length} active listings`,
+      strategy: {
+        name: strategyName,
+        repricingRule,
+        beatBy,
+        stayAboveBy,
+        value,
+        noCompetitionAction,
+        maxPrice,
+        minPrice
       },
-      results,
+      summary: {
+        totalActiveListings: items.length,
+        successfulAssignments: successCount,
+        failedAssignments: errorCount
+      },
+      successfulAssignments: results,
+      failedAssignments: errors
     });
+
   } catch (error) {
+    console.error("eBay Bulk Pricing Strategy Assignment Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message
     });
   }
 });
 
+/**
+ * ===============================
+ * 3. FETCH PRICING STRATEGY FROM SPECIFIC PRODUCT
+ * ===============================
+ */
+
+router.get("/products/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "GetItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "GetItem");
+
+    const item = response.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
+    }
+
+    // Extract pricing strategy data from ItemSpecifics
+    const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+    
+    // Check if any strategy-related specifics exist
+    const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
+    const hasAnyStrategyData = specificsArray.some(spec => {
+      if (!spec?.Name) return false;
+      const name = spec.Name.toLowerCase();
+      return name.includes('pricing') || 
+             name.includes('strategy') || 
+             name.includes('repricing') ||
+             spec.Name === 'NoCompetitionAction' ||
+             spec.Name === 'MaxPrice' || 
+             spec.Name === 'MinPrice';
+    });
+
+    let pricingStrategy = null;
+    let hasPricingStrategy = false;
+
+    if (hasAnyStrategyData) {
+      pricingStrategy = parsePricingStrategyFromSpecifics(itemSpecifics, itemId);
+      hasPricingStrategy = pricingStrategy !== null;
+      
+      // If we get default values, it means parsing failed
+      if (pricingStrategy && 
+          pricingStrategy.strategyName === "Unnamed Strategy" && 
+          pricingStrategy.repricingRule === "UNKNOWN") {
+        
+        console.log(`Warning: Found strategy data but parsing returned defaults for item ${itemId}`);
+        
+        // Optionally, still return the data but flag it as potentially incomplete
+        pricingStrategy.warning = "Strategy data found but some fields could not be parsed correctly";
+      }
+    }
+
+    res.json({
+      success: true,
+      itemId,
+      itemTitle: item.Title,
+      hasPricingStrategy,
+      pricingStrategy,
+      itemDetails: {
+        currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
+        currency: item.StartPrice?.__attributes__?.currencyID || item.Currency || "USD",
+        listingType: item.ListingType,
+        condition: item.ConditionDisplayName
+      },
+      debug: {
+        totalItemSpecifics: specificsArray.length,
+        hasAnyStrategyData,
+        strategyRelatedSpecificsCount: specificsArray.filter(spec => {
+          if (!spec?.Name) return false;
+          const name = spec.Name.toLowerCase();
+          return name.includes('pricing') || 
+                 name.includes('strategy') || 
+                 name.includes('repricing') ||
+                 spec.Name === 'NoCompetitionAction' ||
+                 spec.Name === 'MaxPrice' || 
+                 spec.Name === 'MinPrice';
+        }).length
+      }
+    });
+
+  } catch (error) {
+    console.error("eBay Pricing Strategy Fetch Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 4. FETCH ALL ACTIVE LISTINGS WITH PRICING STRATEGIES
+ * ===============================
+ */
+
+router.get("/active-listings", async (req, res) => {
+  try {
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    // Get all active listings
+    const getActiveListingsXML = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ActiveList>
+          <Include>true</Include>
+          <Pagination>
+            <EntriesPerPage>200</EntriesPerPage>
+            <PageNumber>1</PageNumber>
+          </Pagination>
+        </ActiveList>
+        <DetailLevel>ReturnAll</DetailLevel>
+      </GetMyeBaySellingRequest>
+    `;
+
+    const activeListingsResponse = await makeEBayAPICall(getActiveListingsXML, "GetMyeBaySelling");
+    const activeListingsResult = await parseXMLResponse(activeListingsResponse);
+    const activeListingsData = isEBayResponseSuccessful(activeListingsResult, "GetMyeBaySelling");
+
+    const activeList = activeListingsData.ActiveList;
+    if (!activeList || !activeList.ItemArray) {
+      return res.json({
+        success: true,
+        message: "No active listings found",
+        listings: []
+      });
+    }
+
+    const items = Array.isArray(activeList.ItemArray.Item) 
+      ? activeList.ItemArray.Item 
+      : [activeList.ItemArray.Item];
+
+    // For each item, extract basic info and check if it has pricing strategies
+    const listingsWithStrategies = items.map(item => {
+      const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+      const pricingStrategy = parsePricingStrategyFromSpecifics(itemSpecifics, item.ItemID);
+
+      return {
+        itemId: item.ItemID,
+        title: item.Title,
+        currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
+        currency: item.StartPrice?.__attributes__?.currencyID || "USD",
+        listingType: item.ListingType,
+        hasPricingStrategy: pricingStrategy !== null,
+        pricingStrategy
+      };
+    });
+
+    const withStrategy = listingsWithStrategies.filter(item => item.hasPricingStrategy);
+    const withoutStrategy = listingsWithStrategies.filter(item => !item.hasPricingStrategy);
+
+    res.json({
+      success: true,
+      summary: {
+        totalActiveListings: listingsWithStrategies.length,
+        listingsWithStrategy: withStrategy.length,
+        listingsWithoutStrategy: withoutStrategy.length
+      },
+      listings: listingsWithStrategies
+    });
+
+  } catch (error) {
+    console.error("eBay Active Listings with Pricing Strategies Fetch Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 5. UPDATE PRICING STRATEGY ON SPECIFIC PRODUCT
+ * ===============================
+ */
+
+router.put("/products/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const {
+      strategyName,
+      repricingRule,
+      beatBy,
+      stayAboveBy,
+      value,
+      noCompetitionAction = "USE_MAX_PRICE",
+      maxPrice,
+      minPrice
+    } = req.body;
+
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    if (!strategyName || !repricingRule) {
+      return res.status(400).json({
+        success: false,
+        message: "Strategy name and repricing rule are required"
+      });
+    }
+
+    // Create updated pricing strategy specifics
+    const strategySpecifics = createPricingStrategySpecifics(req.body);
+    strategySpecifics.push({ name: "StrategyUpdatedAt", value: new Date().toISOString() });
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <Item>
+          <ItemID>${itemId}</ItemID>
+          <ItemSpecifics>
+            ${strategySpecifics.map(spec => `
+            <NameValueList>
+              <n>${spec.name}</n>
+              <Value>${spec.value}</Value>
+            </NameValueList>
+            `).join('')}
+          </ItemSpecifics>
+        </Item>
+      </ReviseItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "ReviseItem");
+
+    res.json({
+      success: true,
+      message: "Pricing strategy updated successfully on eBay product",
+      itemId,
+      strategy: {
+        name: strategyName,
+        repricingRule,
+        beatBy,
+        stayAboveBy,
+        value,
+        noCompetitionAction,
+        maxPrice,
+        minPrice
+      },
+      ebayResponse: {
+        itemId: response.ItemID,
+        startTime: response.StartTime,
+        endTime: response.EndTime
+      }
+    });
+
+  } catch (error) {
+    console.error("eBay Pricing Strategy Update Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 6. DELETE PRICING STRATEGY FROM SPECIFIC PRODUCT
+ * ===============================
+ */
+
+router.delete("/products/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    // Add deletion markers to ItemSpecifics
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <Item>
+          <ItemID>${itemId}</ItemID>
+          <ItemSpecifics>
+            <NameValueList>
+              <n>StrategyDeleted</n>
+              <Value>true</Value>
+            </NameValueList>
+            <NameValueList>
+              <n>StrategyDeletedAt</n>
+              <Value>${new Date().toISOString()}</Value>
+            </NameValueList>
+          </ItemSpecifics>
+        </Item>
+      </ReviseItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "ReviseItem");
+
+    res.json({
+      success: true,
+      message: "Pricing strategy deleted successfully from eBay product",
+      itemId,
+      deletedAt: new Date().toISOString(),
+      ebayResponse: {
+        itemId: response.ItemID,
+        startTime: response.StartTime,
+        endTime: response.EndTime
+      }
+    });
+
+  } catch (error) {
+    console.error("eBay Pricing Strategy Deletion Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 7. DELETE PRICING STRATEGIES FROM ALL ACTIVE LISTINGS
+ * ===============================
+ */
+
+router.delete("/delete-from-all-active", async (req, res) => {
+  try {
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    // First get all active listings with pricing strategies
+    const listingsResponse = await axios.get('/active-listings', {
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+
+    const listingsWithStrategies = listingsResponse.data.listings.filter(item => item.hasPricingStrategy);
+
+    if (listingsWithStrategies.length === 0) {
+      return res.json({
+        success: true,
+        message: "No active listings with pricing strategies found",
+        deletedCount: 0
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    // Delete pricing strategy from each listing
+    for (const listing of listingsWithStrategies) {
+      try {
+        const xmlRequest = `
+          <?xml version="1.0" encoding="utf-8"?>
+          <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+            <RequesterCredentials>
+              <eBayAuthToken>${authToken}</eBayAuthToken>
+            </RequesterCredentials>
+            <Item>
+              <ItemID>${listing.itemId}</ItemID>
+              <ItemSpecifics>
+                <NameValueList>
+                  <n>StrategyDeleted</n>
+                  <Value>true</Value>
+                </NameValueList>
+                <NameValueList>
+                  <n>StrategyDeletedAt</n>
+                  <Value>${new Date().toISOString()}</Value>
+                </NameValueList>
+              </ItemSpecifics>
+            </Item>
+          </ReviseItemRequest>
+        `;
+
+        const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+        const result = await parseXMLResponse(xmlResponse);
+        isEBayResponseSuccessful(result, "ReviseItem");
+
+        results.push({
+          itemId: listing.itemId,
+          title: listing.title,
+          success: true
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (error) {
+        errors.push({
+          itemId: listing.itemId,
+          title: listing.title,
+          error: error.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Pricing strategy deletion processed for ${results.length} listings`,
+      summary: {
+        totalProcessed: listingsWithStrategies.length,
+        successful: results.length,
+        failed: errors.length
+      },
+      results,
+      errors
+    });
+
+  } catch (error) {
+    console.error("eBay Pricing Strategy Bulk Deletion Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 8. APPLY PRICING STRATEGY TO UPDATE PRODUCT PRICE
+ * ===============================
+ */
+
+router.post("/products/:itemId/apply", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { 
+      competitorPrices = [], 
+      useExistingStrategy = true,
+      newPrice 
+    } = req.body;
+
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    let priceToApply = newPrice;
+
+    // If using existing strategy, fetch it first and calculate price
+    if (useExistingStrategy && !newPrice) {
+      // Fetch existing strategy from the product
+      const strategyResponse = await axios.get(`/products/${itemId}`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+
+      if (!strategyResponse.data.hasPricingStrategy) {
+        return res.status(400).json({
+          success: false,
+          message: "No pricing strategy found on this product. Please create a strategy first or provide a newPrice."
+        });
+      }
+
+      const strategy = strategyResponse.data.pricingStrategy;
+      const currentPrice = strategyResponse.data.itemDetails.currentPrice;
+
+      // Calculate new price based on strategy and competitor prices
+      if (competitorPrices.length > 0) {
+        const lowestCompetitorPrice = Math.min(...competitorPrices);
+
+        switch (strategy.repricingRule) {
+          case "MATCH_LOWEST":
+            priceToApply = lowestCompetitorPrice;
+            break;
+          case "BEAT_LOWEST":
+            if (strategy.beatBy === "AMOUNT") {
+              priceToApply = lowestCompetitorPrice - (strategy.beatValue || 1);
+            } else if (strategy.beatBy === "PERCENTAGE") {
+              priceToApply = lowestCompetitorPrice * (1 - (strategy.beatValue || 0.05));
+            }
+            break;
+          case "STAY_ABOVE":
+            if (strategy.stayAboveBy === "AMOUNT") {
+              priceToApply = lowestCompetitorPrice + (strategy.stayAboveValue || 1);
+            } else if (strategy.stayAboveBy === "PERCENTAGE") {
+              priceToApply = lowestCompetitorPrice * (1 + (strategy.stayAboveValue || 0.05));
+            }
+            break;
+        }
+
+        // Apply constraints
+        if (strategy.minPrice && priceToApply < strategy.minPrice) {
+          priceToApply = strategy.minPrice;
+        }
+        if (strategy.maxPrice && priceToApply > strategy.maxPrice) {
+          priceToApply = strategy.maxPrice;
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Competitor prices are required when using existing strategy"
+        });
+      }
+    }
+
+    if (!priceToApply || priceToApply <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid price is required"
+      });
+    }
+
+    // Apply the new price to eBay
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <Item>
+          <ItemID>${itemId}</ItemID>
+          <StartPrice currencyID="USD">${priceToApply.toFixed(2)}</StartPrice>
+          <ItemSpecifics>
+            <NameValueList>
+              <n>LastPriceUpdate</n>
+              <Value>${new Date().toISOString()}</Value>
+            </NameValueList>
+            <NameValueList>
+              <n>PriceUpdateMethod</n>
+              <Value>${useExistingStrategy ? 'STRATEGY_APPLIED' : 'MANUAL_OVERRIDE'}</Value>
+            </NameValueList>
+            <NameValueList>
+              <n>CompetitorPricesUsed</n>
+              <Value>${competitorPrices.length}</Value>
+            </NameValueList>
+          </ItemSpecifics>
+        </Item>
+      </ReviseItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "ReviseItem");
+
+    res.json({
+      success: true,
+      message: "Pricing strategy applied successfully - price updated on eBay",
+      itemId,
+      priceUpdate: {
+        newPrice: priceToApply,
+        appliedAt: new Date().toISOString(),
+        competitorPricesUsed: competitorPrices.length,
+        method: useExistingStrategy ? 'STRATEGY_APPLIED' : 'MANUAL_OVERRIDE'
+      },
+      ebayResponse: {
+        itemId: response.ItemID,
+        startTime: response.StartTime,
+        endTime: response.EndTime
+      }
+    });
+
+  } catch (error) {
+    console.error("eBay Pricing Strategy Application Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ===============================
+ * 9. APPLY PRICING STRATEGY TO MULTIPLE PRODUCTS (BULK APPLY)
+ * ===============================
+ */
+
+router.post("/apply-bulk", async (req, res) => {
+  try {
+    const { 
+      itemIds = [],
+      competitorPricesByItem = {}, // { itemId: [prices...] }
+      useExistingStrategy = true,
+      applyToAllActive = false
+    } = req.body;
+
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    let targetItems = [];
+
+    if (applyToAllActive) {
+      // Get all active listings with strategies
+      const listingsResponse = await axios.get('/active-listings', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      targetItems = listingsResponse.data.listings
+        .filter(item => item.hasPricingStrategy)
+        .map(item => item.itemId);
+    } else {
+      targetItems = itemIds;
+    }
+
+    if (targetItems.length === 0) {
+      return res.json({
+        success: true,
+        message: "No items to process",
+        results: []
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const itemId of targetItems) {
+      try {
+        const competitorPrices = competitorPricesByItem[itemId] || [];
+        
+        // Apply strategy to this item
+        const applyResponse = await axios.post(`/products/${itemId}/apply`, {
+          competitorPrices,
+          useExistingStrategy
+        }, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        results.push({
+          itemId,
+          success: true,
+          ...applyResponse.data.priceUpdate
+        });
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 150));
+
+      } catch (error) {
+        errors.push({
+          itemId,
+          success: false,
+          error: error.response?.data?.message || error.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Bulk strategy application completed for ${results.length} of ${targetItems.length} items`,
+      summary: {
+        totalItems: targetItems.length,
+        successful: results.length,
+        failed: errors.length
+      },
+      results,
+      errors
+    });
+
+  } catch (error) {
+    console.error("eBay Bulk Strategy Application Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+
 // Error handling middleware
-route.use((err, req, res, next) => {
+router.use((err, req, res, next) => {
   console.error("API Error:", err);
   res.status(500).json({
     success: false,
@@ -1346,9 +1669,151 @@ route.use((err, req, res, next) => {
   });
 });
 
-export default route;
+export default router;
 
 
+
+
+// ===============================
+// DEBUGGING ENDPOINT (Add this to your backend for testing)
+// ===============================
+
+router.get("/debug/item-specifics/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "eBay auth token is required"
+      });
+    }
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "GetItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "GetItem");
+
+    const item = response.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
+    }
+
+    // Return RAW ItemSpecifics for debugging
+    const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+    const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
+
+    res.json({
+      success: true,
+      itemId,
+      itemTitle: item.Title,
+      totalSpecifics: specificsArray.length,
+      allItemSpecifics: specificsArray.map(spec => ({
+        name: spec.Name,
+        value: spec.Value
+      })),
+      strategyRelatedSpecifics: specificsArray.filter(spec => {
+        const name = spec.Name?.toLowerCase() || '';
+        return name.includes('pricing') || 
+               name.includes('strategy') || 
+               name.includes('repricing') ||
+               name.includes('beat') || 
+               name.includes('stay') ||
+               name.includes('above') ||
+               name.includes('below') ||
+               name.includes('match') ||
+               name.includes('lowest') ||
+               spec.Name === 'NoCompetitionAction' ||
+               spec.Name === 'MaxPrice' || 
+               spec.Name === 'MinPrice';
+      })
+    });
+
+  } catch (error) {
+    console.error("Debug ItemSpecifics Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// ===============================
+// MANUAL STRATEGY CREATION FOR TESTING
+// ===============================
+
+
+router.post("/debug/create-test-strategy/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+
+    // Create a test strategy with known field names
+    const testStrategySpecifics = [
+      { name: "PricingStrategyName", value: "Test Strategy" },
+      { name: "RepricingRule", value: "MATCH_LOWEST" },
+      { name: "NoCompetitionAction", value: "USE_MAX_PRICE" },
+      { name: "MaxPrice", value: "100.00" },
+      { name: "MinPrice", value: "50.00" },
+      { name: "StrategyCreatedAt", value: new Date().toISOString() }
+    ];
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <Item>
+          <ItemID>${itemId}</ItemID>
+          <ItemSpecifics>
+            ${testStrategySpecifics.map(spec => `
+            <NameValueList>
+              <n>${spec.name}</n>
+              <Value>${spec.value}</Value>
+            </NameValueList>
+            `).join('')}
+          </ItemSpecifics>
+        </Item>
+      </ReviseItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, "ReviseItem");
+
+    res.json({
+      success: true,
+      message: "Test strategy created successfully",
+      itemId,
+      testStrategySpecifics,
+      ebayResponse: {
+        itemId: response.ItemID,
+        startTime: response.StartTime,
+        endTime: response.EndTime
+      }
+    });
+
+  } catch (error) {
+    console.error("Create Test Strategy Error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
 //  /strategies/match-lowest
 
 // {

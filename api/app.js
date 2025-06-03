@@ -182,11 +182,11 @@ mongoose
 app.use('/api/ebay', ebayRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/pricing', pricingRoute);
+app.use('/api/pricing-strategies', pricingRoute);
 app.use("/api/price-history", priceTrackerRouter);
 app.use("/api/competitor-rules", competitorRulesRouter);
 // Start the price check interval
-setInterval(checkPriceChanges, 10 * 60 * 1000);
+setInterval(checkPriceChanges, 10 * 60 * 3000);
 
 // Initial price check at startup
 checkPriceChanges();

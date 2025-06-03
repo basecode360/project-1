@@ -51,7 +51,7 @@ function App() {
           <Route path="edit-price" element={<EditProductPrice />} />
           <Route path="update-strategy" element={<PriceStrategy />} />
           <Route path="competitors/:itemId" element={<CompetitorDetails />} />
-          <Route path="update-strategy/add-strategy" element={<AddStrategy />} />
+          <Route path="add-strategy" element={<AddStrategy />} />
           <Route path="add-competitor-rule" element={<CompetitorRule />} />
 
         </Route>

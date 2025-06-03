@@ -6,9 +6,6 @@ import {
   TextField, 
   MenuItem, 
   Button,
-  FormControlLabel,
-  Switch,
-  Divider,
   Alert,
   Collapse,
   IconButton,
@@ -20,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import apiService from '../api/apiService';
 
 export default function EditStrategy() {
-  const { ItemId, AllProducts, modifyProductsObj, sku } = useProductStore();
+  const { ItemId, AllProducts, modifyProductsObj} = useProductStore();
   const [product, setProduct] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -28,10 +25,27 @@ export default function EditStrategy() {
   const [oldPrice, setOldPrice] = useState(0);
   const navigate = useNavigate();
 
-  // State for selected strategy
-  const [strategy, setStrategy] = useState('');
-  
-  // Effect to fetch product data
+  // Form state
+  const [formData, setFormData] = useState({
+    selectedStrategy: '',
+    selectedCompetitorRule: '',
+    myLandedPrice: '',
+    lowestPrice: '',
+    minPrice: '',
+    maxPrice: '',
+    notes: ''
+  });
+
+  // Available strategies and rules (fetched from APIs)
+  const [availableStrategies, setAvailableStrategies] = useState([]);
+  const [availableRules, setAvailableRules] = useState([]);
+
+  // Alert state
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertSeverity, setAlertSeverity] = useState('info');
+
+  // Fetch product data
   useEffect(() => {
     const fetchProductData = async () => {
       try {
@@ -51,7 +65,6 @@ export default function EditStrategy() {
         // Set oldPrice from product data
         if (productObj[0]?.myPrice) {
           const priceString = productObj[0].myPrice;
-          // Handle different price formats (with or without currency symbol)
           const priceValue = priceString.includes(" ") 
             ? priceString.split(" ")[1] 
             : priceString.replace(/[^0-9.]/g, '');
@@ -59,14 +72,17 @@ export default function EditStrategy() {
           setOldPrice(priceValue);
           
           // Initialize form values with product price
-          setFormValues(prev => ({
+          setFormData(prev => ({
             ...prev,
-            landedPrice: priceValue,
-            minPrice: (parseFloat(priceValue) * 0.9).toFixed(2), // 10% below landed price
-            maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2), // 50% above landed price
-            targetPrice: priceValue
+            myLandedPrice: priceValue,
+            minPrice: (parseFloat(priceValue) * 0.9).toFixed(2), // 10% below
+            maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2), // 50% above
           }));
         }
+
+        // Fetch existing strategies and rules for this product
+        await fetchExistingData();
+        
       } catch (err) {
         setError("Error loading product data: " + err.message);
         console.error("Error loading product:", err);
@@ -80,207 +96,142 @@ export default function EditStrategy() {
     }
   }, [ItemId, AllProducts, modifyProductsObj]);
 
-  // State for form values
-  const [formValues, setFormValues] = useState({
-    itemId: ItemId,
-    competitorRule: '',
-    landedPrice: '',
-    lowestPrice: '',
-    minPrice: '',
-    maxPrice: '',
-    targetPrice: '',
-    basePrice: '',
-    weekendBoost: '1.1',
-    holidayBoost: '1.25',
-    clearanceThreshold: '30',
-    repriceFrequency: 'daily',
-    competitorAdjustment: '0',
-    enableBestOffer: false,
-    bestOfferAutoAccept: '',
-    bestOfferAutoDecline: '',
-    demandMultiplier: '1.2',
-    inventoryThreshold: '10',
-    notes: ''
-  });
-  
-  // State for alert
-  const [alertOpen, setAlertOpen] = useState(false);
-  const [alertMessage, setAlertMessage] = useState('');
-  const [alertSeverity, setAlertSeverity] = useState('info');
+  // Fetch existing strategies and competitor rules
+  const fetchExistingData = async () => {
+    try {
+      // Fetch strategies for this product
+      const strategyResponse = await apiService.pricingStrategies.getStrategyFromProduct(ItemId);
+      if (strategyResponse.hasPricingStrategy) {
+        setAvailableStrategies([strategyResponse.pricingStrategy]);
+        setFormData(prev => ({
+          ...prev,
+          selectedStrategy: strategyResponse.pricingStrategy.PricingStrategy
+        }));
+      }
 
-  // Handle strategy change
-  const handleStrategyChange = (event) => {
-    const selectedStrategy = event.target.value;
-    setStrategy(selectedStrategy);
-    
-    // Set default values based on strategy
-    if (selectedStrategy === 'Fixed') {
-      setFormValues(prev => ({
-        ...prev,
-        targetPrice: oldPrice || prev.landedPrice,
-      }));
-    } else if (selectedStrategy === 'Time Based') {
-      setFormValues(prev => ({
-        ...prev,
-        basePrice: oldPrice || prev.landedPrice,
-      }));
-    } else if (selectedStrategy === 'Dynamic') {
-      // Set default values for Dynamic strategy
-      setFormValues(prev => ({
-        ...prev,
-        minPrice: prev.minPrice || (parseFloat(oldPrice) * 0.9).toFixed(2),
-        maxPrice: prev.maxPrice || (parseFloat(oldPrice) * 1.5).toFixed(2),
-        demandMultiplier: '1.2',
-        inventoryThreshold: '10'
-      }));
+      // Fetch competitor rules for this product
+      const ruleResponse = await apiService.competitorRules.getRuleFromProduct(ItemId);
+      if (ruleResponse.hasCompetitorRule) {
+        setAvailableRules([ruleResponse.competitorRule]);
+        setFormData(prev => ({
+          ...prev,
+          selectedCompetitorRule: ruleResponse.rule.name
+        }));
+      }
+
+      // If no existing data, fetch from active listings to show available options
+      if (!strategyResponse.hasPricingStrategy) {
+        const allStrategiesResponse = await apiService.pricingStrategies.getAllActiveWithStrategies();
+        const uniqueStrategies = [];
+        const seen = new Set();
+        
+        allStrategiesResponse.listings.forEach(listing => {
+          if (listing.hasPricingStrategy && !seen.has(listing.pricingStrategy.strategyName)) {
+            seen.add(listing.pricingStrategy.strategyName);
+            uniqueStrategies.push(listing.pricingStrategy);
+          }
+        });
+        
+        setAvailableStrategies(uniqueStrategies);
+      }
+
+      if (!ruleResponse.hasCompetitorRule) {
+        const allRulesResponse = await apiService.competitorRules.getAllActiveWithRules();
+        const uniqueRules = [];
+        const seen = new Set();
+        
+        allRulesResponse.listings.forEach(listing => {
+          if (listing.hasCompetitorRule && !seen.has(listing.competitorRule.ruleName)) {
+            seen.add(listing.competitorRule.ruleName);
+            uniqueRules.push(listing.competitorRule);
+          }
+        });
+        
+        setAvailableRules(uniqueRules);
+      }
+
+    } catch (error) {
+      console.error("Error fetching existing data:", error);
     }
   };
 
-  // Handle form value changes
-  const handleFormChange = (event) => {
-    const { name, value, checked, type } = event.target;
-    let processedValue = value;
-    
-    // For number inputs, ensure we handle empty strings properly
-    if (type === 'number' && value === '') {
-      processedValue = '';
-    } else if (type === 'number') {
-      // For other number values, store them as strings but validate as numbers
-      processedValue = value;
-    }
-    
-    setFormValues(prev => ({
+  // Handle input changes
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    setFormData(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : processedValue
+      [name]: value
     }));
   };
 
-  // Handle form submission
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    
-    // Validate form based on selected strategy
-    if (!strategy) {
-      showAlert('Please select a pricing strategy', 'error');
-      return;
-    }
-    
-    if (strategy === 'Fixed' && !formValues.targetPrice) {
-      showAlert('Target price is required for Fixed strategy', 'error');
-      return;
-    }
-    
-    if ((strategy === 'Competitive' || strategy === 'Dynamic') && 
-        (!formValues.minPrice || !formValues.maxPrice)) {
-      showAlert('Min and max prices are required', 'error');
-      return;
-    }
-    
-    if (strategy === 'Time Based' && !formValues.basePrice) {
-      showAlert('Base price is required for Time Based strategy', 'error');
-      return;
-    }
-    
-    // Check min price is less than max price
-    if ((strategy === 'Competitive' || strategy === 'Dynamic') && 
-        parseFloat(formValues.minPrice) >= parseFloat(formValues.maxPrice)) {
-      showAlert('Min price must be less than max price', 'error');
-      return;
-    }
-    
-    // Prepare payload based on strategy
-    let payload = {
-      itemId: formValues.itemId,
-      strategy: strategy.toLowerCase().replace(' ', '-')
-    };
-    
-    switch (strategy) {
-      case 'Fixed':
-        payload = {
-          ...payload,
-          targetPrice: formValues.targetPrice,
-          enableBestOffer: formValues.enableBestOffer,
-          ...(formValues.enableBestOffer && formValues.bestOfferAutoAccept && {
-            bestOfferAutoAccept: formValues.bestOfferAutoAccept
-          }),
-          ...(formValues.enableBestOffer && formValues.bestOfferAutoDecline && {
-            bestOfferAutoDecline: formValues.bestOfferAutoDecline
-          })
-        };
-        break;
-        
-      case 'Competitive':
-        payload = {
-          ...payload,
-          minPrice: formValues.minPrice,
-          maxPrice: formValues.maxPrice,
-          targetPrice: formValues.targetPrice || formValues.landedPrice,
-          repriceFrequency: formValues.repriceFrequency,
-          competitorAdjustment: formValues.competitorAdjustment
-        };
-        break;
-        
-      case 'Dynamic':
-        payload = {
-          ...payload,
-          minPrice: formValues.minPrice,
-          maxPrice: formValues.maxPrice,
-          competitorAdjustment: formValues.competitorAdjustment,
-          demandMultiplier: formValues.demandMultiplier,
-          inventoryThreshold: formValues.inventoryThreshold
-        };
-        break;
-        
-      case 'Time Based':
-        payload = {
-          ...payload,
-          basePrice: formValues.basePrice,
-          weekendBoost: formValues.weekendBoost,
-          holidayBoost: formValues.holidayBoost,
-          clearanceThreshold: formValues.clearanceThreshold
-        };
-        break;
-    }
-    
-    // Add notes if provided
-    if (formValues.notes) {
-      payload.notes = formValues.notes;
-    }
-    
-    // Submit the payload
-    console.log('Submitting pricing strategy:', payload);
-    
-    try {
-      setSubmitting(true);
-      const response = await apiService.inventory.assignPricingStrategy(payload);
-      console.log('API response:', response);
-      showAlert('Pricing strategy updated successfully!', 'success');
-      
-      // Optional: Navigate after success with slight delay
-      
-      // setTimeout(() => {
-      //   navigate("/inventory");
-      // }, 2000);
-    } catch (error) {
-      console.error("Error setting pricing strategy:", error);
-      setError(error.message);
-      showAlert(`Error: ${error.message || 'Something went wrong'}`, 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-  
   // Show alert
   const showAlert = (message, severity) => {
     setAlertMessage(message);
     setAlertSeverity(severity);
     setAlertOpen(true);
     
-    // Auto-close successful alerts after 5 seconds
     if (severity === 'success') {
       setTimeout(() => {
         setAlertOpen(false);
       }, 5000);
+    }
+  };
+
+  // Handle Update button click
+  const handleUpdate = async () => {
+    try {
+      setSubmitting(true);
+
+      // Validate required fields
+      if (!formData.selectedStrategy) {
+        showAlert("Please select a pricing strategy", "error");
+        return;
+      }
+
+      if (!formData.minPrice || !formData.maxPrice) {
+        showAlert("Min price and max price are required", "error");
+        return;
+      }
+
+      if (parseFloat(formData.minPrice) >= parseFloat(formData.maxPrice)) {
+        showAlert("Min price must be less than max price", "error");
+        return;
+      }
+
+      // Find the selected strategy details
+      const selectedStrategyObj = availableStrategies.find(s => 
+        s.strategyName === formData.selectedStrategy
+      );
+
+      if (!selectedStrategyObj) {
+        showAlert("Selected strategy not found", "error");
+        return;
+      }
+
+      // Prepare update payload with new min/max prices
+      const updatePayload = {
+        ...selectedStrategyObj,
+        minPrice: parseFloat(formData.minPrice),
+        maxPrice: parseFloat(formData.maxPrice),
+        notes: formData.notes
+      };
+
+      console.log("Updating strategy with payload:", updatePayload);
+
+      // Update the strategy
+      const response = await apiService.pricingStrategies.updateStrategyOnProduct(ItemId, updatePayload);
+      
+      console.log("Update response:", response);
+      showAlert("Pricing strategy updated successfully!", "success");
+
+      // Refresh the data
+      await fetchExistingData();
+
+    } catch (error) {
+      console.error("Error updating strategy:", error);
+      showAlert(`Error: ${error.message}`, "error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -315,229 +266,239 @@ export default function EditStrategy() {
   }
 
   return (
-    <>
-      <Container>
-        <Box sx={{ px: 4, py: 5, width: "100%", maxWidth: 700 }}>
-          {/* Alert */}
-          <Collapse in={alertOpen}>
-            <Alert
-              severity={alertSeverity}
-              action={
-                <IconButton
-                  aria-label="close"
-                  color="inherit"
-                  size="small"
-                  onClick={() => setAlertOpen(false)}
-                >
-                  <CloseIcon fontSize="inherit" />
-                </IconButton>
-              }
-              sx={{ mb: 2 }}
-            >
-              {alertMessage}
-            </Alert>
-          </Collapse>
-
-          {/* Title */}
-          <Typography
-            variant="h5"
-            fontWeight="bold"
-            mb={3}
-            sx={{ textAlign: "left", color: "#333" }}
+    <Container>
+      <Box sx={{ px: 4, py: 5, width: "100%", maxWidth: 700 }}>
+        {/* Alert */}
+        <Collapse in={alertOpen}>
+          <Alert
+            severity={alertSeverity}
+            action={
+              <IconButton
+                aria-label="close"
+                color="inherit"
+                size="small"
+                onClick={() => setAlertOpen(false)}
+              >
+                <CloseIcon fontSize="inherit" />
+              </IconButton>
+            }
+            sx={{ mb: 2 }}
           >
-            Assign Pricing Strategy
+            {alertMessage}
+          </Alert>
+        </Collapse>
+
+        {/* Title */}
+        <Typography
+          variant="h5"
+          fontWeight="bold"
+          mb={3}
+          sx={{ textAlign: "left", color: "#333" }}
+        >
+          Pricing Configuration
+        </Typography>
+
+        {/* Product Info */}
+        <Box mb={3}>
+          <Typography
+            variant="body1"
+            color="primary"
+            fontWeight={600}
+            sx={{ textAlign: "left", fontSize: "15px" }}
+          >
+            {product[0]?.productTitle || "Product"}
+            <br />
+            <Typography variant="caption" color="text.secondary">
+              {product[0]?.productId || ItemId} |{" "}
+              <span style={{ color: "#2E865F" }}>Active</span>
+            </Typography>
+          </Typography>
+        </Box>
+
+        {/* Current Price Display */}
+        <Box mb={3} sx={{ textAlign: "left" }}>
+          <Typography variant="body2" color="text.secondary">
+            Current Price: <strong>${oldPrice}</strong>
+          </Typography>
+        </Box>
+
+        {/* Form */}
+        <Box display="flex" flexDirection="column" gap={3}>
+          
+          {/* Pricing Strategy Section */}
+          <TextField
+            select
+            label="Pricing Strategy"
+            name="selectedStrategy"
+            value={formData.selectedStrategy}
+            onChange={handleInputChange}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
+          >
+            <MenuItem value="">Select a strategy</MenuItem>
+            {availableStrategies.map((strategy) => (
+              <MenuItem key={strategy.strategyName} value={strategy.strategyName}>
+                {strategy.strategyName} ({strategy.repricingRule})
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <Typography
+            variant="body2"
+            sx={{
+              color: "#1976d2",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              fontSize: "16px",
+            }}
+            onClick={() => navigate("/home/add-strategy")}
+          >
+            <Box
+              component="span"
+              sx={{ fontWeight: "bold", mr: 0.5, fontSize: "20px" }}
+            >
+              +
+            </Box>{" "}
+            Add Strategy
           </Typography>
 
-          {/* Product Info */}
-          <Box mb={3} sx={{ textAlign: "center" }}>
-            <Typography
-              variant="body1"
-              color="primary"
-              fontWeight={600}
-              sx={{ textAlign: "left", fontSize: "15px" }}
-            >
-              {product[0]?.productTitle || "Product"}
-              <br />
-              <Typography variant="caption" color="text.secondary">
-                {product[0]?.productId || ItemId} |{" "}
-                <span style={{ color: "#2E865F" }}>Active</span>
-              </Typography>
-            </Typography>
-          </Box>
-
-          {/* Current Price Display */}
-          <Box mb={3} sx={{ textAlign: "left" }}>
-            <Typography variant="body2" color="text.secondary">
-              Current Price: <strong>${oldPrice}</strong>
-            </Typography>
-          </Box>
-
-          {/* Form */}
-          <Box
-            component="form"
-            display="flex"
-            flexDirection="column"
-            gap={3}
-            onSubmit={handleSubmit}
+          {/* Competitor Rule Section */}
+          <TextField
+            select
+            label="Competitor Rule"
+            name="selectedCompetitorRule"
+            value={formData.selectedCompetitorRule}
+            onChange={handleInputChange}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
           >
-            {/* Pricing Strategy */}
-            <TextField
-              select
-              label="Pricing Strategy"
-              value={strategy}
-              name="strategy"
-              onChange={handleStrategyChange}
-              required
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
+            <MenuItem value="">Select a rule</MenuItem>
+            {availableRules.map((rule) => (
+              <MenuItem key={rule.ruleName} value={rule.ruleName}>
+                {rule.ruleName}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <Typography
+            variant="body2"
+            sx={{
+              color: "#1976d2",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              fontSize: "16px",
+            }}
+            onClick={() => navigate("/home/add-competitor-rule")}
+          >
+            <Box
+              component="span"
+              sx={{ fontWeight: "bold", mr: 0.5, fontSize: "20px" }}
             >
-              <MenuItem value="">Select a strategy</MenuItem>
-              <MenuItem value="Fixed">Fixed</MenuItem>
-              <MenuItem value="Competitive">Competitive</MenuItem>
-              <MenuItem value="Dynamic">Dynamic</MenuItem>
-              <MenuItem value="Time Based">Time Based</MenuItem>
-            </TextField>
+              +
+            </Box>{" "}
+            Add Competitor Rule
+          </Typography>
 
-            <Typography
-              variant="body2"
-              sx={{
-                color: "#1976d2",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                fontSize: "20px",
-              }}
-              onClick={() => navigate("/home/update-strategy/add-strategy")}
-            >
-              <Box
-                component="span"
-                sx={{ fontWeight: "bold", mr: 0.5, fontSize: "20px" }}
-              >
-                +
-              </Box>{" "}
-              Add Strategy
-            </Typography>
+          {/* Price Fields */}
+          <TextField
+            label="My Landed Price"
+            name="myLandedPrice"
+            value={formData.myLandedPrice}
+            onChange={handleInputChange}
+            type="number"
+            inputProps={{ step: "0.01", min: "0" }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+              backgroundColor: "#f5f5f5"
+            }}
+          />
 
-            <TextField
-              select
-              label="Pricing Strategy"
-              value={strategy}
-              name="strategy"
-              onChange={handleStrategyChange}
-              required
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            >
-              <MenuItem value="">Select a rule</MenuItem>
-              <MenuItem value="Fixed">---------------</MenuItem>
-              {/* <MenuItem value="Competitive">Competitive</MenuItem>
-              <MenuItem value="Dynamic">Dynamic</MenuItem>
-              <MenuItem value="Time Based">Time Based</MenuItem> */}
-            </TextField>
+          <TextField
+            label="Lowest Price"
+            name="lowestPrice"
+            value={formData.lowestPrice}
+            onChange={handleInputChange}
+            type="number"
+            inputProps={{ step: "0.01", min: "0" }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+              backgroundColor: "#f5f5f5"
+            }}
+          />
 
-            <Typography
-              variant="body2"
-              sx={{
-                color: "#1976d2",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                fontSize: "20px",
-              }}
-              onClick={() => navigate("/home/add-competitor-rule")}
-            >
-              <Box
-                component="span"
-                sx={{ fontWeight: "bold", mr: 0.5, fontSize: "20px" }}
-              >
-                +
-              </Box>{" "}
-              Add Competitor Rule
-            </Typography>
+          <TextField
+            label="Min Price (Landed)"
+            name="minPrice"
+            value={formData.minPrice}
+            onChange={handleInputChange}
+            required
+            type="number"
+            inputProps={{ step: "0.01", min: "0" }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
+          />
 
-            <TextField
-              label="My Landed Price"
-              name="landedPrice"
-              value={oldPrice}
-              disabled
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />
+          <TextField
+            label="Max Price (Landed)"
+            name="maxPrice"
+            value={formData.maxPrice}
+            onChange={handleInputChange}
+            required
+            type="number"
+            inputProps={{ step: "0.01", min: "0" }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
+          />
 
-            <TextField
-              label="Lowest Price"
-              name="lowestPrice"
-              disabled
-              value={formValues.minPrice}
-              onChange={handleFormChange}
-              required
-              type="number"
-              inputProps={{ step: "0.01", min: "0" }}
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />
-
-            <TextField
-              label="Min Price"
-              name="minprice"
-              value={formValues.minPrice}
-              onChange={handleFormChange}
-              required
-              type="number"
-              inputProps={{ step: "0.01", min: "0" }}
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />
-
-            <TextField
-              label="Max Price"
-              name="maxPrice"
-              value={formValues.minPrice}
-              onChange={handleFormChange}
-              required
-              type="number"
-              inputProps={{ step: "0.01", min: "0" }}
-              sx={{
-                "& .MuiInputLabel-root": { fontSize: "16px" },
-                "& .MuiInputBase-root": { fontSize: "16px" },
-              }}
-            />
-            
-              <Button
-                          variant="contained"
-                          color="primary"
-                          sx={{
-                            padding: "12px 20px",
-                            width: "120px", // 👈 Updated width
-                            fontWeight: 600,
-                            fontSize: "16px",
-                            borderRadius: "25px",
-                            "&:hover": {
-                              backgroundColor: "#1976d2",
-                              boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.1)",
-                            },
-                            transition: "all 0.3s ease-in-out",
-                          }}
-                          onClick={() => {
-                            handlEditPrice();
-                            handleOpen();
-                          }}
-                        >
-                          Update
-                        </Button>
-            </Box>
-          </Box>
-      </Container>
-    </>
+          <TextField
+            label="Notes"
+            name="notes"
+            value={formData.notes}
+            onChange={handleInputChange}
+            placeholder="e.g. Entire inventory expiring in January."
+            multiline
+            rows={3}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
+          />
+          
+          {/* Update Button */}
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleUpdate}
+            disabled={submitting}
+            sx={{
+              padding: "12px 20px",
+              width: "120px",
+              fontWeight: 600,
+              fontSize: "16px",
+              borderRadius: "25px",
+              "&:hover": {
+                backgroundColor: "#1976d2",
+                boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.1)",
+              },
+              transition: "all 0.3s ease-in-out",
+            }}
+          >
+            {submitting ? <CircularProgress size={24} color="inherit" /> : "Update"}
+          </Button>
+        </Box>
+      </Box>
+    </Container>
   );
 }
