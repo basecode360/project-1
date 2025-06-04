@@ -20,6 +20,7 @@ function App() {
   // State to manage login status
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const user = userStore(store => store.user)
+  const authToken = userStore(store => store.authToken)
 
   const handleLogin = () => {
     setIsLoggedIn(true); // Set login state to true when the user logs in
@@ -34,7 +35,7 @@ function App() {
       <Routes>
         <Route
           path="/"
-          element={<Navigate to={isLoggedIn || user ? "/home" : "/login"} />}
+          element={<Navigate to={isLoggedIn || user || authToken ? "/home" : "/login"} />}
         />
         <Route path="/login" element={<Login handleLogin={handleLogin} />} />
         <Route

@@ -114,35 +114,6 @@ router.post('/add-multiple-products', ebayService.addMultipleProducts);
 
 /**
  * @swagger
- * /editPrice:
- *   put:
- *     description: Edit the price of an eBay product
- *     parameters:
- *       - in: body
- *         name: price
- *         description: New price for the product
- *         schema:
- *           type: object
- *           required:
- *             - id
- *             - price
- *           properties:
- *             id:
- *               type: string
- *               example: "123456789"
- *             price:
- *               type: number
- *               example: 79.99
- *     responses:
- *       200:
- *         description: Price updated successfully
- *       404:
- *         description: Product not found
- */
-router.put('/editPrice', ebayService.editPrice);
-
-/**
- * @swagger
  * /deleteProduct:
  *   delete:
  *     description: Delete a product from eBay

@@ -101,6 +101,16 @@ const inventory = {
 };
 
 const auth = {
+  getAuthToken: async () => {
+    try {
+      const response = await axios.get(`${backend_url}/auth/token`);
+      console.log("API response:", response);
+      return response.data;
+    } catch (error) {
+      console.error("API error:", error);
+      return { success: false, error: error.message };
+    }
+  },
   login: async (credentials) => {
     try {
       const response = await authClient.post("/login", credentials);
