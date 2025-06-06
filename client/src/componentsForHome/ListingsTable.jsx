@@ -34,15 +34,12 @@ export default function ListingsTable() {
     modifySku, 
    searchProduct, 
    modifyCompetitors,
-   modifyProductsObj,
-   authToken,
-   modifyAuthToken
+   modifyProductsObj
   } = useProductStore()
   // Fetch data from eBay when component mounts
   useEffect(() => {
     if (AllProducts && AllProducts.length > 0 && AllProducts[0].productId) {
       setLoading(false);
-      getAuthToken()
       return;
     }
     fetchEbayListings();
@@ -81,21 +78,7 @@ useEffect(() => {
   //   return "N/A";
   // };
 
-  const getAuthToken = async () => {
-    try {
-      const response = await apiService.auth.getAuthToken();
-      if (response.success) {
-        console.log("Auth token fetched successfully:", response.auth_token);
-        modifyAuthToken(response.auth_token);
-        return response.auth_token;
-      } else {
-        throw new Error("Failed to fetch auth token");
-      }
-    } catch (error) {
-      console.error("Error fetching auth token:", error);
-      throw error;
-    }
-  }
+  
   const fetchEbayListings = async () => {
     try {
       setLoading(true);
@@ -125,6 +108,7 @@ for (const item of ebayListings) {
   const response = await apiService.inventory.getCompetitorPrice(itemID);
   response.itemID = itemID;
   const { price, count } = response;
+  console.log("Competitor Price => ", price, "Count => ", count)
   modifyCompetitors(response.productInfo);
   console.log("Competitors => ", response.productInfo)
   if (hasVariations) {

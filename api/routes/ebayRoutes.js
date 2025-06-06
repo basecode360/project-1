@@ -1,298 +1,204 @@
-import express from 'express';
-import ebayService from '../services/ebayService.js'
-import getEbayListings from '../controllers/ebayController.js'
-import { createAllPolicies } from '../services/createPolicy.js';
-import { getPolicy, checkAuthToken } from '../services/getPolicy.js';
-import fetchProducts from '../services/getInventory.js';
-import editRoute from '../services/editProduct.js';
-import strategy from '../services/pricingStrategy.js' 
+import express from "express";
+import xml2js from "xml2js";
+import axios from "axios";
 
 const router = express.Router();
 
 /**
- * @swagger
- * /listings-from-mongo:
- *   get:
- *     description: Retrieve a list of eBay listings
- *     responses:
- *       200:
- *         description: A list of eBay listings
- *       500:
- *         description: Internal server error
+ * Helper Functions (same as before, reused for eBay XML calls)
  */
-router.get('/listings-from-mongo', getEbayListings);
+
+async function parseXMLResponse(xmlData) {
+  const parser = new xml2js.Parser({
+    explicitArray: false,
+    tagNameProcessors: [xml2js.processors.stripPrefix],
+  });
+  return await parser.parseStringPromise(xmlData);
+}
+
+function isEBayResponseSuccessful(result, operationName) {
+  const response = result[operationName + "Response"];
+  if (response.Ack !== "Success" && response.Ack !== "Warning") {
+    const errors = response.Errors;
+    const errorMsg = Array.isArray(errors)
+      ? errors.map((e) => e.LongMessage || e.ShortMessage).join(", ")
+      : errors?.LongMessage || errors?.ShortMessage || "Unknown error";
+    throw new Error(`eBay API Error: ${errorMsg}`);
+  }
+  return response;
+}
+
+async function makeEBayAPICall(xmlRequest, callName) {
+  const response = await axios({
+    method: "post",
+    url: "https://api.ebay.com/ws/api.dll",
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-COMPATIBILITY-LEVEL": "1155",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": "0",
+    },
+    data: xmlRequest,
+  });
+  return response.data;
+}
 
 /**
- * @swagger
- * /inventory:
- *   get:
- *     description: Get the inventory from eBay
- *     responses:
- *       200:
- *         description: List of inventory items
- *       500:
- *         description: Internal server error
+ * 1️⃣ GET /api/ebay/competitor-prices/:itemId
+ *     Fetch “GetItem” from Trading API + Browse API competitor prices
  */
-// router.get('/inventory', fetchProducts.getInventory);
+router.get("/competitor-prices/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const oauthToken = process.env.AUTH_TOKEN; // Trading API
+    const appId = process.env.CLIENT_ID; // Browse API
 
-/**
- * @swagger
- * /add-product:
- *   post:
- *     description: Add a new product to eBay
- *     parameters:
- *       - in: body
- *         name: product
- *         description: Product to be added
- *         schema:
- *           type: object
- *           required:
- *             - name
- *             - price
- *           properties:
- *             name:
- *               type: string
- *               example: "Product Name"
- *             price:
- *               type: number
- *               example: 99.99
- *     responses:
- *       201:
- *         description: Product added successfully
- *       400:
- *         description: Bad request
- */
-router.post('/add-product', ebayService.addProduct);
+    if (!oauthToken) {
+      return res
+        .status(400)
+        .json({ success: false, message: "eBay auth token is required" });
+    }
 
-/**
- * @swagger
- * /getSingleItem/{id}:
- *   get:
- *     description: Get a single eBay item by ID
- *     parameters:
- *       - in: path
- *         name: id
- *         description: ID of the eBay item to fetch
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Single item retrieved
- *       404:
- *         description: Item not found
- */
-router.get('/getSingleItem/:id', fetchProducts.getInventoryItem);
+    // 1) GetItem request (Trading API)
+    const getItemXml = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${oauthToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+    const getItemResponse = await makeEBayAPICall(getItemXml, "GetItem");
+    const parsedItem = await parseXMLResponse(getItemResponse);
+    const itemResult = isEBayResponseSuccessful(parsedItem, "GetItem");
+    const item = itemResult.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
+    }
 
-/**
- * @swagger
- * /add-multiple-products:
- *   post:
- *     description: Add multiple products to eBay
- *     parameters:
- *       - in: body
- *         name: products
- *         description: List of products to be added
- *         schema:
- *           type: array
- *           items:
- *             type: object
- *             properties:
- *               name:
- *                 type: string
- *                 example: "Product Name"
- *               price:
- *                 type: number
- *                 example: 99.99
- *     responses:
- *       201:
- *         description: Products added successfully
- *       400:
- *         description: Bad request
- */
-router.post('/add-multiple-products', ebayService.addMultipleProducts);
+    // Extract title & category for Browse call
+    const title = item.Title || "";
+    const categoryId = item.PrimaryCategory?.CategoryID || "";
 
-/**
- * @swagger
- * /deleteProduct:
- *   delete:
- *     description: Delete a product from eBay
- *     parameters:
- *       - in: query
- *         name: id
- *         description: ID of the product to delete
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Product deleted successfully
- *       404:
- *         description: Product not found
- */
-router.delete('/deleteProduct', ebayService.deleteProduct);
+    // 2) Browse API competitor prices
+    const query = new URLSearchParams({
+      q: title,
+      category_ids: categoryId,
+      limit: 20,
+      sort: "price",
+    });
+    const browseResponse = await axios.get(
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?${query.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${appId}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 10000,
+      }
+    );
 
-/**
- * @swagger
- * /add-Offeres-forProduct:
- *   post:
- *     description: Add offers for a product
- *     parameters:
- *       - in: body
- *         name: offer
- *         description: Offer details
- *         schema:
- *           type: object
- *           required:
- *             - productId
- *             - offerDetails
- *           properties:
- *             productId:
- *               type: string
- *               example: "123456789"
- *             offerDetails:
- *               type: string
- *               example: "Discount offer for the product"
- *     responses:
- *       201:
- *         description: Offer added successfully
- *       400:
- *         description: Bad request
- */
-router.post('/add-Offeres-forProduct', ebayService.createOfferForInventoryItem);
+    const items = browseResponse.data.itemSummaries || [];
+    const competitorPrices = items
+      .filter((i) => i.itemId !== itemId)
+      .map((i) => {
+        const price = parseFloat(i.price.value);
+        const shipping = parseFloat(
+          i.shippingOptions?.[0]?.shippingCost?.value || "0"
+        );
+        return +(price + shipping).toFixed(2);
+      })
+      .filter((p) => !isNaN(p) && p > 0);
 
-/**
- * @swagger
- * /create-ebay-policies:
- *   post:
- *     description: Create eBay policies
- *     responses:
- *       201:
- *         description: Policies created successfully
- */
-router.post('/create-ebay-policies', createAllPolicies);
-
-/**
- * @swagger
- * /get-ebay-policies:
- *   get:
- *     description: Get all eBay policies
- *     responses:
- *       200:
- *         description: List of eBay policies
- */
-// Correct way
-router.get('/get-fullfilment-policies', async (req, res) => {
-    try {
-      const policies = await getPolicy("fulfillment");
-      res.json(policies);
-    } catch (error) {
-      console.error("Error in fulfillment policies route:", error);
-      res.status(500).json({ 
-        error: "Failed to fetch fulfillment policies",
-        details: error.message 
+    res.json({
+      success: true,
+      itemId,
+      itemTitle: item.Title,
+      competitorPrices: {
+        allData: items.map((i) => ({
+          id: i.itemId,
+          title: i.title,
+          price: parseFloat(i.price.value),
+          shipping:
+            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || "0") ||
+            0,
+          imageurl: i.thumbnailImages[0]?.imageUrl || "",
+          seller: i.seller?.username,
+          condition: i.condition,
+          productUrl: i.itemWebUrl,
+          locale: i.itemLocation?.country,
+        })),
+        lowestPrice:
+          competitorPrices.length > 0 ? Math.min(...competitorPrices) : 0,
+        allPrices: competitorPrices,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching competitor prices:", error);
+    if (error.message.includes("rate limit")) {
+      return res.status(429).json({
+        success: false,
+        message: "eBay API rate limit exceeded. Try again later.",
+        error: error.message,
       });
     }
-  });
-// Correct way
-router.get('/get-payment-policies', async (req, res) => {
-    try {
-      const policies = await getPolicy("payment");
-      res.json(policies);
-    } catch (error) {
-      console.error("Error in payment policies route:", error);
-      res.status(500).json({ 
-        error: "Failed to fetch payment policies",
-        details: error.message 
-      });
-    }
-  });
-
-
-  router.get('/get-return-policies', async (req, res) => {
-    try {
-      const policies = await getPolicy("return");
-      res.json(policies);
-    } catch (error) {
-      console.error("Error in return policies route:", error);
-      res.status(500).json({ 
-        error: "Failed to fetch return policies",
-        details: error.message 
-      });
-    }
-  });
-
-
-  router.post('/add-merchant-key', ebayService.createMerchantLocation);
-  router.get('/get-Merchant-key', ebayService.getMerchantKey);
+    return res
+      .status(500)
+      .json({ success: false, message: error.message });
+  }
+});
 
 /**
- * @swagger
- * /active-listings:
- *   get:
- *     description: Get all active selling listings from your eBay inventory
- *     responses:
- *       200:
- *         description: A list of active selling listings
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 listings:
- *                   type: array
- *                   items:
- *                     type: object
- *       500:
- *         description: Internal server error
+ * 2️⃣ Debug endpoint to inspect raw ItemSpecifics
+ *    GET /api/ebay/debug/item-specifics/:itemId
  */
-router.get('/active-listings', fetchProducts.getActiveListings);
+router.get("/debug/item-specifics/:itemId", async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+    if (!authToken) {
+      return res
+        .status(400)
+        .json({ success: false, message: "eBay auth token is required" });
+    }
 
+    const getItemXml = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+    const xmlResponse = await makeEBayAPICall(getItemXml, "GetItem");
+    const parsed = await parseXMLResponse(xmlResponse);
+    const ebayRes = isEBayResponseSuccessful(parsed, "GetItem");
+    const item = ebayRes.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
+    }
 
-
-router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
-
-router.post('/check-token-status', checkAuthToken);
-
-
-
-
-
-
-
-router.get('/item-variations/:itemId', editRoute.getItemVariations);
-
-// Update specific variation price
-router.post('/edit-variation-price', editRoute.editVariationPrice);
-
-// Update all variations to same price
-router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
-
-
-
-
-
-
-
-
-
-
-// Get current pricing strategy
-router.get('/pricing-strategy/:itemId', strategy.getPricingStrategy);
-
-// Set pricing strategy for single item
-router.post('/pricing-strategy', strategy.setPricingStrategy);
-
-// Set pricing strategy for multiple items
-router.post('/pricing-strategy/bulk', strategy.setBulkPricingStrategy);
-
-
-
-
-
-
-
+    const specs = item.ItemSpecifics?.NameValueList || [];
+    const arr = Array.isArray(specs) ? specs : [specs];
+    res.json({
+      success: true,
+      itemId,
+      itemTitle: item.Title,
+      totalSpecifics: arr.length,
+      allItemSpecifics: arr.map((s) => ({ name: s.Name, value: s.Value })),
+    });
+  } catch (error) {
+    console.error("Debug ItemSpecifics Error:", error.message);
+    return res
+      .status(500)
+      .json({ success: false, message: error.message });
+  }
+});
 
 export default router;

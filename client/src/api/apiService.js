@@ -74,7 +74,7 @@ const inventory = {
   getCompetitorPrice: async (itemId) => {
     try {
       const response = await axios.get(
-        `${backend_url}/api/pricing-strategies/competitor-prices/${itemId}`
+        `${backend_url}/api/pricing-strategies/products/${itemId}`
       );
       const data = response.data?.competitorPrices || {};
       const productInfo = data.allData;
@@ -103,7 +103,7 @@ const inventory = {
 const auth = {
   getAuthToken: async () => {
     try {
-      const response = await axios.get(`${backend_url}/auth/token`);
+      const response = await axios.get(`${backend_url}/auth/automated-login`);
       console.log("API response:", response);
       return response.data;
     } catch (error) {
@@ -315,7 +315,7 @@ const pricingStrategies = {
   getAllUniqueStrategies: async () => {
     try {
       const response = await axios.get(
-        `${backend_url}/pricing-strategies/active-listings`
+        `${backend_url}/api/ebay/pricing-strategies?active=true`
       );
       console.log("Get unique strategies API response:", response);
 
@@ -355,6 +355,7 @@ const competitorRules = {
   // Create rule on specific product
   createRuleOnProduct: async (itemId, ruleData) => {
     try {
+      console.log(`Creating competitor rule for itemId:${ruleData}`);
       const response = await axios.post(
         `${backend_url}/api/competitor-rules/products/${itemId}`,
         ruleData

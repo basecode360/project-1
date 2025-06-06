@@ -1,5 +1,6 @@
 import axios from 'axios';
 import xml2js from 'xml2js';
+import PriceHistory from '../models/history.js';
 
 // Get item variations to find available SK
 // Us
@@ -89,17 +90,65 @@ const getItemVariations = async (req, res) => {
   }
 };
 
-// Update price for a specific variation
 const editVariationPrice = async (req, res) => {
-  try {
-    const { itemId, price, sku, currency = 'USD' } = req.body;
-    console.log(`itemId => ${itemId}, price => ${price}, sku => ${sku}`)
+  let priceRecord = null;
+  
+  try { 
+    const { itemId, price, sku, currency = 'USD', title = null, userId = null } = req.body;
+    console.log(`itemId => ${itemId}, price => ${price}, sku => ${sku}`);
+    
     if (!itemId || !price || !sku) {
       return res.status(400).json({
         success: false,
         message: "Required fields are missing (itemId, price, and sku required for variation items)"
       });
     }
+
+    // Get the current price before updating (for tracking change)
+    let oldPrice = null;
+    try {
+      const latestPriceRecord = await PriceHistory.getLatestPrice(itemId, sku);
+      if (latestPriceRecord) {
+        oldPrice = latestPriceRecord.newPrice;
+      }
+    } catch (err) {
+      console.warn(`Could not retrieve previous price for ${itemId}/${sku}: ${err.message}`);
+    }
+
+    // Calculate price change metrics
+    const priceValue = parseFloat(price);
+    let changeAmount = null;
+    let changePercentage = null;
+    let changeDirection = null;
+    
+    if (oldPrice !== null) {
+      changeAmount = priceValue - oldPrice;
+      if (oldPrice > 0) {
+        changePercentage = ((priceValue - oldPrice) / oldPrice) * 100;
+      }
+      changeDirection = 
+        changeAmount > 0 ? 'increased' : 
+        changeAmount < 0 ? 'decreased' : 'unchanged';
+    }
+
+    // Create a price history record (initially marked as unsuccessful)
+    priceRecord = new PriceHistory({
+      itemId,
+      sku,
+      title,
+      oldPrice,
+      newPrice: priceValue,
+      currency,
+      changeAmount,
+      changePercentage,
+      changeDirection,
+      source: 'api',
+      success: false,
+      userId
+    });
+    
+    // Save the initial record to track the attempt
+    await priceRecord.save();
 
     const authToken = process.env.AUTH_TOKEN;
 
@@ -141,9 +190,36 @@ const editVariationPrice = async (req, res) => {
     const reviseResponse = result.ReviseInventoryStatusResponse;
 
     if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
+      // Update the price history record with success info
+      priceRecord.success = true;
+      priceRecord.apiResponse = {
+        ack: reviseResponse.Ack,
+        timestamp: reviseResponse.Timestamp,
+        inventoryStatus: reviseResponse.InventoryStatus
+      };
+      
+      // Add any warnings to metadata
+      if (reviseResponse.Ack === 'Warning' && reviseResponse.Errors) {
+        priceRecord.metadata.warnings = Array.isArray(reviseResponse.Errors) 
+          ? reviseResponse.Errors 
+          : [reviseResponse.Errors];
+      }
+      
+      // Save the updated record
+      await priceRecord.save();
+      
       return res.status(200).json({
         success: true,
         message: `Price updated successfully to ${price} ${currency} for SKU: ${sku}`,
+        priceChangeTracked: true,
+        priceHistory: {
+          id: priceRecord._id,
+          oldPrice,
+          newPrice: priceValue,
+          changeAmount,
+          changePercentage: changePercentage?.toFixed(2) || null,
+          changeDirection
+        },
         data: {
           itemId: reviseResponse.InventoryStatus?.ItemID,
           sku: reviseResponse.InventoryStatus?.SKU,
@@ -158,9 +234,26 @@ const editVariationPrice = async (req, res) => {
   } catch (error) {
     const errorMessage = error.response?.data || error.message;
     console.error('Error updating variation price:', errorMessage);
+    
+    // Update the price history record with error info
+    if (priceRecord) {
+      priceRecord.success = false;
+      priceRecord.error = {
+        message: errorMessage,
+        stack: error.stack,
+        responseStatus: error.response?.status
+      };
+      
+      // Save the updated record with error information
+      await priceRecord.save().catch(err => {
+        console.error('Failed to update price history with error details:', err);
+      });
+    }
+    
     return res.status(error.response?.status || 500).json({
       success: false,
       message: "Error updating variation price",
+      priceChangeTracked: !!priceRecord,
       error: errorMessage
     });
   }

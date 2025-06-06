@@ -1,23 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Container, 
-  Box, 
-  Typography, 
-  TextField, 
-  MenuItem, 
+import React, { useState, useEffect } from "react";
+import {
+  Container,
+  Box,
+  Typography,
+  TextField,
+  MenuItem,
   Button,
   Alert,
   Collapse,
   IconButton,
-  CircularProgress
-} from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import { useProductStore } from '../store/productStore';
-import { useNavigate } from 'react-router-dom';
-import apiService from '../api/apiService';
+  CircularProgress,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import { useProductStore } from "../store/productStore";
+import { useNavigate } from "react-router-dom";
+import apiService from "../api/apiService";
 
 export default function EditStrategy() {
-  const { ItemId, AllProducts, modifyProductsObj, sku} = useProductStore();
+  const { ItemId, AllProducts, modifyProductsObj, sku } = useProductStore();
   const [product, setProduct] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -27,13 +27,13 @@ export default function EditStrategy() {
 
   // Form state
   const [formData, setFormData] = useState({
-    selectedStrategy: '',
-    selectedCompetitorRule: '',
-    myLandedPrice: '',
-    lowestPrice: '',
-    minPrice: '',
-    maxPrice: '',
-    notes: ''
+    selectedStrategy: "",
+    selectedCompetitorRule: "",
+    myLandedPrice: "",
+    lowestPrice: "",
+    minPrice: "",
+    maxPrice: "",
+    notes: "",
   });
 
   // Available strategies and rules (fetched from APIs)
@@ -42,38 +42,38 @@ export default function EditStrategy() {
 
   // Alert state
   const [alertOpen, setAlertOpen] = useState(false);
-  const [alertMessage, setAlertMessage] = useState('');
-  const [alertSeverity, setAlertSeverity] = useState('info');
+  const [alertMessage, setAlertMessage] = useState("");
+  const [alertSeverity, setAlertSeverity] = useState("info");
 
   // Fetch product data
   useEffect(() => {
     const fetchProductData = async () => {
       try {
-        console.log("product data fetching ", sku) 
-        setLoading(true); 
+        console.log("product data fetching ", sku);
+        setLoading(true);
         const productObj = AllProducts.filter((item) =>
           item.sku ? item.sku === sku : item.productId === ItemId
         );
-        
+
         if (productObj.length === 0) {
           setError("Product not found");
           return;
         }
-        
+
         setProduct(productObj);
         modifyProductsObj(productObj);
-        
+
         // Set oldPrice from product data
         if (productObj[0]?.myPrice) {
           const priceString = productObj[0].myPrice;
-          const priceValue = priceString.includes(" ") 
-            ? priceString.split(" ")[1] 
-            : priceString.replace(/[^0-9.]/g, '');
-          
+          const priceValue = priceString.includes(" ")
+            ? priceString.split(" ")[1]
+            : priceString.replace(/[^0-9.]/g, "");
+
           setOldPrice(priceValue);
-          
+
           // Initialize form values with product price
-          setFormData(prev => ({
+          setFormData((prev) => ({
             ...prev,
             myLandedPrice: priceValue,
             minPrice: (parseFloat(priceValue) * 0.9).toFixed(2), // 10% below
@@ -83,7 +83,6 @@ export default function EditStrategy() {
 
         // Fetch existing strategies and rules for this product
         await fetchExistingData();
-        
       } catch (err) {
         setError("Error loading product data: " + err.message);
         console.error("Error loading product:", err);
@@ -100,76 +99,45 @@ export default function EditStrategy() {
   // Fetch existing strategies and competitor rules
   const fetchExistingData = async () => {
     try {
-        const strategyResponse = await apiService.pricingStrategies.getStrategyFromProduct(ItemId);
-    console.log("strategyResponse", strategyResponse);
-    
-    if (strategyResponse.hasPricingStrategy) {
-      // Keep the original structure but also add a normalized property for comparison
-      const strategyWithNormalizedName = {
-        ...strategyResponse.pricingStrategy,
-        // Add this property for internal use without changing the original structure
-        _normalizedName: strategyResponse.pricingStrategy.PricingStrategy || strategyResponse.pricingStrategy.strategyName || ""
-      };
-      
-      setAvailableStrategies([strategyWithNormalizedName]);
-      setFormData(prev => ({
-        ...prev,
-        selectedStrategy: strategyWithNormalizedName._normalizedName
-      }));
-    }
-      // Fetch competitor rules for this product
-      const ruleResponse = await apiService.competitorRules.getRuleFromProduct(ItemId);
-      console.log("ruleResponse", ruleResponse)
-      if (ruleResponse.hasCompetitorRule) {
-        setAvailableRules([ruleResponse.competitorRule]);
-        setFormData(prev => ({
+      // Fetch individual strategy and rule (if set on the product)
+      const { strategy, rule } =
+        await apiService.combined.getProductRulesAndStrategies(ItemId);
+
+      if (strategy?.hasPricingStrategy && strategy.pricingStrategy) {
+        setFormData((prev) => ({
           ...prev,
-          selectedCompetitorRule: ruleResponse.competitorRule.ruleName
+          selectedStrategy: strategy.pricingStrategy.strategyName,
         }));
       }
 
-      // If no existing data, fetch from active listings to show available options
-      if (!strategyResponse.hasPricingStrategy) {
-        const allStrategiesResponse = await apiService.pricingStrategies.getAllActiveWithStrategies();
-        const uniqueStrategies = [];
-        const seen = new Set();
-        
-        allStrategiesResponse.listings.forEach(listing => {
-          if (listing.hasPricingStrategy && !seen.has(listing.pricingStrategy.strategyName)) {
-            seen.add(listing.pricingStrategy.strategyName);
-            uniqueStrategies.push(listing.pricingStrategy);
-          }
-        });
-        
-        setAvailableStrategies(uniqueStrategies);
+      if (rule?.hasCompetitorRule && rule.competitorRule) {
+        setFormData((prev) => ({
+          ...prev,
+          selectedCompetitorRule: rule.competitorRule.ruleName,
+        }));
       }
 
-      if (!ruleResponse.hasCompetitorRule) {
-        const allRulesResponse = await apiService.competitorRules.getAllActiveWithRules();
-        const uniqueRules = [];
-        const seen = new Set();
-        
-        allRulesResponse.listings.forEach(listing => {
-          if (listing.hasCompetitorRule && !seen.has(listing.competitorRule.ruleName)) {
-            seen.add(listing.competitorRule.ruleName);
-            uniqueRules.push(listing.competitorRule);
-          }
-        });
-        
-        setAvailableRules(uniqueRules);
+      // Always fetch all dropdown options
+      const allOptions = await apiService.combined.getAllOptionsForDropdowns();
+
+      if (allOptions.strategies?.length > 0) {
+        setAvailableStrategies(allOptions.strategies);
       }
 
+      if (allOptions.rules?.length > 0) {
+        setAvailableRules(allOptions.rules);
+      }
     } catch (error) {
-      console.error("Error fetching existing data:", error);
+      console.error("Error fetching existing and dropdown data:", error);
     }
   };
 
   // Handle input changes
   const handleInputChange = (event) => {
     const { name, value } = event.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
@@ -178,8 +146,8 @@ export default function EditStrategy() {
     setAlertMessage(message);
     setAlertSeverity(severity);
     setAlertOpen(true);
-    
-    if (severity === 'success') {
+
+    if (severity === "success") {
       setTimeout(() => {
         setAlertOpen(false);
       }, 5000);
@@ -208,8 +176,8 @@ export default function EditStrategy() {
       }
 
       // Find the selected strategy details
-      const selectedStrategyObj = availableStrategies.find(s => 
-        s.strategyName === formData.selectedStrategy
+      const selectedStrategyObj = availableStrategies.find(
+        (s) => s.strategyName === formData.selectedStrategy
       );
 
       if (!selectedStrategyObj) {
@@ -222,20 +190,23 @@ export default function EditStrategy() {
         ...selectedStrategyObj,
         minPrice: parseFloat(formData.minPrice),
         maxPrice: parseFloat(formData.maxPrice),
-        notes: formData.notes
+        notes: formData.notes,
       };
 
       console.log("Updating strategy with payload:", updatePayload);
 
       // Update the strategy
-      const response = await apiService.pricingStrategies.updateStrategyOnProduct(ItemId, updatePayload);
-      
+      const response =
+        await apiService.pricingStrategies.updateStrategyOnProduct(
+          ItemId,
+          updatePayload
+        );
+
       console.log("Update response:", response);
       showAlert("Pricing strategy updated successfully!", "success");
 
       // Refresh the data
       await fetchExistingData();
-
     } catch (error) {
       console.error("Error updating strategy:", error);
       showAlert(`Error: ${error.message}`, "error");
@@ -247,7 +218,14 @@ export default function EditStrategy() {
   if (loading) {
     return (
       <Container>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            height: "50vh",
+          }}
+        >
           <CircularProgress />
         </Box>
       </Container>
@@ -260,9 +238,9 @@ export default function EditStrategy() {
         <Box sx={{ p: 4 }}>
           <Alert severity="error">
             {error}
-            <Button 
-              variant="outlined" 
-              size="small" 
+            <Button
+              variant="outlined"
+              size="small"
               sx={{ ml: 2 }}
               onClick={() => navigate("/inventory")}
             >
@@ -333,34 +311,26 @@ export default function EditStrategy() {
 
         {/* Form */}
         <Box display="flex" flexDirection="column" gap={3}>
-          
-         <TextField
-  select
-  label="Pricing Strategy"
-  name="selectedStrategy"
-  value={formData.selectedStrategy || ""}
-  onChange={handleInputChange}
-  sx={{
-    "& .MuiInputLabel-root": { fontSize: "16px" },
-    "& .MuiInputBase-root": { fontSize: "16px" },
-  }}
->
-  <MenuItem value="">Select a strategy</MenuItem>
-  {availableStrategies.map((strategy) => {
-    // Determine which property to use for display and value
-    const displayName = strategy.strategyName || strategy.PricingStrategy || "";
-    const valueToUse = strategy._normalizedName || displayName;
-    
-    return (
-      <MenuItem 
-        key={valueToUse} 
-        value={valueToUse}
-      >
-        {displayName} ({strategy.repricingRule})
-      </MenuItem>
-    );
-  })}
-</TextField>
+          <TextField
+            select
+            label="Pricing Strategy"
+            name="selectedStrategy"
+            value={
+              availableStrategies.some(
+                (s) => s.strategyName === formData.selectedStrategy
+              )
+                ? formData.selectedStrategy
+                : ""
+            }
+            onChange={handleInputChange}
+          >
+            <MenuItem value="">Select a strategy</MenuItem>
+            {availableStrategies.map((strategy, index) => (
+              <MenuItem key={index} value={strategy.strategyName}>
+                {strategy.displayName}
+              </MenuItem>
+            ))}
+          </TextField>
 
           <Typography
             variant="body2"
@@ -387,17 +357,19 @@ export default function EditStrategy() {
             select
             label="Competitor Rule"
             name="selectedCompetitorRule"
-            value={formData.selectedCompetitorRule}
+            value={
+              availableRules.some(
+                (r) => r.ruleName === formData.selectedCompetitorRule
+              )
+                ? formData.selectedCompetitorRule
+                : ""
+            }
             onChange={handleInputChange}
-            sx={{
-              "& .MuiInputLabel-root": { fontSize: "16px" },
-              "& .MuiInputBase-root": { fontSize: "16px" },
-            }}
           >
             <MenuItem value="">Select a rule</MenuItem>
-            {availableRules.map((rule) => (
-              <MenuItem key={rule.ruleName} value={rule.ruleName}>
-                {rule.ruleName}
+            {availableRules.map((rule, index) => (
+              <MenuItem key={index} value={rule.ruleName}>
+                {rule.displayName || rule.ruleName}
               </MenuItem>
             ))}
           </TextField>
@@ -433,7 +405,7 @@ export default function EditStrategy() {
             sx={{
               "& .MuiInputLabel-root": { fontSize: "16px" },
               "& .MuiInputBase-root": { fontSize: "16px" },
-              backgroundColor: "#f5f5f5"
+              backgroundColor: "#f5f5f5",
             }}
           />
 
@@ -447,7 +419,7 @@ export default function EditStrategy() {
             sx={{
               "& .MuiInputLabel-root": { fontSize: "16px" },
               "& .MuiInputBase-root": { fontSize: "16px" },
-              backgroundColor: "#f5f5f5"
+              backgroundColor: "#f5f5f5",
             }}
           />
 
@@ -492,7 +464,7 @@ export default function EditStrategy() {
               "& .MuiInputBase-root": { fontSize: "16px" },
             }}
           />
-          
+
           {/* Update Button */}
           <Button
             variant="contained"
@@ -512,7 +484,11 @@ export default function EditStrategy() {
               transition: "all 0.3s ease-in-out",
             }}
           >
-            {submitting ? <CircularProgress size={24} color="inherit" /> : "Update"}
+            {submitting ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              "Update"
+            )}
           </Button>
         </Box>
       </Box>

@@ -33,12 +33,12 @@ export default function AddStrategyPage() {
     repricingRule: "",
     beatByType: "", // "AMOUNT" or "PERCENTAGE"
     beatByValue: "",
-    stayAboveType: "", // "AMOUNT" or "PERCENTAGE" 
+    stayAboveType: "", // "AMOUNT" or "PERCENTAGE"
     stayAboveValue: "",
     noCompetitionAction: "USE_MAX_PRICE",
     maxPrice: "",
     minPrice: "",
-    assignToActiveListings: false
+    assignToActiveListings: false,
   });
 
   // Alert state
@@ -70,7 +70,7 @@ export default function AddStrategyPage() {
             ? priceString.split(" ")[1]
             : priceString.replace(/[^0-9.]/g, "");
 
-          setFormData(prev => ({
+          setFormData((prev) => ({
             ...prev,
             minPrice: (parseFloat(priceValue) * 0.9).toFixed(2),
             maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2),
@@ -92,23 +92,23 @@ export default function AddStrategyPage() {
   // Handle input changes
   const handleInputChange = (event) => {
     const { name, value, type, checked } = event.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === "checkbox" ? checked : value,
     }));
   };
 
   // Handle repricing rule change
   const handleRepricingRuleChange = (event) => {
     const value = event.target.value;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       repricingRule: value,
       // Reset dependent fields when rule changes
       beatByType: "",
       beatByValue: "",
       stayAboveType: "",
-      stayAboveValue: ""
+      stayAboveValue: "",
     }));
   };
 
@@ -130,7 +130,7 @@ export default function AddStrategyPage() {
     const payload = {
       strategyName: formData.strategyName,
       repricingRule: formData.repricingRule,
-      noCompetitionAction: formData.noCompetitionAction
+      noCompetitionAction: formData.noCompetitionAction,
     };
 
     if (formData.minPrice) {
@@ -180,12 +180,18 @@ export default function AddStrategyPage() {
       // Validate strategy-specific fields
       if (formData.repricingRule === "BEAT_LOWEST") {
         if (!formData.beatByType || !formData.beatByValue) {
-          showAlert("Beat by type and value are required for Beat Lowest strategy", "error");
+          showAlert(
+            "Beat by type and value are required for Beat Lowest strategy",
+            "error"
+          );
           return;
         }
       } else if (formData.repricingRule === "STAY_ABOVE") {
         if (!formData.stayAboveType || !formData.stayAboveValue) {
-          showAlert("Stay above type and value are required for Stay Above strategy", "error");
+          showAlert(
+            "Stay above type and value are required for Stay Above strategy",
+            "error"
+          );
           return;
         }
       }
@@ -195,10 +201,19 @@ export default function AddStrategyPage() {
 
       let response;
       if (formData.assignToActiveListings) {
-        response = await apiService.pricingStrategies.createStrategyForAllActive(strategyPayload);
-        showAlert(`Pricing strategy created and assigned to ${response.summary.successfulAssignments} active listings!`, "success");
+        response =
+          await apiService.pricingStrategies.createStrategyForAllActive(
+            strategyPayload
+          );
+        showAlert(
+          `Pricing strategy created and assigned to ${response.summary.successfulAssignments} active listings!`,
+          "success"
+        );
       } else {
-        response = await apiService.pricingStrategies.createStrategyOnProduct(ItemId, strategyPayload);
+        response = await apiService.pricingStrategies.createStrategyOnProduct(
+          ItemId,
+          strategyPayload
+        );
         showAlert("Pricing strategy created successfully!", "success");
       }
 
@@ -208,7 +223,6 @@ export default function AddStrategyPage() {
       setTimeout(() => {
         navigate(-1); // Go back to previous page
       }, 2000);
-
     } catch (error) {
       console.error("Error creating pricing strategy:", error);
       showAlert(`Error: ${error.message}`, "error");
@@ -220,7 +234,14 @@ export default function AddStrategyPage() {
   if (loading) {
     return (
       <Container>
-        <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            height: "50vh",
+          }}
+        >
           <CircularProgress />
         </Box>
       </Container>
@@ -233,7 +254,12 @@ export default function AddStrategyPage() {
         <Box sx={{ p: 4 }}>
           <Alert severity="error">
             {error}
-            <Button variant="outlined" size="small" sx={{ ml: 2 }} onClick={() => navigate(-1)}>
+            <Button
+              variant="outlined"
+              size="small"
+              sx={{ ml: 2 }}
+              onClick={() => navigate(-1)}
+            >
               Go Back
             </Button>
           </Alert>
@@ -266,23 +292,33 @@ export default function AddStrategyPage() {
         </Collapse>
 
         {/* Title */}
-        <Typography variant="h5" fontWeight="bold" mb={3} sx={{ textAlign: "left", color: "#333" }}>
+        <Typography
+          variant="h5"
+          fontWeight="bold"
+          mb={3}
+          sx={{ textAlign: "left", color: "#333" }}
+        >
           Add Pricing Strategy
         </Typography>
 
         {/* Product Info */}
         <Box mb={3}>
-          <Typography variant="body1" color="primary" fontWeight={600} sx={{ textAlign: "left", fontSize: "15px" }}>
+          <Typography
+            variant="body1"
+            color="primary"
+            fontWeight={600}
+            sx={{ textAlign: "left", fontSize: "15px" }}
+          >
             {product[0]?.productTitle || "Product"}
             <br />
             <Typography variant="caption" color="text.secondary">
-              {product[0]?.productId || ItemId} | <span style={{ color: "#2E865F" }}>Active</span>
+              {product[0]?.productId || ItemId} |{" "}
+              <span style={{ color: "#2E865F" }}>Active</span>
             </Typography>
           </Typography>
         </Box>
 
         <Box component="form" display="flex" flexDirection="column" gap={3}>
-          
           {/* Strategy Name */}
           <TextField
             label="Strategy Name"
@@ -291,7 +327,10 @@ export default function AddStrategyPage() {
             onChange={handleInputChange}
             required
             placeholder="e.g. Beat Competitors by $5"
-            sx={{ "& .MuiInputLabel-root": { fontSize: "16px" }, "& .MuiInputBase-root": { fontSize: "16px" } }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
           />
 
           {/* Repricing Rule */}
@@ -302,7 +341,10 @@ export default function AddStrategyPage() {
             value={formData.repricingRule}
             onChange={handleRepricingRuleChange}
             required
-            sx={{ "& .MuiInputLabel-root": { fontSize: "16px" }, "& .MuiInputBase-root": { fontSize: "16px" } }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
           >
             <MenuItem value="">Select a rule</MenuItem>
             <MenuItem value="MATCH_LOWEST">Match Lowest Price</MenuItem>
@@ -330,13 +372,24 @@ export default function AddStrategyPage() {
               </Grid>
               <Grid item xs={6}>
                 <TextField
-                  label={formData.beatByType === "PERCENTAGE" ? "Percentage" : "Amount"}
+                  label={
+                    formData.beatByType === "PERCENTAGE"
+                      ? "Percentage"
+                      : "Amount"
+                  }
                   name="beatByValue"
                   value={formData.beatByValue}
                   onChange={handleInputChange}
-                  placeholder={formData.beatByType === "PERCENTAGE" ? "e.g. 10" : "e.g. 5.00"}
+                  placeholder={
+                    formData.beatByType === "PERCENTAGE"
+                      ? "e.g. 10"
+                      : "e.g. 5.00"
+                  }
                   type="number"
-                  inputProps={{ step: formData.beatByType === "PERCENTAGE" ? "1" : "0.01", min: "0" }}
+                  inputProps={{
+                    step: formData.beatByType === "PERCENTAGE" ? "1" : "0.01",
+                    min: "0",
+                  }}
                   required
                   fullWidth
                 />
@@ -363,13 +416,25 @@ export default function AddStrategyPage() {
               </Grid>
               <Grid item xs={6}>
                 <TextField
-                  label={formData.stayAboveType === "PERCENTAGE" ? "Percentage" : "Amount"}
+                  label={
+                    formData.stayAboveType === "PERCENTAGE"
+                      ? "Percentage"
+                      : "Amount"
+                  }
                   name="stayAboveValue"
                   value={formData.stayAboveValue}
                   onChange={handleInputChange}
-                  placeholder={formData.stayAboveType === "PERCENTAGE" ? "e.g. 15" : "e.g. 10.00"}
+                  placeholder={
+                    formData.stayAboveType === "PERCENTAGE"
+                      ? "e.g. 15"
+                      : "e.g. 10.00"
+                  }
                   type="number"
-                  inputProps={{ step: formData.stayAboveType === "PERCENTAGE" ? "1" : "0.01", min: "0" }}
+                  inputProps={{
+                    step:
+                      formData.stayAboveType === "PERCENTAGE" ? "1" : "0.01",
+                    min: "0",
+                  }}
                   required
                   fullWidth
                 />
@@ -378,7 +443,11 @@ export default function AddStrategyPage() {
           )}
 
           {/* Advanced Options */}
-          <Typography variant="h6" fontWeight="bold" sx={{ color: "#333", mt: 2 }}>
+          <Typography
+            variant="h6"
+            fontWeight="bold"
+            sx={{ color: "#333", mt: 2 }}
+          >
             Advanced Options
           </Typography>
 
@@ -410,7 +479,10 @@ export default function AddStrategyPage() {
             onChange={handleInputChange}
             type="number"
             inputProps={{ step: "0.01", min: "0" }}
-            sx={{ "& .MuiInputLabel-root": { fontSize: "16px" }, "& .MuiInputBase-root": { fontSize: "16px" } }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
           />
 
           <TextField
@@ -420,7 +492,10 @@ export default function AddStrategyPage() {
             onChange={handleInputChange}
             type="number"
             inputProps={{ step: "0.01", min: "0" }}
-            sx={{ "& .MuiInputLabel-root": { fontSize: "16px" }, "& .MuiInputBase-root": { fontSize: "16px" } }}
+            sx={{
+              "& .MuiInputLabel-root": { fontSize: "16px" },
+              "& .MuiInputBase-root": { fontSize: "16px" },
+            }}
           />
 
           {/* Assign to Active Listings Checkbox */}
@@ -456,7 +531,11 @@ export default function AddStrategyPage() {
               transition: "all 0.3s ease-in-out",
             }}
           >
-            {submitting ? <CircularProgress size={24} color="inherit" /> : "Add Strategy"}
+            {submitting ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              "Add Strategy"
+            )}
           </Button>
         </Box>
       </Box>

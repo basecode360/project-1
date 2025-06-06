@@ -13,6 +13,7 @@ import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import apiService from "../api/apiService"; 
 import { userStore } from "../store/authStore";
+import getValidAuthToken from "../utils/authToken"; // Function to validate token
 // const allowedUsers = [
 //   { email: "teampartstunt@gmail.com", password: "Dodge@#124578~" },
 // ];
@@ -24,28 +25,38 @@ export default function Login({ handleLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const saveUser = userStore(store => store.saveUser)
+  const user = userStore(store => store.user)
+ useEffect(() => {
+  if (user) {
+    navigate("/home");
+  }
+ },[])
 
-// useEffect(() => {
-//   if(user) {
-//     navigate("/home")
-//   }
-// },[])
-
-  const handleLoginClick = async () => {
-    // const user = allowedUsers.find(
-    //   (u) => u.email === email && u.password === password
-    // );
+const handleLoginClick = async () => {
+  try {
     console.log("Login attempt with email:", email, "and password:", password);
+    
+    // Step 1: Attempt login
     const response = await apiService.auth.login({ email, password });
     console.log("API response:", response);
-    if (response.success) {                                          
-      saveUser({email,password})
-      handleLogin(); // Call the handleLogin function passed from App.js
-      navigate("/home")
+
+    if (response.success) {
+      // Step 2: Save credentials if needed
+      saveUser({ email, password });
+
+      // Step 4: Proceed to next screen
+      const token = await getValidAuthToken();
+      handleLogin(); // from App.js
+      navigate("/home");
     } else {
       setError("Invalid email or password");
     }
-  };
+  } catch (error) {
+    console.error("Error during login:", error);
+    setError("Something went wrong during login.");
+  }
+};
+
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);

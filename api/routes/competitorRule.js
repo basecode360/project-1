@@ -1,14 +1,18 @@
 import express from "express";
 import xml2js from "xml2js";
 import axios from "axios";
-
+import {
+  createCompetitorRule,
+  applyRuleToItems,
+  getAllCompetitorRules,
+} from "../controllers/competitorRule.js";
 const router = express.Router();
 
 /**
  * ===============================
  * COMPETITOR RULES API
  * ===============================
- * 
+ *
  * This file contains all competitor rule management APIs:
  * - Create competitor rule on specific product
  * - Create competitor rule and assign to all active listings
@@ -34,7 +38,7 @@ async function parseXMLResponse(xmlData) {
 
 // Check if eBay API response is successful
 function isEBayResponseSuccessful(result, operationName) {
-  const response = result[operationName + 'Response'];
+  const response = result[operationName + "Response"];
   if (response.Ack !== "Success" && response.Ack !== "Warning") {
     const errors = response.Errors;
     const errorMsg = Array.isArray(errors)
@@ -71,45 +75,68 @@ function createCompetitorRuleSpecifics(ruleData) {
     excludeConditions = [],
     excludeProductTitleWords = [],
     excludeSellers = [],
-    findCompetitorsBasedOnMPN = false
+    findCompetitorsBasedOnMPN = false,
   } = ruleData;
 
   const ruleSpecifics = [
     { name: "CompetitorRuleName", value: ruleName },
-    { name: "FindCompetitorsBasedOnMPN", value: findCompetitorsBasedOnMPN.toString() }
+    {
+      name: "FindCompetitorsBasedOnMPN",
+      value: findCompetitorsBasedOnMPN.toString(),
+    },
   ];
 
   if (minPercentOfCurrentPrice !== undefined) {
-    ruleSpecifics.push({ name: "MinPercentOfCurrentPrice", value: minPercentOfCurrentPrice.toString() });
+    ruleSpecifics.push({
+      name: "MinPercentOfCurrentPrice",
+      value: minPercentOfCurrentPrice.toString(),
+    });
   }
 
   if (maxPercentOfCurrentPrice !== undefined) {
-    ruleSpecifics.push({ name: "MaxPercentOfCurrentPrice", value: maxPercentOfCurrentPrice.toString() });
+    ruleSpecifics.push({
+      name: "MaxPercentOfCurrentPrice",
+      value: maxPercentOfCurrentPrice.toString(),
+    });
   }
 
   // Handle arrays by joining with semicolons
   if (excludeCountries.length > 0) {
-    ruleSpecifics.push({ name: "ExcludeCountries", value: excludeCountries.join(";") });
+    ruleSpecifics.push({
+      name: "ExcludeCountries",
+      value: excludeCountries.join(";"),
+    });
   }
 
   if (excludeConditions.length > 0) {
-    ruleSpecifics.push({ name: "ExcludeConditions", value: excludeConditions.join(";") });
+    ruleSpecifics.push({
+      name: "ExcludeConditions",
+      value: excludeConditions.join(";"),
+    });
   }
 
   if (excludeProductTitleWords.length > 0) {
-    ruleSpecifics.push({ name: "ExcludeProductTitleWords", value: excludeProductTitleWords.join(";") });
+    ruleSpecifics.push({
+      name: "ExcludeProductTitleWords",
+      value: excludeProductTitleWords.join(";"),
+    });
   }
 
   if (excludeSellers.length > 0) {
-    ruleSpecifics.push({ name: "ExcludeSellers", value: excludeSellers.join(";") });
+    ruleSpecifics.push({
+      name: "ExcludeSellers",
+      value: excludeSellers.join(";"),
+    });
   }
 
   // Add timestamp
-  ruleSpecifics.push({ name: "CompetitorRuleCreatedAt", value: new Date().toISOString() });
+  ruleSpecifics.push({
+    name: "CompetitorRuleCreatedAt",
+    value: new Date().toISOString(),
+  });
 
   return ruleSpecifics;
 }
-
 
 /**
  * ===============================
@@ -128,7 +155,7 @@ router.post("/products/:itemId", async (req, res) => {
       excludeConditions = [],
       excludeProductTitleWords = [],
       excludeSellers = [],
-      findCompetitorsBasedOnMPN = false
+      findCompetitorsBasedOnMPN = false,
     } = req.body;
 
     const authToken = process.env.AUTH_TOKEN;
@@ -136,36 +163,48 @@ router.post("/products/:itemId", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
     if (!ruleName) {
       return res.status(400).json({
         success: false,
-        message: "Rule name is required"
+        message: "Rule name is required",
       });
     }
 
     // Validate percentages
-    if (minPercentOfCurrentPrice !== undefined && (typeof minPercentOfCurrentPrice !== "number" || minPercentOfCurrentPrice < 0)) {
+    if (
+      minPercentOfCurrentPrice !== undefined &&
+      (typeof minPercentOfCurrentPrice !== "number" ||
+        minPercentOfCurrentPrice < 0)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Minimum percent must be a non-negative number"
+        message: "Minimum percent must be a non-negative number",
       });
     }
 
-    if (maxPercentOfCurrentPrice !== undefined && (typeof maxPercentOfCurrentPrice !== "number" || maxPercentOfCurrentPrice < 0)) {
+    if (
+      maxPercentOfCurrentPrice !== undefined &&
+      (typeof maxPercentOfCurrentPrice !== "number" ||
+        maxPercentOfCurrentPrice < 0)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Maximum percent must be a non-negative number"
+        message: "Maximum percent must be a non-negative number",
       });
     }
 
-    if (minPercentOfCurrentPrice !== undefined && maxPercentOfCurrentPrice !== undefined && minPercentOfCurrentPrice >= maxPercentOfCurrentPrice) {
+    if (
+      minPercentOfCurrentPrice !== undefined &&
+      maxPercentOfCurrentPrice !== undefined &&
+      minPercentOfCurrentPrice >= maxPercentOfCurrentPrice
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Minimum percent must be less than maximum percent"
+        message: "Minimum percent must be less than maximum percent",
       });
     }
 
@@ -181,12 +220,16 @@ router.post("/products/:itemId", async (req, res) => {
         <Item>
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
-            ${ruleSpecifics.map(spec => `
+            ${ruleSpecifics
+              .map(
+                (spec) => `
             <NameValueList>
               <n>${spec.name}</n>
               <Value>${spec.value}</Value>
             </NameValueList>
-            `).join('')}
+            `
+              )
+              .join("")}
           </ItemSpecifics>
         </Item>
       </ReviseItemRequest>
@@ -195,7 +238,7 @@ router.post("/products/:itemId", async (req, res) => {
     const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
     const result = await parseXMLResponse(xmlResponse);
     const response = isEBayResponseSuccessful(result, "ReviseItem");
-
+    await createCompetitorRule(req, res);
     res.json({
       success: true,
       message: "Competitor rule created successfully on eBay product",
@@ -208,20 +251,19 @@ router.post("/products/:itemId", async (req, res) => {
         excludeConditions,
         excludeProductTitleWords,
         excludeSellers,
-        findCompetitorsBasedOnMPN
+        findCompetitorsBasedOnMPN,
       },
       ebayResponse: {
         itemId: response.ItemID,
         startTime: response.StartTime,
-        endTime: response.EndTime
-      }
+        endTime: response.EndTime,
+      },
     });
-
   } catch (error) {
     console.error("eBay Competitor Rule Creation Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -240,7 +282,9 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
     const authToken = process.env.AUTH_TOKEN;
 
     if (!authToken) {
-      return res.status(400).json({ success: false, message: "eBay auth token is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "eBay auth token is required" });
     }
 
     // First, retrieve existing item specifics
@@ -262,10 +306,10 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
 
     // Extract existing item specifics
     const existingSpecifics = item.Item.ItemSpecifics?.NameValueList || [];
-    
+
     // Filter out competitor rule related specifics if they exist
-    const nonCompetitorRuleSpecifics = existingSpecifics.filter(spec => 
-      !isCompetitorRuleSpecific(spec.Name)
+    const nonCompetitorRuleSpecifics = existingSpecifics.filter(
+      (spec) => !isCompetitorRuleSpecific(spec.Name)
     );
 
     // Create new competitor rule specifics
@@ -281,35 +325,51 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
             <!-- Include existing non-competitor rule specifics -->
-            ${nonCompetitorRuleSpecifics.map(spec => `
+            ${nonCompetitorRuleSpecifics
+              .map(
+                (spec) => `
               <NameValueList>
                 <Name>${spec.Name}</Name>
                 <Value>${spec.Value}</Value>
               </NameValueList>
-            `).join('')}
+            `
+              )
+              .join("")}
             
             <!-- Add new competitor rule specifics -->
-            ${competitorRuleSpecifics.map(spec => `
+            ${competitorRuleSpecifics
+              .map(
+                (spec) => `
               <NameValueList>
                 <Name>${spec.name}</Name>
                 <Value>${spec.value}</Value>
               </NameValueList>
-            `).join('')}
+            `
+              )
+              .join("")}
             
             <!-- Ensure Brand and Type are present -->
-            ${!nonCompetitorRuleSpecifics.some(spec => spec.Name === "Brand") ? `
+            ${
+              !nonCompetitorRuleSpecifics.some((spec) => spec.Name === "Brand")
+                ? `
               <NameValueList>
                 <Name>Brand</Name>
                 <Value>YourBrandName</Value>
               </NameValueList>
-            ` : ''}
+            `
+                : ""
+            }
             
-            ${!nonCompetitorRuleSpecifics.some(spec => spec.Name === "Type") ? `
+            ${
+              !nonCompetitorRuleSpecifics.some((spec) => spec.Name === "Type")
+                ? `
               <NameValueList>
                 <Name>Type</Name>
                 <Value>YourTypeName</Value>
               </NameValueList>
-            ` : ''}
+            `
+                : ""
+            }
           </ItemSpecifics>
         </Item>
       </ReviseItemRequest>
@@ -318,18 +378,19 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
     const xmlResponse = await makeEBayAPICall(xmlRequest, "ReviseItem");
     const result = await parseXMLResponse(xmlResponse);
     const response = isEBayResponseSuccessful(result, "ReviseItem");
-
+    createCompetitorRule(req, res);
+    applyRuleToItems(req, res);
     return res.json({
       success: true,
-      message: "Competitor rule applied successfully while preserving pricing strategy",
+      message:
+        "Competitor rule applied successfully while preserving pricing strategy",
       itemId,
       ebayResponse: {
         itemId: response.ItemID,
         startTime: response.StartTime,
-        endTime: response.EndTime
-      }
+        endTime: response.EndTime,
+      },
     });
-
   } catch (error) {
     console.error("Apply Competitor Rule Error:", error.message);
     return res.status(500).json({ success: false, message: error.message });
@@ -339,16 +400,16 @@ router.post("/apply-competitor-rule/:itemId", async (req, res) => {
 // Helper function to identify competitor rule specifics
 function isCompetitorRuleSpecific(name) {
   const competitorRuleSpecificNames = [
-    "RuleName", 
-    "MinPercentOfCurrentPrice", 
+    "RuleName",
+    "MinPercentOfCurrentPrice",
     "MaxPercentOfCurrentPrice",
-    "ExcludeCountry", 
+    "ExcludeCountry",
     "ExcludeCondition",
-    "ExcludeProductTitleWord", 
+    "ExcludeProductTitleWord",
     "ExcludeSeller",
-    "FindCompetitorsBasedOnMPN"
+    "FindCompetitorsBasedOnMPN",
   ];
-  
+
   return competitorRuleSpecificNames.includes(name);
 }
 
@@ -364,9 +425,9 @@ function isPricingStrategySpecific(name) {
     "StayAboveValue",
     "MaxPrice",
     "MinPrice",
-    "IsPricingStrategy"
+    "IsPricingStrategy",
   ];
-  
+
   return pricingStrategySpecificNames.includes(name);
 }
 
@@ -380,7 +441,7 @@ router.post("/assign-to-all-active", async (req, res) => {
       excludeConditions = [],
       excludeProductTitleWords = [],
       excludeSellers = [],
-      findCompetitorsBasedOnMPN = false
+      findCompetitorsBasedOnMPN = false,
     } = req.body;
 
     const authToken = process.env.AUTH_TOKEN;
@@ -388,14 +449,14 @@ router.post("/assign-to-all-active", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
     if (!ruleName) {
       return res.status(400).json({
         success: false,
-        message: "Rule name is required"
+        message: "Rule name is required",
       });
     }
 
@@ -418,9 +479,15 @@ router.post("/assign-to-all-active", async (req, res) => {
     `;
 
     console.log("Fetching active listings for competitor rule assignment...");
-    const activeListingsResponse = await makeEBayAPICall(getActiveListingsXML, "GetMyeBaySelling");
+    const activeListingsResponse = await makeEBayAPICall(
+      getActiveListingsXML,
+      "GetMyeBaySelling"
+    );
     const activeListingsResult = await parseXMLResponse(activeListingsResponse);
-    const activeListingsData = isEBayResponseSuccessful(activeListingsResult, "GetMyeBaySelling");
+    const activeListingsData = isEBayResponseSuccessful(
+      activeListingsResult,
+      "GetMyeBaySelling"
+    );
 
     const activeList = activeListingsData.ActiveList;
     if (!activeList || !activeList.ItemArray) {
@@ -428,15 +495,17 @@ router.post("/assign-to-all-active", async (req, res) => {
         success: true,
         message: "No active listings found",
         assignedCount: 0,
-        listings: []
+        listings: [],
       });
     }
 
-    const items = Array.isArray(activeList.ItemArray.Item) 
-      ? activeList.ItemArray.Item 
+    const items = Array.isArray(activeList.ItemArray.Item)
+      ? activeList.ItemArray.Item
       : [activeList.ItemArray.Item];
 
-    console.log(`Found ${items.length} active listings for competitor rule assignment`);
+    console.log(
+      `Found ${items.length} active listings for competitor rule assignment`
+    );
 
     // Step 2: Create competitor rule specifics
     const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
@@ -449,7 +518,7 @@ router.post("/assign-to-all-active", async (req, res) => {
     for (const item of items) {
       try {
         const itemId = item.ItemID;
-        
+
         console.log(`Applying competitor rule to item ${itemId}...`);
 
         const xmlRequest = `
@@ -461,12 +530,16 @@ router.post("/assign-to-all-active", async (req, res) => {
             <Item>
               <ItemID>${itemId}</ItemID>
               <ItemSpecifics>
-                ${ruleSpecifics.map(spec => `
+                ${ruleSpecifics
+                  .map(
+                    (spec) => `
                 <NameValueList>
                   <n>${spec.name}</n>
                   <Value>${spec.value}</Value>
                 </NameValueList>
-                `).join('')}
+                `
+                  )
+                  .join("")}
               </ItemSpecifics>
             </Item>
           </ReviseItemRequest>
@@ -480,19 +553,21 @@ router.post("/assign-to-all-active", async (req, res) => {
           itemId,
           title: item.Title,
           success: true,
-          message: "Competitor rule applied successfully"
+          message: "Competitor rule applied successfully",
         });
 
         // Add small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
-
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
-        console.error(`Error applying competitor rule to item ${item.ItemID}:`, error.message);
+        console.error(
+          `Error applying competitor rule to item ${item.ItemID}:`,
+          error.message
+        );
         errors.push({
           itemId: item.ItemID,
           title: item.Title,
           success: false,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -511,26 +586,24 @@ router.post("/assign-to-all-active", async (req, res) => {
         excludeConditions,
         excludeProductTitleWords,
         excludeSellers,
-        findCompetitorsBasedOnMPN
+        findCompetitorsBasedOnMPN,
       },
       summary: {
         totalActiveListings: items.length,
         successfulAssignments: successCount,
-        failedAssignments: errorCount
+        failedAssignments: errorCount,
       },
       successfulAssignments: results,
-      failedAssignments: errors
+      failedAssignments: errors,
     });
-
   } catch (error) {
     console.error("eBay Bulk Competitor Rule Assignment Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
-
 
 /**
  * ===============================
@@ -545,7 +618,7 @@ router.get("/active-listings", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
@@ -567,27 +640,36 @@ router.get("/active-listings", async (req, res) => {
       </GetMyeBaySellingRequest>
     `;
 
-    const activeListingsResponse = await makeEBayAPICall(getActiveListingsXML, "GetMyeBaySelling");
+    const activeListingsResponse = await makeEBayAPICall(
+      getActiveListingsXML,
+      "GetMyeBaySelling"
+    );
     const activeListingsResult = await parseXMLResponse(activeListingsResponse);
-    const activeListingsData = isEBayResponseSuccessful(activeListingsResult, "GetMyeBaySelling");
+    const activeListingsData = isEBayResponseSuccessful(
+      activeListingsResult,
+      "GetMyeBaySelling"
+    );
 
     const activeList = activeListingsData.ActiveList;
     if (!activeList || !activeList.ItemArray) {
       return res.json({
         success: true,
         message: "No active listings found",
-        listings: []
+        listings: [],
       });
     }
 
-    const items = Array.isArray(activeList.ItemArray.Item) 
-      ? activeList.ItemArray.Item 
+    const items = Array.isArray(activeList.ItemArray.Item)
+      ? activeList.ItemArray.Item
       : [activeList.ItemArray.Item];
 
     // For each item, extract basic info and check if it has competitor rules
-    const listingsWithCompetitorRules = items.map(item => {
+    const listingsWithCompetitorRules = items.map((item) => {
       const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
-      const competitorRule = parseCompetitorRuleFromSpecifics(itemSpecifics, item.ItemID);
+      const competitorRule = parseCompetitorRuleFromSpecifics(
+        itemSpecifics,
+        item.ItemID
+      );
 
       return {
         itemId: item.ItemID,
@@ -596,28 +678,34 @@ router.get("/active-listings", async (req, res) => {
         currency: item.StartPrice?.__attributes__?.currencyID || "USD",
         listingType: item.ListingType,
         hasCompetitorRule: competitorRule !== null,
-        competitorRule
+        competitorRule,
       };
     });
 
-    const withCompetitorRule = listingsWithCompetitorRules.filter(item => item.hasCompetitorRule);
-    const withoutCompetitorRule = listingsWithCompetitorRules.filter(item => !item.hasCompetitorRule);
+    const withCompetitorRule = listingsWithCompetitorRules.filter(
+      (item) => item.hasCompetitorRule
+    );
+    const withoutCompetitorRule = listingsWithCompetitorRules.filter(
+      (item) => !item.hasCompetitorRule
+    );
 
     res.json({
       success: true,
       summary: {
         totalActiveListings: listingsWithCompetitorRules.length,
         listingsWithCompetitorRule: withCompetitorRule.length,
-        listingsWithoutCompetitorRule: withoutCompetitorRule.length
+        listingsWithoutCompetitorRule: withoutCompetitorRule.length,
       },
-      listings: listingsWithCompetitorRules
+      listings: listingsWithCompetitorRules,
     });
-
   } catch (error) {
-    console.error("eBay Active Listings with Competitor Rules Fetch Error:", error.message);
+    console.error(
+      "eBay Active Listings with Competitor Rules Fetch Error:",
+      error.message
+    );
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -639,7 +727,7 @@ router.put("/products/:itemId", async (req, res) => {
       excludeConditions = [],
       excludeProductTitleWords = [],
       excludeSellers = [],
-      findCompetitorsBasedOnMPN = false
+      findCompetitorsBasedOnMPN = false,
     } = req.body;
 
     const authToken = process.env.AUTH_TOKEN;
@@ -647,20 +735,23 @@ router.put("/products/:itemId", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
     if (!ruleName) {
       return res.status(400).json({
         success: false,
-        message: "Rule name is required"
+        message: "Rule name is required",
       });
     }
 
     // Create updated competitor rule specifics
     const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
-    ruleSpecifics.push({ name: "CompetitorRuleUpdatedAt", value: new Date().toISOString() });
+    ruleSpecifics.push({
+      name: "CompetitorRuleUpdatedAt",
+      value: new Date().toISOString(),
+    });
 
     const xmlRequest = `
       <?xml version="1.0" encoding="utf-8"?>
@@ -671,12 +762,16 @@ router.put("/products/:itemId", async (req, res) => {
         <Item>
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
-            ${ruleSpecifics.map(spec => `
+            ${ruleSpecifics
+              .map(
+                (spec) => `
             <NameValueList>
               <n>${spec.name}</n>
               <Value>${spec.value}</Value>
             </NameValueList>
-            `).join('')}
+            `
+              )
+              .join("")}
           </ItemSpecifics>
         </Item>
       </ReviseItemRequest>
@@ -698,20 +793,19 @@ router.put("/products/:itemId", async (req, res) => {
         excludeConditions,
         excludeProductTitleWords,
         excludeSellers,
-        findCompetitorsBasedOnMPN
+        findCompetitorsBasedOnMPN,
       },
       ebayResponse: {
         itemId: response.ItemID,
         startTime: response.StartTime,
-        endTime: response.EndTime
-      }
+        endTime: response.EndTime,
+      },
     });
-
   } catch (error) {
     console.error("eBay Competitor Rule Update Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -730,7 +824,7 @@ router.delete("/products/:itemId", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
@@ -769,15 +863,14 @@ router.delete("/products/:itemId", async (req, res) => {
       ebayResponse: {
         itemId: response.ItemID,
         startTime: response.StartTime,
-        endTime: response.EndTime
-      }
+        endTime: response.EndTime,
+      },
     });
-
   } catch (error) {
     console.error("eBay Competitor Rule Deletion Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -795,22 +888,24 @@ router.delete("/delete-from-all-active", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
     // First get all active listings with competitor rules
-    const listingsResponse = await axios.get('/active-listings', {
-      headers: { 'Authorization': `Bearer ${authToken}` }
+    const listingsResponse = await axios.get("/active-listings", {
+      headers: { Authorization: `Bearer ${authToken}` },
     });
 
-    const listingsWithCompetitorRules = listingsResponse.data.listings.filter(item => item.hasCompetitorRule);
+    const listingsWithCompetitorRules = listingsResponse.data.listings.filter(
+      (item) => item.hasCompetitorRule
+    );
 
     if (listingsWithCompetitorRules.length === 0) {
       return res.json({
         success: true,
         message: "No active listings with competitor rules found",
-        deletedCount: 0
+        deletedCount: 0,
       });
     }
 
@@ -849,16 +944,15 @@ router.delete("/delete-from-all-active", async (req, res) => {
         results.push({
           itemId: listing.itemId,
           title: listing.title,
-          success: true
+          success: true,
         });
 
-        await new Promise(resolve => setTimeout(resolve, 100));
-
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
         errors.push({
           itemId: listing.itemId,
           title: listing.title,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -869,21 +963,19 @@ router.delete("/delete-from-all-active", async (req, res) => {
       summary: {
         totalProcessed: listingsWithCompetitorRules.length,
         successful: results.length,
-        failed: errors.length
+        failed: errors.length,
       },
       results,
-      errors
+      errors,
     });
-
   } catch (error) {
     console.error("eBay Competitor Rule Bulk Deletion Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
-
 
 // Debug competitor rule data - add this endpoint to see what's actually stored
 
@@ -895,7 +987,7 @@ router.get("/debug/competitor-rule-specifics/:itemId", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
@@ -921,21 +1013,25 @@ router.get("/debug/competitor-rule-specifics/:itemId", async (req, res) => {
     }
 
     const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
-    const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
+    const specificsArray = Array.isArray(itemSpecifics)
+      ? itemSpecifics
+      : [itemSpecifics];
 
     // Filter for competitor rule related specifics
-    const competitorRuleSpecifics = specificsArray.filter(spec => {
+    const competitorRuleSpecifics = specificsArray.filter((spec) => {
       if (!spec?.Name) return false;
       const name = spec.Name.toLowerCase();
-      return name.includes('competitor') || 
-             name.includes('rule') ||
-             name.includes('exclude') ||
-             name.includes('percent') ||
-             name.includes('mpn') ||
-             name.includes('upc') ||
-             name.includes('ean') ||
-             name.includes('isbn') ||
-             name === 'FindCompetitorsBasedOnMPN';
+      return (
+        name.includes("competitor") ||
+        name.includes("rule") ||
+        name.includes("exclude") ||
+        name.includes("percent") ||
+        name.includes("mpn") ||
+        name.includes("upc") ||
+        name.includes("ean") ||
+        name.includes("isbn") ||
+        name === "FindCompetitorsBasedOnMPN"
+      );
     });
 
     res.json({
@@ -943,28 +1039,29 @@ router.get("/debug/competitor-rule-specifics/:itemId", async (req, res) => {
       itemId,
       itemTitle: item.Title,
       totalSpecifics: specificsArray.length,
-      competitorRuleRelatedSpecifics: competitorRuleSpecifics.map(spec => ({
+      competitorRuleRelatedSpecifics: competitorRuleSpecifics.map((spec) => ({
         name: spec.Name,
-        value: spec.Value
+        value: spec.Value,
       })),
-      allItemSpecifics: specificsArray.map(spec => ({
+      allItemSpecifics: specificsArray.map((spec) => ({
         name: spec.Name,
-        value: spec.Value
-      }))
+        value: spec.Value,
+      })),
     });
-
   } catch (error) {
     console.error("Debug Competitor Rule Specifics Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
 
 // Fixed parseCompetitorRuleFromSpecifics function that correctly identifies rule data
 function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
-  const specificsArray = Array.isArray(itemSpecifics) ? itemSpecifics : [itemSpecifics];
+  const specificsArray = Array.isArray(itemSpecifics)
+    ? itemSpecifics
+    : [itemSpecifics];
   const ruleData = {};
 
   console.log(`=== DEBUG: Parsing competitor rule for item ${itemId} ===`);
@@ -972,30 +1069,30 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
   // STRICT filtering: Only accept fields that are EXCLUSIVELY competitor rule fields
   const COMPETITOR_RULE_FIELDS = [
     // Exact field names for competitor rules (not shared with pricing strategy)
-    'CompetitorRuleName',
-    'MinPercentOfCurrentPrice',        // Different from MinPrice (pricing strategy)
-    'MaxPercentOfCurrentPrice',        // Different from MaxPrice (pricing strategy)
-    'ExcludeCountries',
-    'ExcludeConditions', 
-    'ExcludeProductTitleWords',
-    'ExcludeSellers',
-    'FindCompetitorsBasedOnMPN',
-    'CompetitorRuleCreatedAt',
-    
+    "CompetitorRuleName",
+    "MinPercentOfCurrentPrice", // Different from MinPrice (pricing strategy)
+    "MaxPercentOfCurrentPrice", // Different from MaxPrice (pricing strategy)
+    "ExcludeCountries",
+    "ExcludeConditions",
+    "ExcludeProductTitleWords",
+    "ExcludeSellers",
+    "FindCompetitorsBasedOnMPN",
+    "CompetitorRuleCreatedAt",
+
     // Alternative naming conventions
-    'competitor_rule_name',
-    'min_percent_of_current_price',
-    'max_percent_of_current_price',
-    'exclude_countries',
-    'exclude_conditions',
-    'exclude_product_title_words',
-    'exclude_sellers',
-    'find_competitors_based_on_mpn',
-    'competitor_rule_created_at'
+    "competitor_rule_name",
+    "min_percent_of_current_price",
+    "max_percent_of_current_price",
+    "exclude_countries",
+    "exclude_conditions",
+    "exclude_product_title_words",
+    "exclude_sellers",
+    "find_competitors_based_on_mpn",
+    "competitor_rule_created_at",
   ];
 
   // Extract only TRUE competitor rule-related data
-  specificsArray.forEach(specific => {
+  specificsArray.forEach((specific) => {
     if (specific?.Name && specific?.Value) {
       const name = specific.Name;
       const value = specific.Value;
@@ -1006,7 +1103,9 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
         console.log(`Found competitor rule field: ${name} = ${value}`);
       } else {
         // Log what we're rejecting for debugging
-        console.log(`Rejecting field (not a competitor rule field): ${name} = ${value}`);
+        console.log(
+          `Rejecting field (not a competitor rule field): ${name} = ${value}`
+        );
       }
     }
   });
@@ -1022,48 +1121,44 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
   // Map the fields to the expected format
   const rule = {
     itemId,
-    ruleName: ruleData.CompetitorRuleName || 
-              ruleData.competitor_rule_name ||
-              "Unnamed Rule",
+    ruleName:
+      ruleData.CompetitorRuleName ||
+      ruleData.competitor_rule_name ||
+      "Unnamed Rule",
 
     minPercentOfCurrentPrice: parsePercentage(
-      ruleData.MinPercentOfCurrentPrice || 
-      ruleData.min_percent_of_current_price
+      ruleData.MinPercentOfCurrentPrice || ruleData.min_percent_of_current_price
     ),
-    
+
     maxPercentOfCurrentPrice: parsePercentage(
-      ruleData.MaxPercentOfCurrentPrice || 
-      ruleData.max_percent_of_current_price
+      ruleData.MaxPercentOfCurrentPrice || ruleData.max_percent_of_current_price
     ),
 
     findCompetitorsBasedOnMPN: parseBoolean(
-      ruleData.FindCompetitorsBasedOnMPN || 
-      ruleData.find_competitors_based_on_mpn
+      ruleData.FindCompetitorsBasedOnMPN ||
+        ruleData.find_competitors_based_on_mpn
     ),
 
     excludeCountries: parseArray(
-      ruleData.ExcludeCountries || 
-      ruleData.exclude_countries
+      ruleData.ExcludeCountries || ruleData.exclude_countries
     ),
 
     excludeConditions: parseArray(
-      ruleData.ExcludeConditions || 
-      ruleData.exclude_conditions
+      ruleData.ExcludeConditions || ruleData.exclude_conditions
     ),
 
     excludeProductTitleWords: parseArray(
-      ruleData.ExcludeProductTitleWords || 
-      ruleData.exclude_product_title_words
+      ruleData.ExcludeProductTitleWords || ruleData.exclude_product_title_words
     ),
 
     excludeSellers: parseArray(
-      ruleData.ExcludeSellers || 
-      ruleData.exclude_sellers
+      ruleData.ExcludeSellers || ruleData.exclude_sellers
     ),
 
-    createdAt: ruleData.CompetitorRuleCreatedAt || 
-               ruleData.competitor_rule_created_at ||
-               null
+    createdAt:
+      ruleData.CompetitorRuleCreatedAt ||
+      ruleData.competitor_rule_created_at ||
+      null,
   };
 
   console.log(`Parsed competitor rule for item ${itemId}:`, rule);
@@ -1074,14 +1169,17 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
 router.get("/test-competitor-rule-parsing/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
-    
+
     // Simulate the actual data from your product
     const actualItemSpecifics = [
       { Name: "MPN", Value: "Does Not Apply" },
-      { Name: "CompetitorAdjustment", Value: "-5" } // This is pricing strategy, not competitor rule
+      { Name: "CompetitorAdjustment", Value: "-5" }, // This is pricing strategy, not competitor rule
     ];
 
-    const parsedRule = parseCompetitorRuleFromSpecifics(actualItemSpecifics, itemId);
+    const parsedRule = parseCompetitorRuleFromSpecifics(
+      actualItemSpecifics,
+      itemId
+    );
 
     res.json({
       success: true,
@@ -1090,15 +1188,15 @@ router.get("/test-competitor-rule-parsing/:itemId", async (req, res) => {
       actualItemSpecifics,
       parsedResult: parsedRule,
       hasCompetitorRule: parsedRule !== null,
-      explanation: parsedRule === null ? 
-        "No competitor rule data found - MPN and CompetitorAdjustment are not competitor rule fields" : 
-        "Competitor rule data found and parsed successfully"
+      explanation:
+        parsedRule === null
+          ? "No competitor rule data found - MPN and CompetitorAdjustment are not competitor rule fields"
+          : "Competitor rule data found and parsed successfully",
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -1111,26 +1209,32 @@ function parsePercentage(value) {
 
 function parseBoolean(value) {
   if (!value) return false;
-  if (typeof value === 'boolean') return value;
+  if (typeof value === "boolean") return value;
   const str = value.toString().toLowerCase();
-  return str === 'true' || str === '1' || str === 'yes';
+  return str === "true" || str === "1" || str === "yes";
 }
 
-function parseArray(value) { 
+function parseArray(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;
-  
+
   // Try to split by semicolon first, then comma
-  if (typeof value === 'string') {
-    if (value.includes(';')) {
-      return value.split(';').map(s => s.trim()).filter(s => s);
-    } else if (value.includes(',')) {
-      return value.split(',').map(s => s.trim()).filter(s => s);
+  if (typeof value === "string") {
+    if (value.includes(";")) {
+      return value
+        .split(";")
+        .map((s) => s.trim())
+        .filter((s) => s);
+    } else if (value.includes(",")) {
+      return value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s);
     } else {
-      return [value.trim()].filter(s => s);
+      return [value.trim()].filter((s) => s);
     }
   }
-  
+
   return [];
 }
 
@@ -1143,7 +1247,7 @@ router.get("/products/:itemId", async (req, res) => {
     if (!authToken) {
       return res.status(400).json({
         success: false,
-        message: "eBay auth token is required"
+        message: "eBay auth token is required",
       });
     }
 
@@ -1170,9 +1274,12 @@ router.get("/products/:itemId", async (req, res) => {
 
     // Extract competitor rule data from ItemSpecifics
     const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
-    const competitorRule = parseCompetitorRuleFromSpecifics(itemSpecifics, itemId);
+    const competitorRule = parseCompetitorRuleFromSpecifics(
+      itemSpecifics,
+      itemId
+    );
     const hasCompetitorRule = competitorRule !== null;
-
+    getAllCompetitorRules(req, res);
     res.json({
       success: true,
       itemId,
@@ -1181,17 +1288,17 @@ router.get("/products/:itemId", async (req, res) => {
       competitorRule,
       itemDetails: {
         currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
-        currency: item.StartPrice?.__attributes__?.currencyID || item.Currency || "USD",
+        currency:
+          item.StartPrice?.__attributes__?.currencyID || item.Currency || "USD",
         listingType: item.ListingType,
-        condition: item.ConditionDisplayName
-      }
+        condition: item.ConditionDisplayName,
+      },
     });
-
   } catch (error) {
     console.error("eBay Competitor Rule Fetch Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
@@ -1212,7 +1319,7 @@ router.post("/debug/create-test-competitor-rule/:itemId", async (req, res) => {
       { name: "ExcludeProductTitleWords", value: "refurbished;broken;parts" },
       { name: "ExcludeSellers", value: "bad_seller_123;spam_seller_456" },
       { name: "FindCompetitorsBasedOnMPN", value: "true" },
-      { name: "CompetitorRuleCreatedAt", value: new Date().toISOString() }
+      { name: "CompetitorRuleCreatedAt", value: new Date().toISOString() },
     ];
 
     const xmlRequest = `
@@ -1224,12 +1331,16 @@ router.post("/debug/create-test-competitor-rule/:itemId", async (req, res) => {
         <Item>
           <ItemID>${itemId}</ItemID>
           <ItemSpecifics>
-            ${testRuleSpecifics.map(spec => `
+            ${testRuleSpecifics
+              .map(
+                (spec) => `
             <NameValueList>
               <n>${spec.name}</n>
               <Value>${spec.value}</Value>
             </NameValueList>
-            `).join('')}
+            `
+              )
+              .join("")}
           </ItemSpecifics>
         </Item>
       </ReviseItemRequest>
@@ -1247,15 +1358,14 @@ router.post("/debug/create-test-competitor-rule/:itemId", async (req, res) => {
       ebayResponse: {
         itemId: response.ItemID,
         startTime: response.StartTime,
-        endTime: response.EndTime
-      }
+        endTime: response.EndTime,
+      },
     });
-
   } catch (error) {
     console.error("Create Test Competitor Rule Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
