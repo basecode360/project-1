@@ -1,52 +1,73 @@
 import express from "express";
-import xml2js from "xml2js";
-import axios from "axios";
-
+import ebayService from "../services/ebayService.js";
+import getEbayListings from "../controllers/ebayController.js";
+import { createAllPolicies } from "../services/createPolicy.js";
+import { getPolicy, checkAuthToken } from "../services/getPolicy.js";
+import fetchProducts from "../services/getInventory.js";
+import editRoute from "../services/editProduct.js";
 const router = express.Router();
 
 /**
- * Helper Functions (same as before, reused for eBay XML calls)
+ * @swagger
+ * /listings-from-mongo:
+ *   get:
+ *     description: Retrieve a list of eBay listings
+ *     responses:
+ *       200:
+ *         description: A list of eBay listings
+ *       500:
+ *         description: Internal server error
  */
 
-async function parseXMLResponse(xmlData) {
-  const parser = new xml2js.Parser({
-    explicitArray: false,
-    tagNameProcessors: [xml2js.processors.stripPrefix],
-  });
-  return await parser.parseStringPromise(xmlData);
-}
-
-function isEBayResponseSuccessful(result, operationName) {
-  const response = result[operationName + "Response"];
-  if (response.Ack !== "Success" && response.Ack !== "Warning") {
-    const errors = response.Errors;
-    const errorMsg = Array.isArray(errors)
-      ? errors.map((e) => e.LongMessage || e.ShortMessage).join(", ")
-      : errors?.LongMessage || errors?.ShortMessage || "Unknown error";
-    throw new Error(`eBay API Error: ${errorMsg}`);
-  }
-  return response;
-}
-
-async function makeEBayAPICall(xmlRequest, callName) {
-  const response = await axios({
-    method: "post",
-    url: "https://api.ebay.com/ws/api.dll",
-    headers: {
-      "Content-Type": "text/xml",
-      "X-EBAY-API-COMPATIBILITY-LEVEL": "1155",
-      "X-EBAY-API-CALL-NAME": callName,
-      "X-EBAY-API-SITEID": "0",
-    },
-    data: xmlRequest,
-  });
-  return response.data;
-}
+router.get("/listings-from-mongo", getEbayListings);
 
 /**
- * 1️⃣ GET /api/ebay/competitor-prices/:itemId
- *     Fetch “GetItem” from Trading API + Browse API competitor prices
+ * @swagger
+ * /create-ebay-policies:
+ *   post:
+ *     description: Create eBay policies
+ *     responses:
+ *       201:
+ *         description: Policies created successfully
  */
+router.post("/create-ebay-policies", createAllPolicies);
+
+/**
+ * @swagger
+ * /get-ebay-policies:
+ *   get:
+ *     description: Get all eBay policies
+ *     responses:
+ *       200:
+ *         description: List of eBay policies
+ */
+
+// Correct way
+router.get("/get-fullfilment-policies", async (req, res) => {
+  try {
+    const policies = await getPolicy("fulfillment");
+    res.json(policies);
+  } catch (error) {
+    console.error("Error in fulfillment policies route:", error);
+    res.status(500).json({
+      error: "Failed to fetch fulfillment policies",
+      details: error.message,
+    });
+  }
+});
+// Correct way
+router.get("/get-payment-policies", async (req, res) => {
+  try {
+    const policies = await getPolicy("payment");
+    res.json(policies);
+  } catch (error) {
+    console.error("Error in payment policies route:", error);
+    res.status(500).json({
+      error: "Failed to fetch payment policies",
+      details: error.message,
+    });
+  }
+});
 router.get("/competitor-prices/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -123,8 +144,7 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
           title: i.title,
           price: parseFloat(i.price.value),
           shipping:
-            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || "0") ||
-            0,
+            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || "0") || 0,
           imageurl: i.thumbnailImages[0]?.imageUrl || "",
           seller: i.seller?.username,
           condition: i.condition,
@@ -145,16 +165,53 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
         error: error.message,
       });
     }
-    return res
-      .status(500)
-      .json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 
+router.get("/get-return-policies", async (req, res) => {
+  try {
+    const policies = await getPolicy("return");
+    res.json(policies);
+  } catch (error) {
+    console.error("Error in return policies route:", error);
+    res.status(500).json({
+      error: "Failed to fetch return policies",
+      details: error.message,
+    });
+  }
+});
+router.post("/add-merchant-key", ebayService.createMerchantLocation);
+router.get("/get-Merchant-key", ebayService.getMerchantKey);
 /**
- * 2️⃣ Debug endpoint to inspect raw ItemSpecifics
- *    GET /api/ebay/debug/item-specifics/:itemId
+ ** @swagger
+ * /active-listings:
+ *   get:
+ *     description: Get all active selling listings from your eBay inventory
+ *     responses:
+ *       200:
+ *         description: A list of active selling listings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 listings:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       500:
+ *         description: Internal server error
  */
+
+router.get("/active-listings", fetchProducts.getActiveListings);
+router.get("/active-listingsviaFeed", fetchProducts.getActiveListingsViaFeed);
+router.post("/check-token-status", checkAuthToken);
+router.get("/item-variations/:itemId", editRoute.getItemVariations);
+router.post("/edit-variation-price", editRoute.editVariationPrice);
+router.post("/edit-all-variations-price", editRoute.editAllVariationsPrices);
 router.get("/debug/item-specifics/:itemId", async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -195,9 +252,7 @@ router.get("/debug/item-specifics/:itemId", async (req, res) => {
     });
   } catch (error) {
     console.error("Debug ItemSpecifics Error:", error.message);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 
