@@ -1,0 +1,118 @@
+// services/ebayAuthService.js
+import axios from 'axios';
+import qs from 'qs';
+
+const CLIENT_ID = process.env.EBAY_CLIENT_ID;
+const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
+const REDIRECT_URI = process.env.EBAY_REDIRECT_URI;
+const SCOPES =
+  process.env.EBAY_OAUTH_SCOPES || 'https://api.ebay.com/oauth/api_scope';
+
+// if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+//   throw new Error(
+//     'Missing eBay OAuth environment variables (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI)'
+//   );
+// }
+
+import User from '../models/Users.js'; // <— import the User model now
+
+/**
+ * Build the URL you redirect your frontend user to, for them to consent on eBay.
+ */
+export function getEbayAuthUrl(stateJwt) {
+  const base = 'https://auth.ebay.com/oauth2/authorize';
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: SCOPES,
+    state: stateJwt,
+  });
+  return `${base}?${params.toString()}`;
+}
+
+/**
+ * Exchange the authorization code that eBay gives us
+ * for an access token + refresh token.
+ * Returns { access_token, refresh_token, expires_in }.
+ */
+export async function exchangeCodeForToken(code, userId) {
+  const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
+  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
+    'base64'
+  );
+
+  const data = {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: REDIRECT_URI,
+  };
+
+  const response = await axios.post(tokenUrl, qs.stringify(data), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth}`,
+    },
+  });
+
+  // 1) Save tokens on the User model:
+  const tokens = response.data; // { access_token, refresh_token, expires_in, … }
+  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+  await User.findByIdAndUpdate(userId, {
+    $set: {
+      'ebay.accessToken': tokens.access_token,
+      'ebay.refreshToken': tokens.refresh_token,
+      'ebay.expiresAt': expiresAt,
+    },
+  });
+
+  return tokens;
+}
+
+/**
+ * Use a stored refresh token to get a new access token
+ */
+export async function refreshUserAccessToken(userId) {
+  // 1) Load the user’s refreshToken from User.ebay
+  const user = await User.findById(userId).select(
+    'ebay.refreshToken ebay.expiresAt'
+  );
+  if (!user || !user.ebay.refreshToken) {
+    throw new Error('No refresh token available for user');
+  }
+  const oldRefreshToken = user.ebay.refreshToken;
+
+  // 2) Make the refresh request
+  const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
+  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
+    'base64'
+  );
+  const data = {
+    grant_type: 'refresh_token',
+    refresh_token: oldRefreshToken,
+    scope: SCOPES,
+  };
+
+  const response = await axios.post(tokenUrl, qs.stringify(data), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth}`,
+    },
+  });
+
+  const tokens = response.data; // { access_token, refresh_token?, expires_in, … }
+  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+  // 3) Save them back onto user.ebay
+  const updateFields = {
+    'ebay.accessToken': tokens.access_token,
+    'ebay.expiresAt': expiresAt,
+  };
+  if (tokens.refresh_token) {
+    updateFields['ebay.refreshToken'] = tokens.refresh_token;
+  }
+  await User.findByIdAndUpdate(userId, { $set: updateFields });
+
+  return tokens;
+}

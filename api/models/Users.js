@@ -1,20 +1,22 @@
+// models/Users.js
+
 import mongoose from 'mongoose';
 
+const userSchema = new mongoose.Schema(
+  {
+    email: { type: String, unique: true, required: true },
+    password: { type: String, required: true },
 
-const { Schema } = mongoose;
-
-
-const userSchema = new Schema({
-    email: {
-        type: String,
-        required: true,
-        unique: true,
+    // ← Add this "ebay" sub‐document:
+    ebay: {
+      accessToken: { type: String, default: null },
+      refreshToken: { type: String, default: null },
+      expiresAt: { type: Date, default: null },
     },
-    password: {
-        type: String,
-        required: true,
-    }
-})
+  },
+  {
+    timestamps: true, // preserves createdAt/updatedAt, if you want them
+  }
+);
 
-const User = mongoose.model('User', userSchema);
-export default User;
+export default mongoose.model('User', userSchema);

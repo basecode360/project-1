@@ -1,130 +1,73 @@
-// api/helper/authEbay.js
+// helper/authEbay.js
 import axios from 'axios';
-import qs from 'qs';
-import dotenv from 'dotenv';
-dotenv.config();
+import User from '../models/Users.js';
+import { refreshUserAccessToken } from '../services/ebayAuthService.js';
 
-let cachedToken = null;
-let tokenExpiry = 0;
-// OAuth credentials
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REFRESH_TOKEN = process.env.REFRESH_TOKEN;
-
-// If you have a long‐lived sandbox token, you can drop it here:
-// const STATIC_TOKEN = process.env.EBAY_ACCESS_TOKEN;
-// The scopes your app needs
-const SCOPES = [
-  'https://api.ebay.com/oauth/api_scope',
-  'https://api.ebay.com/oauth/api_scope/sell.account',
-  'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.inventory',
-  'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
-  'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.item',
-  'https://api.ebay.com/oauth/api_scope/sell.item.readonly'
-].join(' ');
-
-
-// 1) Only call the token‐endpoint if no static token is provided
-async function getAccessToken() {
-  const now = Date.now();
-
-  if (cachedToken && tokenExpiry - now > 60_000) {
-    return cachedToken; // return if not about to expire (60s buffer)
-  }
-
-  if (!REFRESH_TOKEN || !CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error('Missing REFRESH_TOKEN or OAuth credentials in your .env');
-  }
-
-  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
-
-  const body = qs.stringify({
-    grant_type: 'refresh_token',
-    refresh_token: REFRESH_TOKEN,
-    scope: SCOPES,
-  });
-
-  const resp = await axios.post('https://api.ebay.com/identity/v1/oauth2/token', body, {
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-  });
-
-  cachedToken = resp.data.access_token;
-  tokenExpiry = now + resp.data.expires_in * 1000;
-
-  return cachedToken;
-}
-
-
-// Modified part of authEbay.js
+/**
+ * axios wrapper that automatically refreshes the user’s eBay OAuth token
+ * and injects it into REST or XML calls.  Uses User.ebay.* instead of a separate UserTokens collection.
+ */
 export default async function ebayApi({
-  method = 'GET',
+  userId,
+  method,
   url,
-  params = {},
-  data = null,
+  data,
+  params,
+  headers = {},
 }) {
-  try {
-    const accessToken = await getAccessToken();
-    const fullUrl = url.startsWith('http') ? url : `https://api.ebay.com${url}`;
-    if (!accessToken) {
-      throw new Error('Access token is empty');
-    }
-
-    const response = await axios({
-      method,
-      url: fullUrl,
-      params,
-      data,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Content-Language': 'en-US',
-      },
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('Error in eBay API request:', error.response ? error.response.data : error.message);
-    throw error;
+  // 1) Load the user's eBay tokens from the User document
+  const user = await User.findById(userId).select(
+    'ebay.accessToken ebay.refreshToken ebay.expiresAt'
+  );
+  if (!user) {
+    throw new Error('User not found');
   }
-}
+  const tokenRecord = user.ebay;
+  if (
+    !tokenRecord.accessToken ||
+    !tokenRecord.refreshToken ||
+    !tokenRecord.expiresAt
+  ) {
+    throw new Error('No eBay tokens stored for this user');
+  }
 
+  // 2) If token is expiring (or expired), refresh it
+  const now = Date.now();
+  // (expiresAt is stored as a Date in the schema)
+  if (
+    !tokenRecord.expiresAt ||
+    now >= tokenRecord.expiresAt.getTime() - 5 * 60 * 1000
+  ) {
+    // within 5 minutes of expiry → refresh
+    // refreshUserAccessToken expects (userId) so that it can look up user.ebay.refreshToken
+    const newTokens = await refreshUserAccessToken(userId);
+    tokenRecord.accessToken = newTokens.access_token;
+    tokenRecord.expiresAt = new Date(Date.now() + newTokens.expires_in * 1000);
+    if (newTokens.refresh_token) {
+      tokenRecord.refreshToken = newTokens.refresh_token;
+    }
+    // Save the updated tokens back onto user.ebay
+    await user.save();
+  }
 
-export const getActiveListings = async () => {
-  // Step 1: Get all inventory items (SKUs)
-  const inventoryResponse = await ebayApi({
-    method: 'GET',
-    url: '/sell/inventory/v1/inventory_item',
+  // 3) Handle any XML payload that contains TOKEN_PLACEHOLDER
+  let finalData = data;
+  if (typeof data === 'string' && data.includes('TOKEN_PLACEHOLDER')) {
+    finalData = data.replace('TOKEN_PLACEHOLDER', tokenRecord.accessToken);
+  }
+
+  // 4) Issue the actual HTTP request (REST or XML)
+  const response = await axios({
+    method,
+    url,
+    data: finalData,
+    params,
+    headers: {
+      ...headers,
+      Authorization: `Bearer ${tokenRecord.accessToken}`,
+    },
+    timeout: 20000,
   });
 
-  const inventoryItems = inventoryResponse.inventoryItems || [];
-
-  // Step 2: For each SKU, fetch active offers
-  let allOffers = [];
-  for (const item of inventoryItems) {
-    try {
-      const offersResponse = await ebayApi({
-        method: 'GET',
-        url: '/sell/inventory/v1/offer',
-        params: { sku: item.sku },
-      });
-
-      const offers = offersResponse.offers || [];
-      allOffers = allOffers.concat(offers);
-    } catch (err) {
-      console.error(`Failed to fetch offers for SKU ${item.sku}:`, err.message);
-      // Optionally continue with next SKU
-    }
-  }
-
-  return allOffers;
-};
-
-
-
-
+  return response.data;
+}

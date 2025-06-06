@@ -1,348 +1,69 @@
-import EbayListing from '../models/ebayListing.js';
-import { inventoryItemsArray } from '../productadded.js';
-import ebayApi from "../helper/authEbay.js"
+// services/ebayService.js
+
 import axios from 'axios';
 import xml2js from 'xml2js';
-import dotenv from 'dotenv';
-dotenv.config();
+import User from '../models/Users.js';
+import { refreshUserAccessToken } from './ebayAuthService.js';
+import ebayApi from '../helper/authEbay.js';
 
-// Function to fetch eBay listings from MongoDB
-export const fetchEbayListings = async () => {
-  try {
-    const listings = await EbayListing.find();
+/**
+ * Fetch all active listings directly from eBay (Trading API).
+ * Protected route: expects req.user.id.
+ */
+export async function fetchEbayListings(userId) {
+  const xml = `
+    <?xml version="1.0" encoding="utf-8"?>
+    <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+      <RequesterCredentials>
+        <eBayAuthToken>TOKEN_PLACEHOLDER</eBayAuthToken>
+      </RequesterCredentials>
+      <ActiveList>
+        <Include>true</Include>
+        <Pagination>
+          <EntriesPerPage>200</EntriesPerPage>
+          <PageNumber>1</PageNumber>
+        </Pagination>
+      </ActiveList>
+      <DetailLevel>ReturnAll</DetailLevel>
+    </GetMyeBaySellingRequest>
+  `;
 
-    return listings;
-  } catch (error) {
-    throw new Error('Unable to fetch eBay listings');
-  }
-};
-
-
-const singleItem = `https://api.ebay.com/sell/inventory/v1/inventory_item/`
-
-const inventoryItemData = {
-  "availability": {
-    "shipToLocationAvailability": {
-      "quantity": 100
-    }
-  },
-  "condition": "NEW",
-  "product": {
-    "title": "2025 BMW i7 Electric Luxury Sedan - Premium Package",
-    "description": "Brand new 2025 BMW i7 electric luxury sedan with premium package. Features advanced driving assistance, premium sound system, and extended range battery. Vehicle includes full manufacturer warranty and free delivery within 100 miles.",
-    "aspects": {
-      "Brand": ["BMW"],
-      "Model": ["i7"],
-      "Year": ["2025"],
-      "Vehicle Type": ["Sedan"],
-      "Fuel Type": ["Electric"],
-      "Color": ["Black"],
-      "Condition": ["New"]
+  const response = await ebayApi({
+    userId,
+    method: 'POST',
+    url: 'https://api.ebay.com/ws/api.dll',
+    data: xml,
+    headers: {
+      'Content-Type': 'text/xml',
+      'X-EBAY-API-COMPATIBILITY-LEVEL': '1155',
+      'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+      'X-EBAY-API-SITEID': '0',
     },
-    "imageUrls": ["https://posit.co/wp-content/themes/Posit/public/markdown-blogs/creating-apis-for-data-science-with-plumber/images/image1.png"]
-  },
-  "sku": "MySku1bmw",
-  "packageWeightAndSize": {
-    "dimensions": {
-      "height": 6,
-      "length": 12,
-      "width": 8,
-      "unit": "INCH"
-    },
-    "weight": {
-      "value": 2,
-      "unit": "POUND"
-    }
-  }, "pricingDetails": {
-    "price": {
-      "value": 5000.00,
-      "currency": "USD"
-    },
-    "originalRetailPrice": {
-      "value": 15000.00,
-      "currency": "USD"
-    }
-  }
-};  
-const addProduct = async (req, res) => {
-  // Inventory API expects JSON, not XML
-  try {
-    // Use the SKU in the URL (important for the Inventory API)
-    const sku = inventoryItemData.sku;
-    console.log(`sku for the product ${sku}`);
-    const url = `${singleItem}${sku}`;
+  });
 
-    // Make the PUT request to add the product (Inventory API uses PUT for creating items)
-    const data = await ebayApi({
-      method: "PUT", // Note: Inventory API uses PUT for creating/updating items
-      url: url,
-      data: inventoryItemData
-    });
+  const parsed = await new xml2js.Parser({
+    explicitArray: false,
+    tagNameProcessors: [xml2js.processors.stripPrefix],
+  }).parseStringPromise(response);
 
-    console.log("Added product:", data);
-    
-    try {
-      // Changed condition: we want to create an offer if data exists (not if !data)
-      if (!data) {
-        const publishResult = await createAndPublishOffer(sku);
-        console.log("Offer published:", publishResult);
-        
-        return res.status(200).json({
-          success: true,
-          inventoryData: data,
-          offerData: publishResult
-        });
-      }
-    } catch (offerError) {
-      console.error("Error in offer creation/publishing:", offerError);
-      console.error("Full offer error details:", offerError.response ? offerError.response.data : offerError.message);
-      
-      // Still return 200 since the inventory item was created successfully
-      return res.status(200).json({
-        success: true,
-        inventoryData: data,
-        offerError: {
-          message: "Product was added to inventory but offer creation failed",
-          details: offerError.response ? offerError.response.data : offerError.message
-        }
-      });
-    }
-    
-    return res.status(200).json({
-      success: true,
-      data
-    });
-
-  } catch (error) {
-    console.error("Error adding product:", error);
-    console.error("Error response data:", error.response ? error.response.data : "No response data");
-    console.error("Error message:", error.message);
-
-    const statusCode = error.response ? error.response.status : 500;
-    const errorData = error.response ? error.response.data : { message: error.message };
-
-    return res.status(statusCode).json({
-      success: false,
-      message: "Error adding product",
-      error: errorData
-    });
-  }
-};
-
-const createAndPublishOffer = async (sku) => {
-  // Step 1: Create an offer for the inventory item
-  const offerData = {
-    sku: sku,
-    marketplaceId: "EBAY_US",
-    format: "FIXED_PRICE",
-    availableQuantity: 1,
-    categoryId: "177834",  // Replace with appropriate category ID
-    listingDescription: inventoryItemData.product.description,
-    includeCatalogProductDetails: true,
-    listingDuration: "GTC",
-    listingPolicies: {
-      fulfillmentPolicyId: "223145237024",
-      paymentPolicyId: "245816178024",
-      returnPolicyId: "223145092024"
-    },
-    pricingSummary: {
-      price: inventoryItemData.pricingDetails.price
-    },
-    merchantLocationKey: "warehouse-001"  // Replace with your location key
-  };
-
-  try {
-    // Create the offer
-    console.log("Creating offer with data:", JSON.stringify(offerData, null, 2));
-    const createOfferUrl = "https://api.ebay.com/sell/inventory/v1/offer";
-    const offerResponse = await ebayApi({
-      method: "POST",
-      url: createOfferUrl,
-      data: offerData
-    });
-    
-    console.log("Offer created successfully:", offerResponse);
-    
-    if (!offerResponse || !offerResponse.offerId) {
-      throw new Error("Failed to get offerId from create offer response");
-    }
-
-    // Step 2: Publish the offer
-    const offerId = offerResponse.offerId;
-    const publishOfferUrl = `https://api.ebay.com/sell/inventory/v1/offer/${offerId}/publish`;
-    
-    console.log(`Publishing offer with ID: ${offerId}`);
-    const publishResponse = await ebayApi({
-      method: "POST",
-      url: publishOfferUrl
-    });
-    
-    console.log("Offer published successfully:", publishResponse);
-    
-    // Check offer status
-    try {
-      const offerStatus = await checkOfferStatus(offerId);
-      console.log(`Status check for offer ${offerId}:`, offerStatus);
-      
-      return {
-        createResponse: offerResponse,
-        publishResponse: publishResponse,
-        statusResponse: offerStatus
-      };
-    } catch (statusError) {
-      console.error(`Error checking status for offer ${offerId}:`, statusError.message);
-      console.error("Status check error details:", statusError.response ? statusError.response.data : "No response data");
-      
-      // Return the publish response even if status check fails
-      return {
-        createResponse: offerResponse,
-        publishResponse: publishResponse,
-        statusError: statusError.message
-      };
-    }
-  } catch (error) {
-    console.error("Error in createAndPublishOffer:", error);
-    console.error("Error details:", error.response ? error.response.data : "No response data");
-    console.error("Error message:", error.message);
-    
-    // Re-throw the error to be caught by the calling function
-    throw {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data
-      } : null
-    };
-  }
-};
-
-const checkOfferStatus = async (offerId) => {
-  try {
-    const statusUrl = `https://api.ebay.com/sell/inventory/v1/offer/${offerId}`;
-    const statusResponse = await ebayApi({
-      method: "GET",
-      url: statusUrl
-    });
-    
-    console.log(`Offer ${offerId} status details:`, statusResponse);
-    return statusResponse;
-  } catch (error) {
-    console.error(`Error checking offer status for offer ${offerId}:`, error);
-    console.error("Status error details:", error.response ? error.response.data : "No response data");
-    
-    // Re-throw with more context
-    throw {
-      message: `Failed to check status for offer ${offerId}: ${error.message}`,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data
-      } : null
-    };
-  }
-};
-
-
-const getMerchantKey = async (req,res) => {
-    let url = "https://api.ebay.com/sell/inventory/v1/location"
-
-    try {
-      let merchantKey = await ebayApi({
-        url
-      })
-  
-      return res.status(200).send({
-        success: true,
-        message: "Fetched merchant key successfully",
-        data: merchantKey,
-      })
-  
-    } catch (error) {
-      const errorMessage = error.response ? error.response.data : error.message
-      return res.status(500).send({
-        success: false,
-        message: errorMessage,
-      })
-    }
-
+  const items =
+    parsed.GetMyeBaySellingResponse?.ActiveList?.ItemArray?.Item || [];
+  return Array.isArray(items) ? items : [items];
 }
 
-const addMultipleProducts = async (req, res) => {
-  try {
-    const results = [];
-    const errors = [];
-
-    // Process each inventory item
-    for (const item of inventoryItemsArray) {
-      try {
-        const sku = item.sku;
-        const url = `${singleItem}${sku}`;
-
-        // Make the PUT request to add the product
-        const data = await ebayApi({
-          method: "PUT", // Inventory API uses PUT for creating/updating items
-          url: url,
-          data: item,
-          headers: {
-            'Content-Language': 'en-US'
-          }
-        });
-
-        results.push({
-          sku,
-          success: true,
-          data
-        });
-
-        console.log(`Added product ${sku} successfully`);
-
-      } catch (itemError) {
-        const errorMessage = itemError.response ? itemError.response.data : itemError.message;
-        console.error(`Error adding product ${item.sku}:`, errorMessage);
-
-        errors.push({
-          sku: item.sku,
-          error: errorMessage
-        });
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      resultsCount: results.length,
-      errorsCount: errors.length,
-      results,
-      errors
-    });
-
-  } catch (error) {
-    console.error("Error in batch operation:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Error processing batch operation",
-      error: error.message
-    });
+/**
+ * Update price for a single listing (Trading API ReviseInventoryStatus).
+ * Protected route: expects req.user.id.
+ */
+export async function editPrice(userId, { itemId, price, sku }) {
+  if (!itemId || price == null) {
+    throw new Error('Required fields are missing (itemId and price required)');
   }
-};
 
-const editPrice = async (req, res) => {
-  try {
-    const {itemId, price, currency = 'USD', sku } = req.body;
-
-    if (!itemId || !price) {
-      return res.status(400).json({
-        success: false,
-        message: "Required fields are missing (itemId and price required)"
-      });
-    }
-
-    const authToken = process.env.AUTH_TOKEN;
-
-    // For ReviseInventoryStatus API
-    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+  const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
+    <eBayAuthToken>TOKEN_PLACEHOLDER</eBayAuthToken>
   </RequesterCredentials>
   <InventoryStatus>
     <ItemID>${itemId}</ItemID>
@@ -351,296 +72,36 @@ const editPrice = async (req, res) => {
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
-    // Make the API call with CORRECT headers
-    const response = await axios({
-      method: 'POST',
-      url:
-'https://api.ebay.com/ws/api.dll',
+  const response = await ebayApi({
+    userId,
+    method: 'POST',
+    url: 'https://api.ebay.com/ws/api.dll',
+    data: xmlRequest,
+    headers: {
+      'Content-Type': 'text/xml',
+      'X-EBAY-API-COMPATIBILITY-LEVEL': '1155',
+      'X-EBAY-API-CALL-NAME': 'ReviseInventoryStatus',
+      'X-EBAY-API-SITEID': '0',
+    },
+  });
 
-      headers: {
-        'Content-Type': 'text/xml',
-        'X-EBAY-API-CALL-NAME': 'ReviseInventoryStatus', // Changed from 'ReviseItem'
-        'X-EBAY-API-SITEID': '0',
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
-        'X-EBAY-API-APP-NAME': process.env.CLIENT_ID
-      },
-      data: xmlRequest
-    });
+  const parsed = await new xml2js.Parser({
+    explicitArray: false,
+    tagNameProcessors: [xml2js.processors.stripPrefix],
+  }).parseStringPromise(response);
 
-    // Parse response...
-    const parser = new xml2js.Parser({ 
-      explicitArray: false, 
-      ignoreAttrs: true 
-    });
-    
-    const result = await new Promise((resolve, reject) => {
-      parser.parseString(response.data, (err, result) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(result);
-        }
-      });
-    });
-
-    // Check response
-    const reviseResponse = result.ReviseInventoryStatusResponse;
-    
-    if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
-      return res.status(200).json({
-        success: true,
-        message: `Price updated successfully to ${price} ${currency}`,
-        data: reviseResponse
-      });
-    } else {
-      throw new Error(JSON.stringify(reviseResponse.Errors));
-    }
-
-  } catch (error) {
-    const errorMessage = error.response?.data || error.message;
-    console.error('Error updating price:', errorMessage);
-    return res.status(error.response?.status || 500).json({
-      success: false,
-      message: "Error updating price",
-      error: errorMessage
-    });
+  const ack = parsed.ReviseInventoryStatusResponse?.Ack;
+  if (ack !== 'Success' && ack !== 'Warning') {
+    const errors = parsed.ReviseInventoryStatusResponse?.Errors;
+    const msg = Array.isArray(errors)
+      ? errors.map((e) => e.LongMessage || e.ShortMessage).join(', ')
+      : errors?.LongMessage || errors?.ShortMessage || 'Unknown error';
+    throw new Error(`eBay API Error: ${msg}`);
   }
-};
-
-const deleteProduct = async (req, res) => {
-  try {
-    const url = singleItem;
-    const inventoryItemsData = await ebayApi({
-      url
-    })
-
-    if (!inventoryItemsData.inventoryItems) {
-      return res.status().json({
-        success: false,
-        message: "No inventory item found"
-      })
-    }
-    const skus = inventoryItemsData.inventoryItems.map(item => item.sku)
-
-    if (!skus) {
-      return res.status().json({
-        success: false,
-        message: "No skus found"
-      })
-    }
-
-    let deleteArray = []
-    let deleteErrors = []
-
-    for (const sku of skus) {
-      try {
-        const url = `${singleItem}${sku}`
-        await ebayApi({
-          method: "DELETE",
-          url,
-        })
-
-        deleteArray.push({
-          success: true,
-          sku
-        })
-      } catch (error) {
-        const errorMessage = error.response ? error.response.data : error.message;
-        console.error(`Error while deleting the product ${errorMessage}`)
-        deleteErrors.push({
-          success: false,
-          sku
-        })
-
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      errorCount: deleteErrors.length,
-      successCount: deleteArray.length,
-      deleteArray,
-      deleteErrors
-    })
-
-  } catch (error) {
-    const errorMessage = error.response ? error.response.data : error.message;
-    const status = error.response ? error.response.status : 500;
-    console.error(`Delete batch operation failed ${errorMessage}`)
-    return res.status(status).json({
-      success: false,
-      message: "Error processing batch operation",
-      error: error.message
-    })
-  }
+  return parsed.ReviseInventoryStatusResponse;
 }
 
-
-
-// console.log(inventoryItemsArray[0].availability.shipToLocationAvailability.quantity)
-const createOfferForInventoryItem = async (req, res) => {
-  try {
-    
-    const inventoryItemSkus = inventoryItemsArray.map(item => item.sku);
-    
-    if (!inventoryItemSkus) {
-      return res.status(404).json({
-        success: false,
-        message: `No inventory sku found`
-      });
-    }
-    
-    const createOfferUrl = "https://api.ebay.com/sell/inventory/v1/offer";
-    
-    // Create the offer data
-    const i = 0;
-    for (const sku of inventoryItemSkus) {
-      
-      const offerData = {
-        sku: sku,
-        marketplaceId: "EBAY_US",
-        format: "FIXED_PRICE",
-        availableQuantity: inventoryItemsArray[i].availability.shipToLocationAvailability.quantity,
-        categoryId: "33997", // Electric Vehicles category - you need the correct category ID
-        listingDescription: inventoryItemsArray[i].product.description,
-        listingPolicies: {
-          fulfillmentPolicyId: "YOUR_FULFILLMENT_POLICY_ID", // You must create these policies first
-          paymentPolicyId: "YOUR_PAYMENT_POLICY_ID",
-          returnPolicyId: "YOUR_RETURN_POLICY_ID"
-        },
-        pricingSummary: {
-          price: {
-            value: inventoryItemsArray[i].pricingDetails.price.value,
-            currency: inventoryItemsArray[i].pricingDetails.price.currency
-          }
-        },
-        merchantLocationKey: "YOUR_MERCHANT_LOCATION_KEY" // You need to create this first
-      };
-
-      const data = await ebayApi({
-        method: "POST",
-        url: createOfferUrl,
-        data: offerData,
-        headers: {
-          'Content-Language': 'en-US'
-        }
-      });
-      
-      console.log(`Created offer for SKU ${sku}`);
-      i++;
-    }
-      return res.status(200).json({
-        success: true,
-        message: `Offer created successfully for SKU: ${sku}`,
-        data
-      });
-    
-    // Create the offer using eBay API
-    
-  } catch (error) {
-    console.error("Error creating offer:", error.response ? error.response.data : error.message);
-    
-    const statusCode = error.response ? error.response.status : 500;
-    const errorData = error.response ? error.response.data : { message: error.message };
-    
-    return res.status(statusCode).json({
-      success: false,
-      message: "Error creating offer",
-      error: errorData
-    });
-  }
+export default {
+  fetchEbayListings,
+  editPrice,
 };
-
-
-
-
-// Function to create a merchant location
-const createMerchantLocation = async (req, res) => {
-  // Choose a unique key for your location
-  const merchantLocationKey = "warehouse-001";
-  
-  // Location data - modify with your actual address
-  const locationData = {
-    location: {
-      address: {
-        addressLine1: "123 Main Street",
-        city: "Karachi",
-        stateOrProvince: "Sindh",
-        postalCode: "75330",
-        country: "PK"  // Use your country code
-      }
-    },
-    locationInstructions: "Standard shipping location",
-    name: "Main Warehouse",
-    merchantLocationStatus: "ENABLED",
-    locationTypes: ["WAREHOUSE"]
-  };
-
-  try {
-    const url = `https://api.ebay.com/sell/inventory/v1/location/${merchantLocationKey}`;
-    
-    const response = await ebayApi({
-      method: "POST",
-      url: url,
-      data: locationData
-    });
-    
-    console.log("Location created:", response);
-    
-    return res.status(200).json({
-      success: true,
-      merchantLocationKey: merchantLocationKey,
-      response: response
-    });
-  } catch (error) {
-    console.error("Error creating location:", error.response ? error.response.data : error.message);
-    
-    return res.status(500).json({
-      success: false,
-      message: "Error creating merchant location",
-      error: error.response ? error.response.data : error.message
-    });
-  }
-};
-
-
-
-const getCategoryTree = async () => {
-  try {
-    // 0 is the ID for the eBay US category tree
-    const url = "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0";
-    const categoryTree = await ebayApi({
-      method: "GET",
-      url: url
-    });
-    console.log("Category tree:", categoryTree);
-    return categoryTree;
-  } catch (error) {
-    console.error("Error fetching category tree:", error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
-
-const getCategorySuggestions = async () => {
-  try {
-    const url = "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions";
-    const response = await ebayApi({
-      method: "POST",
-      url: url,
-      data: {
-        "keywords": "electric car BMW i7" 
-      }
-    });
-    console.log("Category suggestions:", response);
-    return response;
-  } catch (error) {
-    console.error("Error getting category suggestions:", error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
-
-
-export default { addProduct, addMultipleProducts, editPrice, deleteProduct , createOfferForInventoryItem, getMerchantKey, createMerchantLocation};
-

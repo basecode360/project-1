@@ -1,5 +1,5 @@
 import express from 'express'
-import triggerAutoSync from '../services/sync.js';
+import {triggerAutoSync} from '../services/syncService.js';
 
 
 const router = express.Router();

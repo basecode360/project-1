@@ -1,207 +1,266 @@
 // routes/priceHistoryRoutes.js
+
 import express from 'express';
-import { getItemPriceHistory, addManualPriceRecord } from '../controllers/HistoryFunctions.js';
+import { requireAuth } from '../controllers/middleware/authMiddleware.js';
+import {
+  recordPriceChange,
+  fetchRawPriceHistory,
+  getPriceAnalytics,
+} from '../services/historyService.js';
 
 const router = express.Router();
 
-// Price update endpoint (existing)
-
-// New endpoints for price history
-router.get('/history/:itemId', getItemPriceHistory);
-router.post('/history/manual', addManualPriceRecord);
-
-// New endpoint to get price change analytics
-router.get('/analytics/:itemId', async (req, res) => {
+/**
+ * GET /api/price-history/history/:itemId
+ * Retrieve raw price-history entries; each record now includes:
+ *   itemId, sku, title, oldPrice, newPrice, competitorLowestPrice,
+ *   strategyName, status, createdAt, etc.
+ *
+ * Query params:
+ *   - sku   (optional)
+ *   - limit (optional, defaults to 100)
+ */
+router.get('/history/:itemId', requireAuth, async (req, res) => {
   try {
+    const userId = req.user.id;
     const { itemId } = req.params;
-    const { sku, period = '30d' } = req.query;
-    
-    // Get model from import
-    const PriceHistory = req.app.get('models').PriceHistory;
-    
-    // Calculate date range based on period
-    const endDate = new Date();
-    let startDate = new Date();
-    
-    switch(period) {
-      case '7d':
-        startDate.setDate(startDate.getDate() - 7);
-        break;
-      case '30d':
-        startDate.setDate(startDate.getDate() - 30);
-        break;
-      case '90d':
-        startDate.setDate(startDate.getDate() - 90);
-        break;
-      case '1y':
-        startDate.setFullYear(startDate.getFullYear() - 1);
-        break;
-      case 'all':
-        startDate = new Date(0); // Beginning of time
-        break;
-      default:
-        startDate.setDate(startDate.getDate() - 30); // Default to 30 days
-    }
-    
-    // Build query
-    const query = { 
+    const { sku = null, limit = 100 } = req.query;
+
+    // Fetch raw records (most recent first)
+    const records = await fetchRawPriceHistory({
       itemId,
+      sku,
+      limit: Number(limit),
+    });
+
+    return res.json({
       success: true,
-      createdAt: { $gte: startDate, $lte: endDate }
-    };
-    
-    if (sku) {
-      query.sku = sku;
-    }
-    
-    // Get price records in date range
-    const priceRecords = await PriceHistory.find(query)
-      .sort({ createdAt: 1 });
-    
-    // If SKU specified, get analytics for that SKU
-    if (sku) {
-      if (priceRecords.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: `No price history found for item ${itemId}, SKU ${sku} in the selected period`
-        });
-      }
-      
-      const firstRecord = priceRecords[0];
-      const lastRecord = priceRecords[priceRecords.length - 1];
-      const priceChanges = priceRecords.length - 1;
-      
-      const analytics = {
-        itemId,
-        sku,
-        period,
-        startDate,
-        endDate,
-        priceAtStart: firstRecord.newPrice,
-        currentPrice: lastRecord.newPrice,
-        priceChange: lastRecord.newPrice - firstRecord.newPrice,
-        percentageChange: ((lastRecord.newPrice - firstRecord.newPrice) / firstRecord.newPrice) * 100,
-        totalChanges: priceChanges,
-        changeFrequency: priceChanges > 0 ? 
-          `${(priceChanges / Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24))).toFixed(2)} changes per day` : 
-          'No changes',
-        pricePoints: priceRecords.map(record => ({
-          price: record.newPrice,
-          date: record.createdAt,
-          change: record.changeAmount,
-          percentChange: record.changePercentage
-        }))
-      };
-      
-      return res.json({
-        success: true,
-        analytics
-      });
-    } 
-    // If no SKU, group by SKU and get analytics for each
-    else {
-      // Group records by SKU
-      const skuGroups = {};
-      
-      priceRecords.forEach(record => {
-        if (!skuGroups[record.sku]) {
-          skuGroups[record.sku] = [];
-        }
-        skuGroups[record.sku].push(record);
-      });
-      
-      // Generate analytics for each SKU
-      const skuAnalytics = {};
-      
-      Object.entries(skuGroups).forEach(([sku, records]) => {
-        if (records.length === 0) return;
-        
-        const firstRecord = records[0];
-        const lastRecord = records[records.length - 1];
-        const priceChanges = records.length - 1;
-        
-        skuAnalytics[sku] = {
-          priceAtStart: firstRecord.newPrice,
-          currentPrice: lastRecord.newPrice,
-          priceChange: lastRecord.newPrice - firstRecord.newPrice,
-          percentageChange: ((lastRecord.newPrice - firstRecord.newPrice) / firstRecord.newPrice) * 100,
-          totalChanges: priceChanges,
-          lastUpdated: lastRecord.createdAt
-        };
-      });
-      
-      return res.json({
-        success: true,
-        itemId,
-        period,
-        startDate,
-        endDate,
-        totalSkus: Object.keys(skuAnalytics).length,
-        skuAnalytics
-      });
-    }
-    
+      itemId,
+      sku,
+      recordCount: records.length,
+      priceHistory: records,
+    });
   } catch (error) {
-    console.error('Error generating price analytics:', error);
+    console.error('Error fetching price history:', error);
     return res.status(500).json({
       success: false,
-      message: "Error generating price analytics",
-      error: error.message
+      message: 'Error fetching price history',
+      error: error.message,
     });
   }
 });
 
-// Bulk data export for price history
-router.get('/export/:itemId', async (req, res) => {
+/**
+ * POST /api/price-history/history/manual
+ * Manually record a price change. Body must include:
+ * {
+ *   itemId: string,
+ *   sku: string,
+ *   title?: string,
+ *   oldPrice?: number,
+ *   newPrice: number,
+ *   competitorLowestPrice?: number,
+ *   strategyName?: string,
+ *   status: 'Done'|'Skipped'|'Error'|'Manual',
+ *   currency?: string,
+ *   source?: 'api'|'manual'|'system',
+ *   success: boolean,
+ *   apiResponse?: any,
+ *   error?: any,
+ *   metadata?: any
+ * }
+ */
+router.post('/history/manual', requireAuth, async (req, res) => {
   try {
-    const { itemId } = req.params;
-    const { format = 'json' } = req.query;
-    
-    // Get model from import
-    const PriceHistory = req.app.get('models').PriceHistory;
-    
-    // Get all price history for item
-    const priceHistory = await PriceHistory.find({ itemId, success: true })
-      .sort({ sku: 1, createdAt: 1 });
-    
-    if (priceHistory.length === 0) {
-      return res.status(404).json({
+    const userId = req.user.id;
+    const {
+      itemId,
+      sku,
+      title = null,
+      oldPrice = null,
+      newPrice,
+      currency = 'USD',
+      competitorLowestPrice = null,
+      strategyName = null,
+      status,
+      source = 'manual',
+      apiResponse = null,
+      success,
+      error = null,
+      metadata = {},
+    } = req.body;
+
+    if (
+      !itemId ||
+      sku == null ||
+      newPrice == null ||
+      status == null ||
+      success == null
+    ) {
+      return res.status(400).json({
         success: false,
-        message: `No price history found for item ${itemId}`
+        message:
+          'Missing required fields: itemId, sku, newPrice, status, and success are required.',
       });
     }
-    
-    // Format output based on requested format
+
+    const record = await recordPriceChange({
+      userId,
+      itemId,
+      sku,
+      title,
+      oldPrice,
+      newPrice,
+      currency,
+      competitorLowestPrice,
+      strategyName,
+      status,
+      source,
+      apiResponse,
+      success,
+      error,
+      metadata,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Price change recorded successfully',
+      record,
+    });
+  } catch (err) {
+    console.error('Error adding manual price record:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Error adding manual price record',
+      error: err.message,
+    });
+  }
+});
+
+/**
+ * GET /api/price-history/analytics/:itemId
+ * Return analytics for an item (and optional SKU) over period.
+ * Query params:
+ *   - sku (optional)
+ *   - period in { '7d'|'30d'|'90d'|'1y'|'all' } (defaults to '30d')
+ */
+router.get('/analytics/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { sku = null, period = '30d' } = req.query;
+
+    const analytics = await getPriceAnalytics({ itemId, sku, period });
+    return res.json({ success: true, analytics });
+  } catch (err) {
+    console.error('Error generating price analytics:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Error generating price analytics',
+      error: err.message,
+    });
+  }
+});
+
+/**
+ * GET /api/price-history/export/:itemId
+ * Export all price-history records as JSON or CSV.
+ * Query params:
+ *   - sku (optional)
+ *   - format = 'json' | 'csv' (default: 'json')
+ */
+router.get('/export/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { sku = null, format = 'json' } = req.query;
+
+    // Fetch ALL history (limit = very large)
+    const records = await fetchRawPriceHistory({
+      itemId,
+      sku,
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+
+    if (records.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No price history found for item ${itemId}${
+          sku ? `, SKU ${sku}` : ''
+        }`,
+      });
+    }
+
     if (format === 'csv') {
-      // Create CSV content
-      const csvHeader = 'SKU,Price,Currency,Date,ChangeAmount,ChangePercentage\n';
-      const csvRows = priceHistory.map(record => {
-        return `${record.sku},${record.newPrice},${record.currency},${record.createdAt.toISOString()},${record.changeAmount || ''},${record.changePercentage || ''}`;
-      }).join('\n');
-      
-      const csvContent = csvHeader + csvRows;
-      
-      // Set headers for file download
+      // CSV header: list all fields we want to export
+      const header = [
+        'itemId',
+        'sku',
+        'title',
+        'oldPrice',
+        'newPrice',
+        'currency',
+        'competitorLowestPrice',
+        'strategyName',
+        'status',
+        'changeAmount',
+        'changePercentage',
+        'changeDirection',
+        'source',
+        'success',
+        'error',
+        'createdAt',
+      ].join(',');
+
+      const rows = records.map((r) => {
+        const fields = [
+          r.itemId,
+          r.sku,
+          r.title || '',
+          r.oldPrice != null ? r.oldPrice : '',
+          r.newPrice,
+          r.currency,
+          r.competitorLowestPrice != null ? r.competitorLowestPrice : '',
+          r.strategyName || '',
+          r.status,
+          r.changeAmount != null ? r.changeAmount : '',
+          r.changePercentage != null ? r.changePercentage : '',
+          r.changeDirection || '',
+          r.source,
+          r.success,
+          r.error != null ? JSON.stringify(r.error) : '',
+          r.createdAt.toISOString(),
+        ];
+        // Escape commas in title if needed
+        const escaped = fields.map((f) =>
+          typeof f === 'string' && f.includes(',')
+            ? `"${f.replace(/"/g, '""')}"`
+            : f
+        );
+        return escaped.join(',');
+      });
+
+      const csvContent = [header, ...rows].join('\n');
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="price_history_${itemId}.csv"`);
-      
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="price_history_${itemId}.csv"`
+      );
       return res.send(csvContent);
     } else {
-      // Return JSON format
+      // JSON
       return res.json({
         success: true,
         itemId,
-        recordCount: priceHistory.length,
-        priceHistory
+        sku,
+        recordCount: records.length,
+        priceHistory: records,
       });
     }
-    
-  } catch (error) {
-    console.error('Error exporting price history:', error);
+  } catch (err) {
+    console.error('Error exporting price history:', err);
     return res.status(500).json({
       success: false,
-      message: "Error exporting price history",
-      error: error.message
+      message: 'Error exporting price history',
+      error: err.message,
     });
   }
 });
