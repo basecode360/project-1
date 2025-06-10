@@ -4,7 +4,7 @@ import qs from 'qs';
 
 const CLIENT_ID = process.env.EBAY_CLIENT_ID;
 const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
-const REDIRECT_URI = process.env.EBAY_REDIRECT_URI;
+const REDIRECT_URI = process.env.REDIRECT_URI;
 const SCOPES =
   process.env.EBAY_OAUTH_SCOPES || 'https://api.ebay.com/oauth/api_scope';
 

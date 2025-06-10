@@ -1,11 +1,54 @@
-import express from "express";
-import ebayService from "../services/ebayService.js";
-import getEbayListings from "../controllers/ebayController.js";
-import fetchProducts from "../services/getInventory.js";
-import editRoute from "../services/editProduct.js";
+import express from 'express';
+import xml2js from 'xml2js';
+import axios from 'axios';
+import ebayService from '../services/ebayService.js';
+import getEbayListings from '../controllers/ebayController.js';
+import fetchProducts from '../services/getInventory.js';
+import editRoute from '../services/editProduct.js';
+
 const router = express.Router();
 
+// ── Helper Functions ────────────────────────────────────────────────────────────
 
+// Parse XML response helper
+async function parseXMLResponse(xmlData) {
+  const parser = new xml2js.Parser({
+    explicitArray: false,
+    tagNameProcessors: [xml2js.processors.stripPrefix],
+  });
+  return await parser.parseStringPromise(xmlData);
+}
+
+// Check if eBay API response is successful
+function isEBayResponseSuccessful(result, operationName) {
+  const response = result[operationName + 'Response'];
+  if (response.Ack !== 'Success' && response.Ack !== 'Warning') {
+    const errors = response.Errors;
+    const errorMsg = Array.isArray(errors)
+      ? errors.map((e) => e.LongMessage || e.ShortMessage).join(', ')
+      : errors?.LongMessage || errors?.ShortMessage || 'Unknown error';
+    throw new Error(`eBay API Error: ${errorMsg}`);
+  }
+  return response;
+}
+
+// Make eBay XML API call
+async function makeEBayAPICall(xmlRequest, callName) {
+  const response = await axios({
+    method: 'post',
+    url: 'https://api.ebay.com/ws/api.dll',
+    headers: {
+      'Content-Type': 'text/xml',
+      'X-EBAY-API-COMPATIBILITY-LEVEL': '1155',
+      'X-EBAY-API-CALL-NAME': callName,
+      'X-EBAY-API-SITEID': '0', // US site
+    },
+    data: xmlRequest,
+  });
+  return response.data;
+}
+
+// ── Routes ──────────────────────────────────────────────────────────────────────
 
 /**
  ** @swagger
@@ -29,13 +72,12 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
+router.get('/active-listings', fetchProducts.getActiveListings);
 
- router.get("/active-listings", fetchProducts.getActiveListings);
-
-
-
-
-router.get("/competitor-prices/:itemId", async (req, res) => {
+/**
+ * Get competitor prices for a specific item
+ */
+router.get('/competitor-prices/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
     const oauthToken = process.env.AUTH_TOKEN; // Trading API
@@ -44,7 +86,7 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
     if (!oauthToken) {
       return res
         .status(400)
-        .json({ success: false, message: "eBay auth token is required" });
+        .json({ success: false, message: 'eBay auth token is required' });
     }
 
     // 1) GetItem request (Trading API)
@@ -59,31 +101,31 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
         <IncludeItemSpecifics>true</IncludeItemSpecifics>
       </GetItemRequest>
     `;
-    const getItemResponse = await makeEBayAPICall(getItemXml, "GetItem");
+    const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
     const parsedItem = await parseXMLResponse(getItemResponse);
-    const itemResult = isEBayResponseSuccessful(parsedItem, "GetItem");
+    const itemResult = isEBayResponseSuccessful(parsedItem, 'GetItem');
     const item = itemResult.Item;
     if (!item) {
       throw new Error(`Item ${itemId} not found`);
     }
 
     // Extract title & category for Browse call
-    const title = item.Title || "";
-    const categoryId = item.PrimaryCategory?.CategoryID || "";
+    const title = item.Title || '';
+    const categoryId = item.PrimaryCategory?.CategoryID || '';
 
     // 2) Browse API competitor prices
     const query = new URLSearchParams({
       q: title,
       category_ids: categoryId,
       limit: 20,
-      sort: "price",
+      sort: 'price',
     });
     const browseResponse = await axios.get(
       `https://api.ebay.com/buy/browse/v1/item_summary/search?${query.toString()}`,
       {
         headers: {
           Authorization: `Bearer ${appId}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         timeout: 10000,
       }
@@ -95,7 +137,7 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
       .map((i) => {
         const price = parseFloat(i.price.value);
         const shipping = parseFloat(
-          i.shippingOptions?.[0]?.shippingCost?.value || "0"
+          i.shippingOptions?.[0]?.shippingCost?.value || '0'
         );
         return +(price + shipping).toFixed(2);
       })
@@ -111,8 +153,8 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
           title: i.title,
           price: parseFloat(i.price.value),
           shipping:
-            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || "0") || 0,
-          imageurl: i.thumbnailImages[0]?.imageUrl || "",
+            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || '0') || 0,
+          imageurl: i.thumbnailImages[0]?.imageUrl || '',
           seller: i.seller?.username,
           condition: i.condition,
           productUrl: i.itemWebUrl,
@@ -124,11 +166,11 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching competitor prices:", error);
-    if (error.message.includes("rate limit")) {
+    console.error('Error fetching competitor prices:', error);
+    if (error.message.includes('rate limit')) {
       return res.status(429).json({
         success: false,
-        message: "eBay API rate limit exceeded. Try again later.",
+        message: 'eBay API rate limit exceeded. Try again later.',
         error: error.message,
       });
     }
@@ -136,13 +178,132 @@ router.get("/competitor-prices/:itemId", async (req, res) => {
   }
 });
 
+/**
+ * Get active listings via feed
+ */
+router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
 
+/**
+ * Get item variations for a specific item
+ */
+router.get('/item-variations/:itemId', editRoute.getItemVariations);
 
+/**
+ * Edit variation price for a specific variation
+ */
+router.post('/edit-variation-price', editRoute.editVariationPrice);
 
-router.get("/active-listingsviaFeed", fetchProducts.getActiveListingsViaFeed);
-router.get("/item-variations/:itemId", editRoute.getItemVariations);
-router.post("/edit-variation-price", editRoute.editVariationPrice);
-router.post("/edit-all-variations-price", editRoute.editAllVariationsPrices);
+/**
+ * Edit all variations prices for an item
+ */
+router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
 
+/**
+ * Get item details by ID
+ */
+router.get('/item/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const authToken = process.env.AUTH_TOKEN;
+
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'eBay auth token is required',
+      });
+    }
+
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, 'GetItem');
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, 'GetItem');
+
+    const item = response.Item;
+    if (!item) {
+      throw new Error(`Item ${itemId} not found`);
+    }
+
+    res.json({
+      success: true,
+      itemId,
+      item: {
+        title: item.Title,
+        currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
+        currency: item.StartPrice?.__attributes__?.currencyID || 'USD',
+        listingType: item.ListingType,
+        condition: item.ConditionDisplayName,
+        category: item.PrimaryCategory,
+        itemSpecifics: item.ItemSpecifics?.NameValueList || [],
+        description: item.Description,
+        location: item.Location,
+        startTime: item.StartTime,
+        endTime: item.EndTime,
+        listingStatus: item.SellingStatus?.ListingStatus,
+      },
+    });
+  } catch (error) {
+    console.error('eBay Get Item Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Health check for eBay API service
+ */
+router.get('/health', async (req, res) => {
+  try {
+    const authToken = process.env.AUTH_TOKEN;
+    const clientId = process.env.CLIENT_ID;
+
+    const healthStatus = {
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      service: 'eBay API Service',
+      version: '1.0.0',
+      checks: {
+        environment: {
+          status: authToken && clientId ? 'OK' : 'ERROR',
+          message:
+            authToken && clientId
+              ? 'eBay credentials configured'
+              : 'Missing eBay credentials',
+        },
+        api: {
+          status: 'OK',
+          message: 'API is responding',
+        },
+      },
+    };
+
+    const isHealthy = Object.values(healthStatus.checks).every(
+      (check) => check.status === 'OK'
+    );
+
+    return res.status(isHealthy ? 200 : 503).json({
+      success: isHealthy,
+      data: healthStatus,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Health check failed',
+      error: error.message,
+    });
+  }
+});
 
 export default router;
