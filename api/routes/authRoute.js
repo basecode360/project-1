@@ -164,6 +164,8 @@ router.post('/login', async (req, res) => {
 
 // Step 1 of user‐consent flow: Redirect to eBay's authorization page
 router.get('/ebay-login', (req, res) => {
+  const { userId } = req.query;
+
   const clientId = process.env.CLIENT_ID;
   const redirect = encodeURIComponent(process.env.REDIRECT_URI);
 
@@ -183,7 +185,8 @@ router.get('/ebay-login', (req, res) => {
     `&response_type=code` +
     `&redirect_uri=${redirect}` +
     `&scope=${scopes}` +
-    `&state=${req.query.userId}`;
+    `&state=${userId}`;
+
   console.log('Redirecting to eBay login:', authUrl);
   res.redirect(authUrl);
 });
@@ -215,6 +218,8 @@ router.get('/automated-login', async (req, res) => {
 router.post('/exchange-code', async (req, res) => {
   try {
     const { code, userId } = req.body;
+    console.log('[Backend] Received code:', code, 'userId:', userId);
+
     if (!code || !userId) {
       return sendResponse(res, 400, false, 'Both code and userId are required');
     }
@@ -252,7 +257,7 @@ router.get('/token', async (req, res) => {
   try {
     // Check if it's a user-specific request or system-wide token request
     const { userId } = req.query;
-    
+
     if (userId) {
       // User-specific token logic (existing code)
       if (!userId) {
@@ -352,7 +357,7 @@ router.get('/application_token', async (req, res) => {
 // GET /auth/refresh → manually refresh user's token
 router.get('/refresh', async (req, res) => {
   const { userId } = req.query;
-  
+
   if (userId) {
     // User-specific refresh
     try {
