@@ -7,7 +7,6 @@ import User from '../models/Users.js';
 import sendResponse from '../helper/sendResponse.js'; // utility for consistent JSON replies
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import EbayOAuthToken from 'ebay-oauth-nodejs-client';
 
 // Import our eBay‐OAuth helpers
 import {
@@ -21,13 +20,6 @@ import {
 } from '../controllers/middleware/authenticateUser.js';
 
 const router = express.Router();
-
-// Initialize eBay OAuth SDK
-const eBay = new EbayOAuthToken({
-  clientId: process.env.CLIENT_ID,
-  clientSecret: process.env.CLIENT_SECRET,
-  redirectUri: process.env.REDIRECT_URI,
-});
 
 // ── Token Management ────────────────────────────────────────────────────────────
 
@@ -542,17 +534,5 @@ async function getApplicationToken() {
     note: 'This token can only be used for APIs that do not require user consent.',
   };
 }
-
-// GET /auth/test-ebay-sdk → Test eBay SDK token exchange
-router.get('/test-ebay-sdk', async (req, res) => {
-  const code = req.query.code;
-  try {
-    const token = await eBay.getAccessToken('PRODUCTION', code);
-    res.json(token);
-  } catch (err) {
-    console.error('SDK token error:', err?.response?.data || err);
-    res.status(500).send('Token error');
-  }
-});
 
 export default router;
