@@ -43,8 +43,6 @@ app.use(morgan('short'));
 // If you want to make models available to controllers via `req.app.get('models')`:
 app.set('models', { PriceHistory });
 
-
-
 // ── Mounting All Routers ───────────────────────────────────────────────────────
 
 // 1) Authentication (login, register, logout, OAuth callback, etc.)
@@ -91,8 +89,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Server listening on http://localhost:${PORT}`);
 });
 console.log('🧪 ENV CHECK', {
-  EBAY_CLIENT_ID: process.env.EBAY_CLIENT_ID,
-  EBAY_CLIENT_SECRET: process.env.EBAY_CLIENT_SECRET
-    ? '✔️ present'
-    : '❌ missing',
+  EBAY_CLIENT_ID: process.env.CLIENT_ID,
+  EBAY_CLIENT_SECRET: process.env.CLIENT_SECRET ? '✔️ present' : '❌ missing',
 });
