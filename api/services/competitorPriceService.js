@@ -7,7 +7,7 @@ import { refreshUserAccessToken } from './ebayAuthService.js';
 /**
  * Ensure the user’s eBay accessToken is valid.
  * If missing or expired, refresh it using their refreshToken.
- * This confirms the user has connected eBay; Browse API itself uses EBAY_CLIENT_ID.
+ * This confirms the user has connected eBay; Browse API itself uses CLIENT_ID.
  */
 async function ensureValidEbayToken(userId) {
   const user = await User.findById(userId);
@@ -46,9 +46,9 @@ export async function fetchCompetitorPrices(userId, itemId, title, categoryId) {
   await ensureValidEbayToken(userId);
 
   // 2) Build Browse API query
-  const appId = process.env.EBAY_CLIENT_ID;
+  const appId = process.env.CLIENT_ID;
   if (!appId) {
-    throw new Error('Missing EBAY_CLIENT_ID in environment');
+    throw new Error('Missing CLIENT_ID in environment');
   }
 
   const params = new URLSearchParams({

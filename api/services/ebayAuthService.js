@@ -2,15 +2,15 @@
 import axios from 'axios';
 import qs from 'qs';
 
-const CLIENT_ID = process.env.EBAY_CLIENT_ID;
-const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const SCOPES =
   process.env.EBAY_OAUTH_SCOPES || 'https://api.ebay.com/oauth/api_scope';
 
 // if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
 //   throw new Error(
-//     'Missing eBay OAuth environment variables (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI)'
+//     'Missing eBay OAuth environment variables (CLIENT_ID, CLIENT_SECRET, EBAY_REDIRECT_URI)'
 //   );
 // }
 
