@@ -50,7 +50,23 @@ export default function Home({ handleLogout }) {
           console.log('[Home.jsx] Exchange response from backend:', resp);
 
           if (!resp.success) throw new Error(resp.error || 'Exchange failed');
-          localStorage.setItem('ebay_user_token', resp.data.access_token);
+          localStorage.setItem('userId', user.id);
+
+          const expiresIn = resp.data.expires_in || 7200; // fallback to 2h
+          const expiresAt = Date.now() + expiresIn * 1000;
+
+          localStorage.setItem(
+            'ebay_user_token',
+            JSON.stringify({
+              value: resp.data.access_token,
+              expiry: expiresAt,
+            })
+          );
+
+          if (resp.data.refresh_token) {
+            localStorage.setItem('ebay_refresh_token', resp.data.refresh_token);
+          }
+
           setEbayToken(resp.data.access_token);
           setNeedsConnection(false);
         } catch (err) {
@@ -64,29 +80,37 @@ export default function Home({ handleLogout }) {
   }, [user]);
 
   // 1) On mount (and whenever the "user" changes), try to fetch/refresh the eBay token.
-  //    If none is available, show “Connect to eBay” button.
+  //    If none is available, show "Connect to eBay" button.
   useEffect(() => {
     async function checkToken() {
-      if (!user || !user.id) {
-        // No logged‐in user → bail out.
-        return;
+      if (!user || !user.id) return;
+
+      // 1. Try localStorage first
+      const localToken = localStorage.getItem('ebay_user_token');
+      if (localToken) {
+        setEbayToken(localToken); // use it
+        setNeedsConnection(false); // hide "connect" button
       }
+
+      // 2. Still validate via backend in case token is expired
       try {
-        // Pass user.id into getValidAuthToken so it can do GET /auth/token?userId=<…>
         const token = await getValidAuthToken(user.id);
-        if (!token) {
-          // Backend says “no eBay token stored yet” → show the Connect button.
+        if (token) {
+          localStorage.setItem('ebay_user_token', token);
+          setEbayToken(token);
+          setNeedsConnection(false);
+        } else if (!localToken) {
+          // If no local token either
           setNeedsConnection(true);
-          return;
         }
-        // We have a valid (or freshly‐refreshed) eBay token:
-        setEbayToken(token);
-        setNeedsConnection(false);
       } catch (err) {
+        if (!localToken) {
+          setNeedsConnection(true);
+        }
         console.warn('⚠️ Unable to fetch/refresh eBay token:', err);
-        setNeedsConnection(true);
       }
     }
+
     checkToken();
   }, [user]);
 

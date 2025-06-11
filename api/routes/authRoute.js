@@ -287,8 +287,8 @@ router.get('/token', async (req, res) => {
         // Still more than 5 minutes before expiry
         return sendResponse(res, 200, true, 'Token still valid', {
           access_token: user.ebay.accessToken,
+          expires_in: Math.floor((expiresAt - now) / 1000),
           expires_at: user.ebay.expiresAt,
-          expires_in_seconds: Math.floor((expiresAt - now) / 1000),
         });
       }
 
@@ -298,9 +298,9 @@ router.get('/token', async (req, res) => {
 
       return sendResponse(res, 200, true, 'Token refreshed successfully', {
         access_token: newTokens.access_token,
+        expires_in: newTokens.expires_in,
         refresh_token: newTokens.refresh_token || user.ebay.refreshToken,
         expires_at: user.ebay.expiresAt,
-        expires_in_seconds: newTokens.expires_in,
       });
     } else {
       // System-wide token logic (from original app.js)
