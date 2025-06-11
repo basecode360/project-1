@@ -37,37 +37,58 @@ export function getEbayAuthUrl(stateJwt) {
  * Returns { access_token, refresh_token, expires_in }.
  */
 export async function exchangeCodeForToken(code, userId) {
-  const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
-  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
-    'base64'
-  );
+  console.log('[exchangeCodeForToken] Exchanging code for user:', userId);
+  console.log('[exchangeCodeForToken] Code received:', code);
 
-  const data = {
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: REDIRECT_URI,
-  };
+  try {
+    const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
+    const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
+      'base64'
+    );
 
-  const response = await axios.post(tokenUrl, qs.stringify(data), {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${basicAuth}`,
-    },
-  });
+    const data = {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+    };
 
-  // 1) Save tokens on the User model:
-  const tokens = response.data; // { access_token, refresh_token, expires_in, … }
-  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    const response = await axios.post(tokenUrl, qs.stringify(data), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
+      },
+    });
 
-  await User.findByIdAndUpdate(userId, {
-    $set: {
-      'ebay.accessToken': tokens.access_token,
-      'ebay.refreshToken': tokens.refresh_token,
-      'ebay.expiresAt': expiresAt,
-    },
-  });
+    console.log(
+      '[exchangeCodeForToken] Token exchange response from eBay:',
+      response.data
+    );
 
-  return tokens;
+    // 1) Save tokens on the User model:
+    const tokens = response.data; // { access_token, refresh_token, expires_in, … }
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+    console.log(
+      '[exchangeCodeForToken] Storing tokens in DB for user:',
+      userId
+    );
+
+    await User.findByIdAndUpdate(userId, {
+      $set: {
+        'ebay.accessToken': tokens.access_token,
+        'ebay.refreshToken': tokens.refresh_token,
+        'ebay.expiresAt': expiresAt,
+      },
+    });
+
+    return tokens;
+  } catch (err) {
+    console.error(
+      '[exchangeCodeForToken] ERROR exchanging code:',
+      err?.response?.data || err
+    );
+    throw err;
+  }
 }
 
 /**

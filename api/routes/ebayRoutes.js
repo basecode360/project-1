@@ -261,49 +261,6 @@ router.get('/item/:itemId', async (req, res) => {
   }
 });
 
-/**
- * Health check for eBay API service
- */
-router.get('/health', async (req, res) => {
-  try {
-    const authToken = process.env.AUTH_TOKEN;
-    const clientId = process.env.CLIENT_ID;
 
-    const healthStatus = {
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      service: 'eBay API Service',
-      version: '1.0.0',
-      checks: {
-        environment: {
-          status: authToken && clientId ? 'OK' : 'ERROR',
-          message:
-            authToken && clientId
-              ? 'eBay credentials configured'
-              : 'Missing eBay credentials',
-        },
-        api: {
-          status: 'OK',
-          message: 'API is responding',
-        },
-      },
-    };
-
-    const isHealthy = Object.values(healthStatus.checks).every(
-      (check) => check.status === 'OK'
-    );
-
-    return res.status(isHealthy ? 200 : 503).json({
-      success: isHealthy,
-      data: healthStatus,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Health check failed',
-      error: error.message,
-    });
-  }
-});
 
 export default router;
