@@ -49,7 +49,7 @@ export async function exchangeCodeForToken(code, userId) {
     const data = {
       grant_type: 'authorization_code',
       code,
-      redirect_uri: https://partstunt.netlify.app/auth/popup-callback,
+      redirect_uri: 'https://partstunt.netlify.app/auth/popup-callback',
     };
 
     const response = await axios.post(tokenUrl, qs.stringify(data), {
