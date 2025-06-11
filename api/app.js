@@ -90,3 +90,9 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on http://localhost:${PORT}`);
 });
+console.log('🧪 ENV CHECK', {
+  EBAY_CLIENT_ID: process.env.EBAY_CLIENT_ID,
+  EBAY_CLIENT_SECRET: process.env.EBAY_CLIENT_SECRET
+    ? '✔️ present'
+    : '❌ missing',
+});
