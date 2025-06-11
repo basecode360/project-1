@@ -62,8 +62,9 @@ export async function generateEbayAuthCode(options = {}) {
     `https://auth.ebay.com/oauth2/authorize` +
     `?client_id=${clientId}` +
     `&response_type=code` +
-    `&redirect_uri=${redirectUri}` +
-    `&scope=${scopes}`;
+    `&redirect_uri=${redirect}` +
+    `&scope=${scopes}` +
+    `&state=${req.query.userId}`;
 
   console.log('Starting automated eBay authorization...');
   console.log('Auth URL:', authUrl);

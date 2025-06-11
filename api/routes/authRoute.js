@@ -182,7 +182,8 @@ router.get('/ebay-login', (req, res) => {
     `?client_id=${clientId}` +
     `&response_type=code` +
     `&redirect_uri=${redirect}` +
-    `&scope=${scopes}`;
+    `&scope=${scopes}` +
+    `&state=${req.query.userId}`;
   console.log('Redirecting to eBay login:', authUrl);
   res.redirect(authUrl);
 });
