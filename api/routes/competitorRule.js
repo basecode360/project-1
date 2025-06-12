@@ -600,8 +600,9 @@ router.post('/assign-to-all-active', async (req, res) => {
 
         const xmlResponse = await makeEBayAPICall(xmlRequest, 'ReviseItem');
         const result = await parseXMLResponse(xmlResponse);
-        isEBayResponseSuccessful(result, 'ReviseItem');
-
+        const response = isEBayResponseSuccessful(result, 'ReviseItem');
+        createCompetitorRule(req, res);
+        applyRuleToItems(req, res);
         results.push({
           itemId,
           title: item.Title,
@@ -666,6 +667,24 @@ router.post('/assign-to-all-active', async (req, res) => {
 
 router.get('/active-listings', async (req, res) => {
   try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required as query parameter',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
 
     if (!authToken) {
@@ -889,6 +908,24 @@ router.put('/products/:itemId', async (req, res) => {
 router.delete('/products/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
 
     if (!authToken) {
@@ -953,6 +990,24 @@ router.delete('/products/:itemId', async (req, res) => {
 
 router.delete('/delete-from-all-active', async (req, res) => {
   try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
 
     if (!authToken) {
@@ -962,14 +1017,56 @@ router.delete('/delete-from-all-active', async (req, res) => {
       });
     }
 
-    // First get all active listings with competitor rules
-    const listingsResponse = await axios.get('/active-listings', {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    // Get all active listings directly using eBay API
+    const getActiveListingsXML = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${authToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ActiveList>
+          <Include>true</Include>
+          <Pagination>
+            <EntriesPerPage>200</EntriesPerPage>
+            <PageNumber>1</PageNumber>
+          </Pagination>
+        </ActiveList>
+        <DetailLevel>ReturnAll</DetailLevel>
+      </GetMyeBaySellingRequest>
+    `;
 
-    const listingsWithCompetitorRules = listingsResponse.data.listings.filter(
-      (item) => item.hasCompetitorRule
+    const activeListingsResponse = await makeEBayAPICall(
+      getActiveListingsXML,
+      'GetMyeBaySelling'
     );
+    const activeListingsResult = await parseXMLResponse(activeListingsResponse);
+    const activeListingsData = isEBayResponseSuccessful(
+      activeListingsResult,
+      'GetMyeBaySelling'
+    );
+
+    const activeList = activeListingsData.ActiveList;
+    if (!activeList || !activeList.ItemArray) {
+      return res.json({
+        success: true,
+        message: 'No active listings found',
+        deletedCount: 0,
+      });
+    }
+
+    const items = Array.isArray(activeList.ItemArray.Item)
+      ? activeList.ItemArray.Item
+      : [activeList.ItemArray.Item];
+
+    // Filter for items with competitor rules
+    const listingsWithCompetitorRules = items.filter((item) => {
+      const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+      const competitorRule = parseCompetitorRuleFromSpecifics(
+        itemSpecifics,
+        item.ItemID
+      );
+      return competitorRule !== null;
+    });
 
     if (listingsWithCompetitorRules.length === 0) {
       return res.json({
@@ -992,7 +1089,7 @@ router.delete('/delete-from-all-active', async (req, res) => {
               <eBayAuthToken>${authToken}</eBayAuthToken>
             </RequesterCredentials>
             <Item>
-              <ItemID>${listing.itemId}</ItemID>
+              <ItemID>${listing.ItemID}</ItemID>
               <ItemSpecifics>
                 <NameValueList>
                   <n>CompetitorRuleDeleted</n>
@@ -1012,22 +1109,22 @@ router.delete('/delete-from-all-active', async (req, res) => {
         isEBayResponseSuccessful(result, 'ReviseItem');
 
         results.push({
-          itemId: listing.itemId,
-          title: listing.title,
+          itemId: listing.ItemID,
+          title: listing.Title,
           success: true,
         });
 
         await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
         errors.push({
-          itemId: listing.itemId,
-          title: listing.title,
+          itemId: listing.ItemID,
+          title: listing.Title,
           error: error.message,
         });
       }
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: `Competitor rule deletion processed for ${results.length} listings`,
       summary: {
@@ -1040,7 +1137,7 @@ router.delete('/delete-from-all-active', async (req, res) => {
     });
   } catch (error) {
     console.error('eBay Competitor Rule Bulk Deletion Error:', error.message);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -1052,14 +1149,25 @@ router.delete('/delete-from-all-active', async (req, res) => {
 router.get('/debug/competitor-rule-specifics/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const authToken = user.ebay.accessToken;
+    const { userId } = req.query;
 
-    if (!authToken) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'eBay auth token is required',
+        message: 'userId is required as query parameter',
       });
     }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    const authToken = user.ebay.accessToken;
 
     const xmlRequest = `
       <?xml version="1.0" encoding="utf-8"?>
@@ -1312,14 +1420,25 @@ function parseArray(value) {
 router.get('/products/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const authToken = user.ebay.accessToken;
+    const { userId } = req.query;
 
-    if (!authToken) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'eBay auth token is required',
+        message: 'userId is required as query parameter',
       });
     }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    const authToken = user.ebay.accessToken;
 
     const xmlRequest = `
       <?xml version="1.0" encoding="utf-8"?>
@@ -1377,6 +1496,24 @@ router.get('/products/:itemId', async (req, res) => {
 router.post('/debug/create-test-competitor-rule/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
 
     // Create a test competitor rule with known field names
