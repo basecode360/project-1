@@ -51,28 +51,7 @@ async function makeEBayAPICall(xmlRequest, callName) {
 
 // ── Routes ──────────────────────────────────────────────────────────────────────
 
-/**
- ** @swagger
- * /active-listings:
- *   get:
- *     description: Get all active selling listings from your eBay inventory
- *     responses:
- *       200:
- *         description: A list of active selling listings
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 listings:
- *                   type: array
- *                   items:
- *                     type: object
- *       500:
- *         description: Internal server error
- */
+
 router.get('/active-listings', fetchProducts.getActiveListings);
 
 /**

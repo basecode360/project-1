@@ -8,9 +8,11 @@ import { fetchEbayListings } from '../services/ebayService.js';
  */
 const getEbayListings = async (req, res) => {
   try {
-    const userId = req.user?.id; // ← assumes JWT middleware populated req.user
+    const userId = req.user?.id || req.query.userId;
     if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+      return res
+        .status(401)
+        .json({ success: false, message: 'Unauthorized: userId required' });
     }
 
     const listings = await fetchEbayListings(userId); // ✅ pass it here
@@ -28,6 +30,5 @@ const getEbayListings = async (req, res) => {
     });
   }
 };
-
 
 export default getEbayListings;
