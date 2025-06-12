@@ -55,7 +55,7 @@ app.use('/api/ebay', ebayRoutes);
 app.use('/api/sync', syncRoutes);
 
 // 4) Pricing‐strategies endpoints (create/update/delete strategies, apply to items, etc.)
-app.use('/api/ebay/pricing-strategies', pricingStrategiesRouter);
+app.use('/api/pricing-strategies', pricingStrategiesRouter);
 
 // 5) Price-history endpoints (history/:itemId, analytics/:itemId, export/:itemId)
 app.use('/api/ebay', priceHistoryRoutes);

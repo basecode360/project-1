@@ -111,6 +111,45 @@ router.post('/:id/apply', requireAuth, async (req, res) => {
   }
 });
 
+// 6.5) Apply strategies to a specific product/item
+//      POST /api/pricing-strategies/products/:itemId
+router.post('/products/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { strategyIds, sku = null } = req.body; // strategyIds should be an array
+
+    if (
+      !strategyIds ||
+      !Array.isArray(strategyIds) ||
+      strategyIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'strategyIds array is required',
+      });
+    }
+
+    const results = [];
+    for (const strategyId of strategyIds) {
+      try {
+        await applyStrategyToItems(strategyId, [{ itemId, sku }]);
+        results.push({ strategyId, success: true });
+      } catch (error) {
+        results.push({ strategyId, success: false, error: error.message });
+      }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    return res.json({
+      success: true,
+      message: `Applied ${successCount} of ${strategyIds.length} strategies to item ${itemId}`,
+      results,
+    });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // 7) Get strategies that apply to a single item
 //    GET /api/pricing-strategies/item/:itemId?sku=<optional>
 router.get('/item/:itemId', requireAuth, async (req, res) => {

@@ -58,11 +58,13 @@ const createCompetitorRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating competitor rule:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error creating competitor rule',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error creating competitor rule',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -89,11 +91,13 @@ const getAllCompetitorRules = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching competitor rules:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching competitor rules',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching competitor rules',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -121,11 +125,13 @@ const getCompetitorRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching competitor rule:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching competitor rule',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching competitor rule',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -205,11 +211,13 @@ const updateCompetitorRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating competitor rule:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error updating competitor rule',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error updating competitor rule',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -246,11 +254,13 @@ const deleteCompetitorRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting competitor rule:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error deleting competitor rule',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error deleting competitor rule',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -325,11 +335,13 @@ const applyRuleToItems = async (req, res) => {
     });
   } catch (error) {
     console.error('Error applying competitor rule:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error applying competitor rule',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error applying competitor rule',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -361,11 +373,13 @@ const getRulesForItem = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching rules for item:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching rules for item',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching rules for item',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -414,11 +428,13 @@ const removeRuleFromItem = async (req, res) => {
     });
   } catch (error) {
     console.error('Error removing rule from item:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error removing rule from item',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error removing rule from item',
+        error: error.message,
+      });
+    }
   }
 };
 
@@ -492,11 +508,13 @@ const updateRuleExecutionStats = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating rule execution stats:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Error updating rule execution statistics',
-      error: error.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error updating rule execution statistics',
+        error: error.message,
+      });
+    }
   }
 };
 
