@@ -8,7 +8,13 @@ import { fetchEbayListings } from '../services/ebayService.js';
  */
 const getEbayListings = async (req, res) => {
   try {
-    const listings = await fetchEbayListings();
+    const userId = req.user?.id; // ← assumes JWT middleware populated req.user
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const listings = await fetchEbayListings(userId); // ✅ pass it here
+
     return res.status(200).json({
       success: true,
       data: listings,
@@ -22,5 +28,6 @@ const getEbayListings = async (req, res) => {
     });
   }
 };
+
 
 export default getEbayListings;
