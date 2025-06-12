@@ -104,7 +104,9 @@ const getAllPricingStrategies = async (req, res) => {
       isActive = false;
     }
 
-    const strategies = await getAllStrategies(isActive);
+    const userId = req.user?._id; // Ensure userId is extracted correctly
+    const strategies = await getAllStrategies(isActive, userId);
+
     return res.status(200).json({
       success: true,
       count: strategies.length,

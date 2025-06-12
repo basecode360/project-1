@@ -1,6 +1,61 @@
 // controllers/competitorRuleController.js
 
 import CompetitorRule from '../models/competitorSchema.js';
+import Product from '../models/Product.js';
+
+/**
+ * Extract core logic for creating a competitor rule
+ */
+const createCompetitorRuleLogic = async (data) => {
+  const {
+    ruleName,
+    minPercentOfCurrentPrice = 0,
+    maxPercentOfCurrentPrice = 1000,
+    excludeCountries = [],
+    excludeConditions = [],
+    excludeProductTitleWords = [],
+    excludeSellers = [],
+    findCompetitorsBasedOnMPN = false,
+    createdBy,
+    appliesTo = [],
+  } = data;
+
+  if (!ruleName) {
+    throw new Error('Rule name is required');
+  }
+
+  const existing = await CompetitorRule.findOne({ ruleName });
+  if (existing) {
+    throw new Error(`Rule with name "${ruleName}" already exists`);
+  }
+
+  const rule = new CompetitorRule({
+    ruleName,
+    minPercentOfCurrentPrice,
+    maxPercentOfCurrentPrice,
+    excludeCountries,
+    excludeConditions,
+    excludeProductTitleWords,
+    excludeSellers,
+    findCompetitorsBasedOnMPN,
+    createdBy,
+    appliesTo,
+    usageCount: appliesTo.length,
+    lastUsed: appliesTo.length ? new Date() : null,
+  });
+
+  await rule.save();
+
+  // Associate the rule with the product
+  if (appliesTo.length > 0) {
+    await Product.updateOne(
+      { itemId: appliesTo[0].itemId },
+      { $set: { competitorRule: rule._id } }
+    );
+  }
+
+  return rule;
+};
 
 /**
  * Create a new competitor rule
@@ -8,63 +63,17 @@ import CompetitorRule from '../models/competitorSchema.js';
  */
 const createCompetitorRule = async (req, res) => {
   try {
-    const {
-      ruleName,
-      minPercentOfCurrentPrice,
-      maxPercentOfCurrentPrice,
-      excludeCountries,
-      excludeConditions,
-      excludeProductTitleWords,
-      excludeSellers,
-      findCompetitorsBasedOnMPN,
-    } = req.body;
-
-    if (!ruleName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Rule name is required',
-      });
-    }
-
-    const existingRule = await CompetitorRule.findOne({ ruleName });
-    if (existingRule) {
-      return res.status(409).json({
-        success: false,
-        message: `Rule with name "${ruleName}" already exists`,
-      });
-    }
-
-    const competitorRule = new CompetitorRule({
-      ruleName,
-      minPercentOfCurrentPrice:
-        minPercentOfCurrentPrice !== undefined ? minPercentOfCurrentPrice : 0,
-      maxPercentOfCurrentPrice:
-        maxPercentOfCurrentPrice !== undefined
-          ? maxPercentOfCurrentPrice
-          : 1000,
-      excludeCountries: excludeCountries || [],
-      excludeConditions: excludeConditions || [],
-      excludeProductTitleWords: excludeProductTitleWords || [],
-      excludeSellers: excludeSellers || [],
-      findCompetitorsBasedOnMPN: findCompetitorsBasedOnMPN || false,
-    });
-
-    await competitorRule.save();
-
+    const rule = await createCompetitorRuleLogic(req.body);
     return res.status(201).json({
       success: true,
       message: 'Competitor rule created successfully',
-      data: competitorRule,
+      data: rule,
     });
   } catch (error) {
-    console.error('Error creating competitor rule:', error);
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        message: 'Error creating competitor rule',
-        error: error.message,
-      });
-    }
+    return res.status(400).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -518,8 +527,141 @@ const updateRuleExecutionStats = async (req, res) => {
   }
 };
 
+/**
+ * Get a competitor rule for a specific product
+ * GET /api/competitor-rules/product/:itemId
+ */
+const getCompetitorRuleForProduct = async (req, res) => {
+  const { itemId } = req.params;
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      message: 'userId is required in request body',
+    });
+  }
+
+  try {
+    const rule = await CompetitorRule.findOne({
+      'appliesTo.itemId': itemId,
+      createdBy: userId, // Optional: filter by owner
+    });
+
+    if (!rule) {
+      return res.status(200).json({
+        success: true,
+        hasCompetitorRule: false,
+        competitorRule: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      hasCompetitorRule: true,
+      competitorRule: rule,
+    });
+  } catch (err) {
+    console.error('Error fetching rule for product:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching rule for product',
+    });
+  }
+};
+
+/**
+ * Create and assign a competitor rule to a specific product
+ * POST /api/competitor-rules/product/:itemId
+ */
+const createRuleForProduct = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const {
+      ruleName,
+      minPercentOfCurrentPrice,
+      maxPercentOfCurrentPrice,
+      excludeCountries,
+      excludeConditions,
+      excludeProductTitleWords,
+      excludeSellers,
+      findCompetitorsBasedOnMPN,
+      assignToAll = false,
+      createdBy,
+    } = req.body;
+
+    if (!ruleName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rule name is required',
+      });
+    }
+
+    if (!createdBy) {
+      return res.status(400).json({
+        success: false,
+        message: 'createdBy (userId) is required in request body',
+      });
+    }
+
+    // Check for existing rule with same name
+    const existing = await CompetitorRule.findOne({ ruleName });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: `Rule with name "${ruleName}" already exists`,
+      });
+    }
+
+    // Create new rule
+    const newRule = new CompetitorRule({
+      ruleName,
+      minPercentOfCurrentPrice: minPercentOfCurrentPrice ?? 0,
+      maxPercentOfCurrentPrice: maxPercentOfCurrentPrice ?? 1000,
+      excludeCountries: excludeCountries || [],
+      excludeConditions: excludeConditions || [],
+      excludeProductTitleWords: excludeProductTitleWords || [],
+      excludeSellers: excludeSellers || [],
+      findCompetitorsBasedOnMPN: findCompetitorsBasedOnMPN || false,
+      createdBy,
+      appliesTo: [
+        {
+          itemId,
+          sku: req.body.sku || null,
+          title: req.body.title || null,
+          dateApplied: new Date(),
+        },
+      ],
+      usageCount: 1,
+      lastUsed: new Date(),
+    });
+
+    await newRule.save();
+
+    // Associate with product
+    await Product.updateOne(
+      { itemId },
+      { $set: { competitorRule: newRule._id } }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Competitor rule created and applied to product',
+      data: newRule,
+    });
+  } catch (err) {
+    console.error('Error in createRuleForProduct:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: err.message,
+    });
+  }
+};
+
 export {
   createCompetitorRule,
+  createCompetitorRuleLogic,
   getAllCompetitorRules,
   getCompetitorRule,
   updateCompetitorRule,
@@ -528,4 +670,6 @@ export {
   getRulesForItem,
   removeRuleFromItem,
   updateRuleExecutionStats,
+  getCompetitorRuleForProduct,
+  createRuleForProduct,
 };

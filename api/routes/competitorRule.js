@@ -2,10 +2,14 @@ import express from 'express';
 import xml2js from 'xml2js';
 import axios from 'axios';
 import User from '../models/Users.js';
+import Product from '../models/Product.js'; // Import Product model
 import {
   createCompetitorRule,
   applyRuleToItems,
   getAllCompetitorRules,
+  createRuleForProduct, // Import createRuleForProduct
+  getCompetitorRuleForProduct, // Import getCompetitorRuleForProduct
+  createCompetitorRuleLogic, // Import createCompetitorRuleLogic
 } from '../controllers/competitorRule.js';
 const router = express.Router();
 
@@ -147,139 +151,38 @@ function createCompetitorRuleSpecifics(ruleData) {
 
 router.post('/products/:itemId', async (req, res) => {
   try {
+    // Perform eBay XML logic first...
     const { itemId } = req.params;
-    const { userId } = req.body;
-    const {
-      ruleName,
-      minPercentOfCurrentPrice,
-      maxPercentOfCurrentPrice,
-      excludeCountries = [],
-      excludeConditions = [],
-      excludeProductTitleWords = [],
-      excludeSellers = [],
-      findCompetitorsBasedOnMPN = false,
-    } = req.body;
+    const { userId, sku, title } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId is required in request body',
-      });
-    }
+    // Create competitor rule using the extracted logic
+    const rule = await createCompetitorRuleLogic({
+      ...req.body,
+      appliesTo: [
+        {
+          itemId,
+          sku: sku || null,
+          title: title || null,
+          dateApplied: new Date(),
+        },
+      ],
+      createdBy: userId,
+    });
 
-    // Get user's eBay token
-    const user = await User.findById(userId);
-    if (!user || !user.ebay.accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'No eBay credentials found for this user',
-      });
-    }
+    // Associate the created rule with the product
+    await Product.findOneAndUpdate(
+      { itemId }, // Ensure this matches the product's unique identifier
+      { competitorRule: rule._id },
+      { new: true }
+    );
 
-    const authToken = user.ebay.accessToken;
-
-    if (!authToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'eBay auth token is required',
-      });
-    }
-
-    if (!ruleName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Rule name is required',
-      });
-    }
-
-    // Validate percentages
-    if (
-      minPercentOfCurrentPrice !== undefined &&
-      (typeof minPercentOfCurrentPrice !== 'number' ||
-        minPercentOfCurrentPrice < 0)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Minimum percent must be a non-negative number',
-      });
-    }
-
-    if (
-      maxPercentOfCurrentPrice !== undefined &&
-      (typeof maxPercentOfCurrentPrice !== 'number' ||
-        maxPercentOfCurrentPrice < 0)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Maximum percent must be a non-negative number',
-      });
-    }
-
-    if (
-      minPercentOfCurrentPrice !== undefined &&
-      maxPercentOfCurrentPrice !== undefined &&
-      minPercentOfCurrentPrice >= maxPercentOfCurrentPrice
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Minimum percent must be less than maximum percent',
-      });
-    }
-
-    // Create competitor rule specifics
-    const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
-
-    const xmlRequest = `
-      <?xml version="1.0" encoding="utf-8"?>
-      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${authToken}</eBayAuthToken>
-        </RequesterCredentials>
-        <Item>
-          <ItemID>${itemId}</ItemID>
-          <ItemSpecifics>
-            ${ruleSpecifics
-              .map(
-                (spec) => `
-            <NameValueList>
-              <n>${spec.name}</n>
-              <Value>${spec.value}</Value>
-            </NameValueList>
-            `
-              )
-              .join('')}
-          </ItemSpecifics>
-        </Item>
-      </ReviseItemRequest>
-    `;
-
-    const xmlResponse = await makeEBayAPICall(xmlRequest, 'ReviseItem');
-    const result = await parseXMLResponse(xmlResponse);
-    const response = isEBayResponseSuccessful(result, 'ReviseItem');
-    await createCompetitorRule(req, res);
-    res.json({
+    return res.status(201).json({
       success: true,
-      message: 'Competitor rule created successfully on eBay product',
-      itemId,
-      rule: {
-        name: ruleName,
-        minPercentOfCurrentPrice,
-        maxPercentOfCurrentPrice,
-        excludeCountries,
-        excludeConditions,
-        excludeProductTitleWords,
-        excludeSellers,
-        findCompetitorsBasedOnMPN,
-      },
-      ebayResponse: {
-        itemId: response.ItemID,
-        startTime: response.StartTime,
-        endTime: response.EndTime,
-      },
+      message: 'Competitor rule created successfully and applied to product',
+      data: rule,
     });
   } catch (error) {
-    console.error('eBay Competitor Rule Creation Error:', error.message);
-    res.status(500).json({
+    return res.status(400).json({
       success: false,
       message: error.message,
     });
@@ -666,119 +569,39 @@ router.post('/assign-to-all-active', async (req, res) => {
  */
 
 router.get('/active-listings', async (req, res) => {
+  const userId = req.query.userId || req.user.id;
+
   try {
-    const { userId } = req.query;
+    const listings = await Product.find({ userId, isActive: true })
+      .populate('competitorRule') // Populate competitor rules
+      .lean();
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId is required as query parameter',
-      });
-    }
+    // Extract and deduplicate rules
+    const rules = listings
+      .map((listing) => listing.competitorRule)
+      .filter((rule) => rule && rule._id)
+      .reduce((acc, rule) => {
+        if (!acc.some((r) => r._id.toString() === rule._id.toString())) {
+          acc.push(rule);
+        }
+        return acc;
+      }, []);
 
-    // Get user's eBay token
-    const user = await User.findById(userId);
-    if (!user || !user.ebay.accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'No eBay credentials found for this user',
-      });
-    }
-
-    const authToken = user.ebay.accessToken;
-
-    if (!authToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'eBay auth token is required',
-      });
-    }
-
-    // Get all active listings
-    const getActiveListingsXML = `
-      <?xml version="1.0" encoding="utf-8"?>
-      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${authToken}</eBayAuthToken>
-        </RequesterCredentials>
-        <ActiveList>
-          <Include>true</Include>
-          <Pagination>
-            <EntriesPerPage>200</EntriesPerPage>
-            <PageNumber>1</PageNumber>
-          </Pagination>
-        </ActiveList>
-        <DetailLevel>ReturnAll</DetailLevel>
-      </GetMyeBaySellingRequest>
-    `;
-
-    const activeListingsResponse = await makeEBayAPICall(
-      getActiveListingsXML,
-      'GetMyeBaySelling'
-    );
-    const activeListingsResult = await parseXMLResponse(activeListingsResponse);
-    const activeListingsData = isEBayResponseSuccessful(
-      activeListingsResult,
-      'GetMyeBaySelling'
-    );
-
-    const activeList = activeListingsData.ActiveList;
-    if (!activeList || !activeList.ItemArray) {
-      return res.json({
-        success: true,
-        message: 'No active listings found',
-        listings: [],
-      });
-    }
-
-    const items = Array.isArray(activeList.ItemArray.Item)
-      ? activeList.ItemArray.Item
-      : [activeList.ItemArray.Item];
-
-    // For each item, extract basic info and check if it has competitor rules
-    const listingsWithCompetitorRules = items.map((item) => {
-      const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
-      const competitorRule = parseCompetitorRuleFromSpecifics(
-        itemSpecifics,
-        item.ItemID
-      );
-
-      return {
-        itemId: item.ItemID,
-        title: item.Title,
-        currentPrice: item.StartPrice?.Value || item.StartPrice?.__value__ || 0,
-        currency: item.StartPrice?.__attributes__?.currencyID || 'USD',
-        listingType: item.ListingType,
-        hasCompetitorRule: competitorRule !== null,
-        competitorRule,
-      };
-    });
-
-    const withCompetitorRule = listingsWithCompetitorRules.filter(
-      (item) => item.hasCompetitorRule
-    );
-    const withoutCompetitorRule = listingsWithCompetitorRules.filter(
-      (item) => !item.hasCompetitorRule
-    );
-
-    res.json({
+    return res.json({
       success: true,
+      rules,
+      listings, // Include listings for UI if needed
       summary: {
-        totalActiveListings: listingsWithCompetitorRules.length,
-        listingsWithCompetitorRule: withCompetitorRule.length,
-        listingsWithoutCompetitorRule: withoutCompetitorRule.length,
+        totalActiveListings: listings.length,
+        listingsWithCompetitorRule: listings.filter((l) => l.competitorRule)
+          .length,
+        listingsWithoutCompetitorRule: listings.filter((l) => !l.competitorRule)
+          .length,
       },
-      listings: listingsWithCompetitorRules,
     });
   } catch (error) {
-    console.error(
-      'eBay Active Listings with Competitor Rules Fetch Error:',
-      error.message
-    );
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error('Error fetching active listings with rules:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -1576,5 +1399,14 @@ router.post('/debug/create-test-competitor-rule/:itemId', async (req, res) => {
     });
   }
 });
+
+// Route to create and assign a competitor rule to a specific product
+router.post('/create-rule/:itemId', createRuleForProduct);
+
+// Route to fetch a competitor rule for a specific product
+router.get('/fetch-rule/:itemId', getCompetitorRuleForProduct);
+
+// Route to fetch all competitor rules
+router.get('/', getAllCompetitorRules);
 
 export default router;

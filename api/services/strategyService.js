@@ -1,6 +1,7 @@
 // services/strategyService.js
 
 import PricingStrategy from '../models/PricingStrategy.js';
+import mongoose from 'mongoose';
 
 /**
  * Create a new pricing strategy.
@@ -45,6 +46,7 @@ export async function createStrategy(data) {
 
   const strategy = new PricingStrategy({
     strategyName,
+    displayName: strategyName, // Add displayName field
     repricingRule,
     description,
     beatBy,
@@ -64,10 +66,17 @@ export async function createStrategy(data) {
  * Get all pricing strategies, optionally filtered by isActive.
  * @param {Boolean|null} isActive - If true/false, filter by that; if null, return all.
  */
-export async function getAllStrategies(isActive = null) {
+export async function getAllStrategies(isActive = null, userId = null) {
   const query = {};
-  if (isActive === true) query.isActive = true;
-  if (isActive === false) query.isActive = false;
+
+  if (isActive !== null) {
+    query.isActive = isActive;
+  }
+
+  if (userId) {
+    query.createdBy = new mongoose.Types.ObjectId(userId); // Filter by createdBy
+  }
+
   return await PricingStrategy.find(query).sort({ strategyName: 1 });
 }
 
@@ -266,4 +275,73 @@ export async function getActiveStrategies() {
   return await PricingStrategy.find({ isActive: true }).sort({
     strategyName: 1,
   });
+}
+
+/**
+ * Apply multiple strategies to a single product/item.
+ * @param {String} itemId
+ * @param {Array<String>} strategyIds
+ * @param {String|null} sku
+ */
+export async function applyStrategiesToProduct(
+  itemId,
+  strategyIds,
+  sku = null
+) {
+  if (!itemId) {
+    throw new Error('Item ID is required');
+  }
+  if (!Array.isArray(strategyIds) || strategyIds.length === 0) {
+    throw new Error('Strategy IDs array is required');
+  }
+
+  const results = [];
+  for (const strategyId of strategyIds) {
+    try {
+      const strategy = await getStrategyById(strategyId);
+      if (!strategy) {
+        results.push({
+          strategyId,
+          success: false,
+          error: 'Strategy not found',
+        });
+        continue;
+      }
+
+      // Check if already applied
+      const existingEntry = strategy.appliesTo.find(
+        (entry) => entry.itemId === itemId && entry.sku === sku
+      );
+
+      if (existingEntry) {
+        results.push({
+          strategyId,
+          success: false,
+          error: 'Strategy already applied to this item',
+        });
+        continue;
+      }
+
+      strategy.appliesTo.push({
+        itemId,
+        sku,
+        title: null,
+        dateApplied: new Date(),
+      });
+
+      strategy.usageCount += 1;
+      strategy.lastUsed = new Date();
+      await strategy.save();
+
+      results.push({ strategyId, success: true });
+    } catch (error) {
+      results.push({
+        strategyId,
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  return results;
 }
