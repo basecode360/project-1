@@ -26,13 +26,13 @@ const router = express.Router();
 const tokenManager = {
   tokens: { accessToken: null, refreshToken: null, expiryTime: null },
 
-  init() {
-    this.tokens.accessToken = user.ebay.accessToken || null;
-    this.tokens.refreshToken = user.ebay.refreshToken || null;
-    // If you stored expiry in ENV
-    this.tokens.expiryTime = user.ebay.accessToken_EXPIRY
-      ? new Date(user.ebay.accessToken_EXPIRY)
+  init(user) {
+    this.tokens.accessToken = user?.ebay?.accessToken || null;
+    this.tokens.refreshToken = user?.ebay?.refreshToken || null;
+    this.tokens.expiryTime = user?.ebay?.expiresAt
+      ? new Date(user.ebay.expiresAt)
       : null;
+
     console.log(
       'Token manager initialized:',
       this.tokens.accessToken ? '[accessToken exists]' : '[no accessToken]',
@@ -45,10 +45,6 @@ const tokenManager = {
     if (refreshToken) this.tokens.refreshToken = refreshToken;
     this.tokens.expiryTime = new Date(Date.now() + expiresIn * 1000);
 
-    user.ebay.accessToken = accessToken;
-    if (refreshToken) user.ebay.refreshToken = refreshToken;
-    user.ebay.accessToken_EXPIRY = this.tokens.expiryTime.toISOString();
-
     console.log('Tokens updated; new expiry:', this.tokens.expiryTime);
   },
 
@@ -59,8 +55,6 @@ const tokenManager = {
     return this.tokens.expiryTime > fiveMinutesLater;
   },
 };
-
-tokenManager.init();
 
 // ─── Health check or placeholder ───────────────────────────────────
 router.get('/', (req, res) => {
