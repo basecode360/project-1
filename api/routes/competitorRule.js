@@ -1,6 +1,7 @@
 import express from 'express';
 import xml2js from 'xml2js';
 import axios from 'axios';
+import User from '../models/Users.js';
 import {
   createCompetitorRule,
   applyRuleToItems,
@@ -147,6 +148,7 @@ function createCompetitorRuleSpecifics(ruleData) {
 router.post('/products/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
+    const { userId } = req.body;
     const {
       ruleName,
       minPercentOfCurrentPrice,
@@ -157,6 +159,22 @@ router.post('/products/:itemId', async (req, res) => {
       excludeSellers = [],
       findCompetitorsBasedOnMPN = false,
     } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
 
     const authToken = user.ebay.accessToken;
 
@@ -279,6 +297,24 @@ router.post('/apply-competitor-rule/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
     const ruleOptions = req.body;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
 
     if (!authToken) {
@@ -443,6 +479,23 @@ router.post('/assign-to-all-active', async (req, res) => {
       excludeSellers = [],
       findCompetitorsBasedOnMPN = false,
     } = req.body;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
 
     const authToken = user.ebay.accessToken;
 
@@ -729,6 +782,23 @@ router.put('/products/:itemId', async (req, res) => {
       excludeSellers = [],
       findCompetitorsBasedOnMPN = false,
     } = req.body;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
 
     const authToken = user.ebay.accessToken;
 

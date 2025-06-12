@@ -15,7 +15,7 @@ async function ensureValidEbayToken(userId) {
     throw new Error('No eBay credentials found for this user');
   }
   if (!user.ebay.accessToken || new Date() >= new Date(user.ebay.expiresAt)) {
-    const tokenResponse = await refreshUserAccessToken(user.ebay.refreshToken);
+    const tokenResponse = await refreshUserAccessToken(userId);
     user.ebay.accessToken = tokenResponse.access_token;
     user.ebay.refreshToken =
       tokenResponse.refresh_token || user.ebay.refreshToken;

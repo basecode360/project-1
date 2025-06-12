@@ -1,12 +1,31 @@
 import axios from 'axios';
 import xml2js from 'xml2js';
 import PriceHistory from '../models/PriceHistory.js';
+import User from '../models/Users.js';
 
 // Get item variations to find available SK
 // Us
 const getItemVariations = async (req, res) => {
   try {
     const { itemId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in query parameters',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken;
     console.log(`item id = > ${itemId}`);
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -106,6 +125,23 @@ const editVariationPrice = async (req, res) => {
       title = null,
       userId = null,
     } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     console.log(`itemId => ${itemId}, price => ${price}, sku => ${sku}`);
 
     if (!itemId || !price || !sku) {
@@ -284,7 +320,23 @@ const editVariationPrice = async (req, res) => {
 
 const editAllVariationsPrices = async (req, res) => {
   try {
-    const { itemId, price, currency = 'USD' } = req.body;
+    const { itemId, price, currency = 'USD', userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
 
     if (!itemId || !price) {
       return res.status(400).json({

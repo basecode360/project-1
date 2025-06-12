@@ -2,6 +2,7 @@ import ebayApi from '../helper/authEbay.js';
 import axios from 'axios';
 import xml2js from 'xml2js';
 import dotenv from 'dotenv';
+import User from '../models/Users.js';
 
 dotenv.config();
 
@@ -10,7 +11,24 @@ dotenv.config();
 const getInventoryItem = async (req, res) => {
   try {
     const itemId = req.params.id;
+    const { userId } = req.query;
     console.log(`item id = > ${itemId}`);
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in query parameters',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
 
     const xmlPayload = `<?xml version="1.0" encoding="utf-8"?>
       <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -62,6 +80,24 @@ const getInventoryItem = async (req, res) => {
 
 const getActiveListings = async (req, res) => {
   try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in query parameters',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
     const authToken = user.ebay.accessToken; // Make sure this is set
 
     // Simple XML request

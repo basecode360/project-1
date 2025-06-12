@@ -76,11 +76,10 @@ router.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     checks: {
       environment: {
-        status: user.ebay.accessToken && process.env.CLIENT_ID ? 'OK' : 'ERROR',
-        message:
-          user.ebay.accessToken && process.env.CLIENT_ID
-            ? 'eBay credentials configured'
-            : 'Missing eBay credentials',
+        status: process.env.CLIENT_ID ? 'OK' : 'ERROR',
+        message: process.env.CLIENT_ID
+          ? 'eBay credentials configured'
+          : 'Missing eBay credentials',
       },
       api: {
         status: 'OK',

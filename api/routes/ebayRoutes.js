@@ -5,6 +5,7 @@ import ebayService from '../services/ebayService.js';
 import getEbayListings from '../controllers/ebayController.js';
 import fetchProducts from '../services/getInventory.js';
 import editRoute from '../services/editProduct.js';
+import User from '../models/Users.js';
 
 const router = express.Router();
 
@@ -80,7 +81,25 @@ router.get('/active-listings', fetchProducts.getActiveListings);
 router.get('/competitor-prices/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const oauthToken = user.ebay.accessToken; // Trading API
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in query parameters',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    const oauthToken = user.ebay.accessToken;
     const appId = process.env.CLIENT_ID; // Browse API
 
     if (!oauthToken) {
@@ -204,14 +223,25 @@ router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
 router.get('/item/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const authToken = user.ebay.accessToken;
+    const { userId } = req.query;
 
-    if (!authToken) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'eBay auth token is required',
+        message: 'userId is required in query parameters',
       });
     }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    const authToken = user.ebay.accessToken;
 
     const xmlRequest = `
       <?xml version="1.0" encoding="utf-8"?>
