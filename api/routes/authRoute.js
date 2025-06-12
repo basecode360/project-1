@@ -27,11 +27,11 @@ const tokenManager = {
   tokens: { accessToken: null, refreshToken: null, expiryTime: null },
 
   init() {
-    this.tokens.accessToken = process.env.AUTH_TOKEN || null;
-    this.tokens.refreshToken = process.env.REFRESH_TOKEN || null;
+    this.tokens.accessToken = user.ebay.accessToken || null;
+    this.tokens.refreshToken = user.ebay.refreshToken || null;
     // If you stored expiry in ENV
-    this.tokens.expiryTime = process.env.AUTH_TOKEN_EXPIRY
-      ? new Date(process.env.AUTH_TOKEN_EXPIRY)
+    this.tokens.expiryTime = user.ebay.accessToken_EXPIRY
+      ? new Date(user.ebay.accessToken_EXPIRY)
       : null;
     console.log(
       'Token manager initialized:',
@@ -45,9 +45,9 @@ const tokenManager = {
     if (refreshToken) this.tokens.refreshToken = refreshToken;
     this.tokens.expiryTime = new Date(Date.now() + expiresIn * 1000);
 
-    process.env.AUTH_TOKEN = accessToken;
-    if (refreshToken) process.env.REFRESH_TOKEN = refreshToken;
-    process.env.AUTH_TOKEN_EXPIRY = this.tokens.expiryTime.toISOString();
+    user.ebay.accessToken = accessToken;
+    if (refreshToken) user.ebay.refreshToken = refreshToken;
+    user.ebay.accessToken_EXPIRY = this.tokens.expiryTime.toISOString();
 
     console.log('Tokens updated; new expiry:', this.tokens.expiryTime);
   },

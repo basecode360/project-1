@@ -7,7 +7,7 @@ import PriceHistory from '../models/PriceHistory.js';
 const getItemVariations = async (req, res) => {
   try {
     const { itemId } = req.params;
-    const authToken = process.env.AUTH_TOKEN;
+    const authToken = user.ebay.accessToken;
     console.log(`item id = > ${itemId}`);
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -167,7 +167,7 @@ const editVariationPrice = async (req, res) => {
     // Save the initial record to track the attempt
     await priceRecord.save();
 
-    const authToken = process.env.AUTH_TOKEN;
+    const authToken = user.ebay.accessToken;
 
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -294,7 +294,7 @@ const editAllVariationsPrices = async (req, res) => {
     }
 
     // First get all variations
-    const authToken = process.env.AUTH_TOKEN;
+    const authToken = user.ebay.accessToken;
 
     // Get item variations
     const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -350,7 +350,7 @@ const editAllVariationsPrices = async (req, res) => {
       }
 
       // Fresh auth token for each request
-      const currentAuthToken = process.env.AUTH_TOKEN;
+      const currentAuthToken = user.ebay.accessToken;
 
       const updateXml = `<?xml version="1.0" encoding="utf-8"?>
         <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">

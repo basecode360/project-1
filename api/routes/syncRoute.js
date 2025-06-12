@@ -1,6 +1,5 @@
-import express from 'express'
-import {triggerAutoSync} from '../services/syncService.js';
-
+import express from 'express';
+import { triggerAutoSync } from '../services/syncService.js';
 
 const router = express.Router();
 
@@ -12,10 +11,10 @@ const authenticateAPI = (req, res, next) => {
   if (!apiKey || apiKey !== process.env.API_KEY) {
     return res.status(401).json({
       success: false,
-      message: 'Unauthorized: Invalid or missing API key'
+      message: 'Unauthorized: Invalid or missing API key',
     });
   }
-  
+
   next();
 };
 
@@ -45,9 +44,9 @@ router.get('/scheduled', authenticateAPI, logRequest, (req, res) => {
     batchSize: parseInt(req.query.batchSize) || 25,
     delayBetweenBatches: parseInt(req.query.delayBetweenBatches) || 2000,
     forceUpdate: req.query.forceUpdate === 'true',
-    dryRun: req.query.dryRun === 'true'
+    dryRun: req.query.dryRun === 'true',
   };
-  
+
   return triggerAutoSync(req, res);
 });
 
@@ -59,7 +58,7 @@ router.get('/scheduled', authenticateAPI, logRequest, (req, res) => {
 router.post('/preview', authenticateAPI, logRequest, (req, res) => {
   // Force dry run mode
   req.body.dryRun = true;
-  
+
   return triggerAutoSync(req, res);
 });
 
@@ -77,21 +76,26 @@ router.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     checks: {
       environment: {
-        status: process.env.AUTH_TOKEN && process.env.CLIENT_ID ? 'OK' : 'ERROR',
-        message: process.env.AUTH_TOKEN && process.env.CLIENT_ID ? 'eBay credentials configured' : 'Missing eBay credentials'
+        status: user.ebay.accessToken && process.env.CLIENT_ID ? 'OK' : 'ERROR',
+        message:
+          user.ebay.accessToken && process.env.CLIENT_ID
+            ? 'eBay credentials configured'
+            : 'Missing eBay credentials',
       },
       api: {
         status: 'OK',
-        message: 'API is responding'
-      }
-    }
+        message: 'API is responding',
+      },
+    },
   };
 
-  const isHealthy = Object.values(healthStatus.checks).every(check => check.status === 'OK');
-  
+  const isHealthy = Object.values(healthStatus.checks).every(
+    (check) => check.status === 'OK'
+  );
+
   return res.status(isHealthy ? 200 : 503).json({
     success: isHealthy,
-    data: healthStatus
+    data: healthStatus,
   });
 });
 
@@ -103,7 +107,7 @@ router.get('/health', (req, res) => {
 router.get('/status', authenticateAPI, (req, res) => {
   // This would typically fetch from your database
   // For now, return a sample status
-  
+
   const status = {
     lastSync: {
       timestamp: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
@@ -112,34 +116,36 @@ router.get('/status', authenticateAPI, (req, res) => {
       successCount: 42,
       errorCount: 1,
       skippedCount: 2,
-      duration: 125000 // milliseconds
+      duration: 125000, // milliseconds
     },
     nextScheduledSync: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
     isRunning: false,
     configuration: {
       defaultBatchSize: 25,
       defaultSyncType: 'all',
-      autoSyncEnabled: true
-    }
+      autoSyncEnabled: true,
+    },
   };
 
   return res.status(200).json({
     success: true,
     message: 'Sync service status retrieved',
-    data: status
+    data: status,
   });
 });
 
 // Error handling middleware
 router.use((error, req, res, next) => {
   console.error('🚨 Sync API Error:', error);
-  
+
   return res.status(500).json({
     success: false,
     message: 'Internal server error in sync service',
-    error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    error:
+      process.env.NODE_ENV === 'development'
+        ? error.message
+        : 'Internal server error',
   });
 });
-
 
 export default router;

@@ -80,7 +80,7 @@ router.get('/active-listings', fetchProducts.getActiveListings);
 router.get('/competitor-prices/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const oauthToken = process.env.AUTH_TOKEN; // Trading API
+    const oauthToken = user.ebay.accessToken; // Trading API
     const appId = process.env.CLIENT_ID; // Browse API
 
     if (!oauthToken) {
@@ -204,7 +204,7 @@ router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
 router.get('/item/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const authToken = process.env.AUTH_TOKEN;
+    const authToken = user.ebay.accessToken;
 
     if (!authToken) {
       return res.status(400).json({
@@ -260,7 +260,5 @@ router.get('/item/:itemId', async (req, res) => {
     });
   }
 });
-
-
 
 export default router;

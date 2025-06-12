@@ -111,12 +111,12 @@ app.get('/auth/success', async (req, res) => {
     const { access_token, refresh_token, expires_in } = data;
 
     // Store tokens properly
-    process.env.AUTH_TOKEN = access_token;
-    process.env.REFRESH_TOKEN = refresh_token;
+    user.ebay.accessToken = access_token;
+    user.ebay.refreshToken = refresh_token;
     
     // Calculate and store expiry time
     const expiryTime = new Date(Date.now() + expires_in * 1000);
-    process.env.AUTH_TOKEN_EXPIRY = expiryTime.toISOString();
+    user.ebay.accessToken_EXPIRY = expiryTime.toISOString();
 
     // Redirect to a success page or return JSON
     return res.json({ 
@@ -135,7 +135,7 @@ app.get('/auth/success', async (req, res) => {
 
 // // ── 3) Refresh Access Token via Stored Refresh Token ─────────────────────────
 // app.get('/auth/refresh_token', async (req, res) => {
-//   if (!process.env.REFRESH_TOKEN) {
+//   if (!user.ebay.refreshToken) {
 //     return res.status(400).json({ error: 'No refresh token configured' });
 //   }
 
@@ -145,7 +145,7 @@ app.get('/auth/success', async (req, res) => {
 
 //   const body = qs.stringify({
 //     grant_type: 'refresh_token',
-//     refresh_token: process.env.REFRESH_TOKEN,
+//     refresh_token: user.ebay.refreshToken,
 //     scope: [
 //       'https://api.ebay.com/oauth/api_scope',
 //       'https://api.ebay.com/oauth/api_scope/sell.inventory',
@@ -167,7 +167,7 @@ app.get('/auth/success', async (req, res) => {
 //     const { access_token, refresh_token: newRt, expires_in } = data;
 
 //     // Overwrite with the newly rotated refresh token
-//     process.env.REFRESH_TOKEN = newRt;
+//     user.ebay.refreshToken = newRt;
 
 //     return res.json({ access_token, refresh_token: newRt, expires_in });
 //   } catch (err) {
@@ -182,13 +182,13 @@ app.get('/auth/success', async (req, res) => {
 app.get('/auth/token', async (req, res) => {
   try {
     // Check if we have a token in memory/environment
-    if (!process.env.AUTH_TOKEN || !process.env.AUTH_TOKEN_EXPIRY) {
+    if (!user.ebay.accessToken || !user.ebay.accessToken_EXPIRY) {
       // No token exists, try to refresh it
       return refreshAndReturnToken(req, res);
     }
     
     // Check if token is expired (with 5-minute buffer)
-    const tokenExpiry = new Date(process.env.AUTH_TOKEN_EXPIRY);
+    const tokenExpiry = new Date(user.ebay.accessToken_EXPIRY);
     const now = new Date();
     const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
     
@@ -200,7 +200,7 @@ app.get('/auth/token', async (req, res) => {
     // Return the current valid token
     return res.json({
       success: true,
-      auth_token: process.env.AUTH_TOKEN,
+      auth_token: user.ebay.accessToken,
       expires_at: tokenExpiry,
       expires_in_seconds: Math.floor((tokenExpiry - now) / 1000)
     });
@@ -216,7 +216,7 @@ app.get('/auth/token', async (req, res) => {
 
 // Helper function to refresh and return token
 async function refreshAndReturnToken(req, res) {
-  if (!process.env.REFRESH_TOKEN) {
+  if (!user.ebay.refreshToken) {
     return res.status(400).json({ 
       success: false,
       message: 'No refresh token configured. Please authenticate first.'
@@ -228,7 +228,7 @@ async function refreshAndReturnToken(req, res) {
   
   const body = qs.stringify({
     grant_type: 'refresh_token',
-    refresh_token: process.env.REFRESH_TOKEN,
+    refresh_token: user.ebay.refreshToken,
     scope: [
       'https://api.ebay.com/oauth/api_scope',
       'https://api.ebay.com/oauth/api_scope/sell.inventory',
@@ -238,7 +238,7 @@ async function refreshAndReturnToken(req, res) {
     ].join(' '),
   });
 
-  console.log('Refreshing auth token...', `${process.env.REFRESH_TOKEN}:${process.env.CLIENT_SECRET}`);
+  console.log('Refreshing auth token...', `${user.ebay.refreshToken}:${process.env.CLIENT_SECRET}`);
 
   try {
     const { data } = await axios.post(
@@ -255,15 +255,15 @@ async function refreshAndReturnToken(req, res) {
     const { access_token, refresh_token: newRt, expires_in } = data;
 
     // Save the new tokens
-    process.env.AUTH_TOKEN = access_token;
+    user.ebay.accessToken = access_token;
     
     // Calculate and store expiry time
     const expiryTime = new Date(Date.now() + expires_in * 1000);
-    process.env.AUTH_TOKEN_EXPIRY = expiryTime.toISOString();
+    user.ebay.accessToken_EXPIRY = expiryTime.toISOString();
     
     // Save the new refresh token if provided
     if (newRt) {
-      process.env.REFRESH_TOKEN = newRt;
+      user.ebay.refreshToken = newRt;
     }
 
     return res.json({ 
