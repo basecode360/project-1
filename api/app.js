@@ -24,10 +24,8 @@ const app = express();
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
-    console.log('✅ Connected to MongoDB');
   })
   .catch((err) => {
-    console.error('❌ Error connecting to MongoDB:', err);
   });
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -86,9 +84,5 @@ app.get('/', (req, res) => {
 // ── Start the server ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server listening on http://localhost:${PORT}`);
 });
-console.log('🧪 ENV CHECK', {
-  EBAY_CLIENT_ID: process.env.CLIENT_ID,
-  EBAY_CLIENT_SECRET: process.env.CLIENT_SECRET ? '✔️ present' : '❌ missing',
-});
+

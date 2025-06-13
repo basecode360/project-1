@@ -49,46 +49,14 @@ export async function recordPriceChange({
   error = null,
   metadata = {},
 }) {
-  console.log(
-    `📝 💾 =================== recordPriceChange CALLED ===================`
-  );
-  console.log(`📝 💾 Function parameters received:`, {
-    userId: userId ? userId.toString() : 'NULL',
-    itemId,
-    sku,
-    title,
-    oldPrice,
-    newPrice,
-    currency,
-    competitorLowestPrice,
-    strategyName,
-    status,
-    source,
-    success,
-    error,
-    metadataKeys: Object.keys(metadata),
-  });
-
-  // Check MongoDB connection with more detail
+  // Check MongoDB connection
   const mongoose = (await import('mongoose')).default;
-  console.log(`📝 💾 MongoDB connection details:`);
-  console.log(
-    `📝 💾   - Connection state: ${mongoose.connection.readyState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`
-  );
-  console.log(`📝 💾   - Database name: ${mongoose.connection.name}`);
-  console.log(`📝 💾   - Database host: ${mongoose.connection.host}`);
-  console.log(`📝 💾   - Database port: ${mongoose.connection.port}`);
 
   // Check if PriceHistory model is available
   try {
-    console.log(`📝 💾 PriceHistory model check:`);
-    console.log(`📝 💾   - Model name: ${PriceHistory.modelName}`);
-    console.log(`📝 💾   - Collection name: ${PriceHistory.collection.name}`);
-    console.log(
-      `📝 💾   - Collection namespace: ${PriceHistory.collection.namespace}`
-    );
+    // ...existing code...
   } catch (modelError) {
-    console.error(`📝 ❌ PriceHistory model error:`, modelError);
+    // ...existing code...
   }
 
   // FIX: Allow sku to be null or empty string (not require it to be defined)
@@ -103,8 +71,6 @@ export async function recordPriceChange({
     });
     throw new Error(errorMsg);
   }
-
-  console.log(`📝 ✅ Basic validation passed`);
 
   // FIX: Handle sku properly - allow null/undefined/empty string
   const cleanSku = sku || null;
@@ -125,15 +91,6 @@ export async function recordPriceChange({
     else if (changeAmount < 0) changeDirection = 'decreased';
     else changeDirection = 'unchanged';
   }
-
-  console.log(`📝 💾 Calculated values:`, {
-    cleanSku,
-    changeAmount,
-    changePercentage,
-    changeDirection,
-  });
-
-  console.log(`📝 💾 Creating PriceHistory record object...`);
 
   const recordData = {
     userId,
@@ -158,99 +115,27 @@ export async function recordPriceChange({
     metadata,
   };
 
-  console.log(
-    `📝 💾 =================== RECORD DATA OBJECT ===================`
-  );
-  console.log(JSON.stringify(recordData, null, 2));
-  console.log(
-    `📝 💾 =========================================================`
-  );
-
   try {
-    console.log(`📝 💾 Creating new PriceHistory instance...`);
     const record = new PriceHistory(recordData);
 
-    console.log(`📝 💾 PriceHistory instance created:`, {
-      _id: record._id,
-      itemId: record.itemId,
-      newPrice: record.newPrice,
-      status: record.status,
-      success: record.success,
-    });
-
-    console.log(`📝 💾 Validating record before save...`);
     const validationError = record.validateSync();
     if (validationError) {
-      console.error(`📝 ❌ Validation failed:`, validationError.errors);
       throw validationError;
     }
-    console.log(`📝 ✅ Record validation passed`);
-
-    console.log(`📝 💾 ATTEMPTING TO SAVE TO MONGODB...`);
-    console.log(`📝 💾 Collection: ${PriceHistory.collection.name}`);
-    console.log(`📝 💾 Database: ${mongoose.connection.name}`);
 
     const savedRecord = await record.save();
 
-    console.log(
-      `📝 ✅ =================== MONGODB SAVE SUCCESSFUL ===================`
-    );
-    console.log(`📝 ✅ SUCCESSFULLY saved to MongoDB!`);
-    console.log(`📝 ✅ Collection: ${PriceHistory.collection.name}`);
-    console.log(`📝 ✅ Record ID: ${savedRecord._id}`);
-    console.log(`📝 ✅ Saved record summary:`, {
-      _id: savedRecord._id,
-      itemId: savedRecord.itemId,
-      newPrice: savedRecord.newPrice,
-      oldPrice: savedRecord.oldPrice,
-      strategyName: savedRecord.strategyName,
-      status: savedRecord.status,
-      success: savedRecord.success,
-      createdAt: savedRecord.createdAt,
-      updatedAt: savedRecord.updatedAt,
-    });
-    console.log(
-      `📝 ✅ Full saved record:`,
-      JSON.stringify(savedRecord.toObject(), null, 2)
-    );
-
     // Immediate verification
-    console.log(`📝 🔍 IMMEDIATE VERIFICATION: Querying saved record...`);
     const verification = await PriceHistory.findById(savedRecord._id);
     if (verification) {
-      console.log(
-        `📝 ✅ VERIFICATION SUCCESSFUL: Record found immediately after save`
-      );
-      console.log(`📝 ✅ Verification record ID: ${verification._id}`);
+      
+      
     } else {
-      console.log(
-        `📝 ❌ VERIFICATION FAILED: Record NOT found immediately after save`
-      );
+      
     }
 
-    console.log(
-      `📝 ✅ ================================================================`
-    );
     return savedRecord;
   } catch (saveError) {
-    console.error(
-      `📝 ❌ =================== MONGODB SAVE FAILED ===================`
-    );
-    console.error(`📝 ❌ FAILED to save to MongoDB:`, saveError);
-    console.error(`📝 ❌ Error name: ${saveError.name}`);
-    console.error(`📝 ❌ Error message: ${saveError.message}`);
-    console.error(`📝 ❌ Error code: ${saveError.code}`);
-    console.error(`📝 ❌ Collection name: ${PriceHistory.collection.name}`);
-    if (saveError.errors) {
-      console.error(`📝 ❌ Validation errors:`);
-      Object.keys(saveError.errors).forEach((key) => {
-        console.error(`📝 ❌   - ${key}: ${saveError.errors[key].message}`);
-      });
-    }
-    console.error(`📝 ❌ Full error object:`, saveError);
-    console.error(
-      `📝 ❌ ================================================================`
-    );
     throw saveError;
   }
 }
@@ -268,18 +153,8 @@ export async function fetchRawPriceHistory({
   sku = null,
   limit = 100,
 }) {
-  console.log(
-    `📊 🔍 =================== fetchRawPriceHistory CALLED ===================`
-  );
-  console.log(`📊 🔍 Parameters: itemId=${itemId}, sku=${sku}, limit=${limit}`);
-  console.log(`📊 🔍 Collection name: ${PriceHistory.collection.name}`);
-
   // Check MongoDB connection
   const mongoose = (await import('mongoose')).default;
-  console.log(
-    `📊 🔍 MongoDB connection state: ${mongoose.connection.readyState}`
-  );
-  console.log(`📊 🔍 MongoDB database name: ${mongoose.connection.name}`);
 
   if (!itemId) {
     throw new Error('itemId is required');
@@ -288,78 +163,28 @@ export async function fetchRawPriceHistory({
   const query = { itemId };
   if (sku) query.sku = sku;
 
-  console.log(`📊 🔍 Query object:`, JSON.stringify(query, null, 2));
-
   try {
     // First check total records in collection
     const totalInCollection = await PriceHistory.countDocuments({});
-    console.log(
-      `📊 💾 Total records in entire PriceHistory collection: ${totalInCollection}`
-    );
 
     // Check records for this specific itemId
     const totalCount = await PriceHistory.countDocuments({ itemId });
-    console.log(`📊 💾 Total records for itemId ${itemId}: ${totalCount}`);
 
     // List all unique itemIds in collection
     const uniqueItemIds = await PriceHistory.distinct('itemId');
-    console.log(
-      `📊 💾 Unique itemIds in collection (${uniqueItemIds.length}):`,
-      uniqueItemIds
-    );
 
     // Get sample of latest records in collection
     const latestRecords = await PriceHistory.find({})
       .sort({ createdAt: -1 })
       .limit(5);
-    console.log(
-      `📊 💾 Latest 5 records in collection:`,
-      latestRecords.map((r) => ({
-        _id: r._id,
-        itemId: r.itemId,
-        newPrice: r.newPrice,
-        strategyName: r.strategyName,
-        createdAt: r.createdAt,
-      }))
-    );
 
     // Now query for specific records
-    console.log(`📊 🔍 Executing main query with limit ${limit}...`);
     const records = await PriceHistory.find(query)
       .sort({ createdAt: -1 })
       .limit(limit);
 
-    console.log(
-      `📊 ✅ Query completed. Found ${records.length} records for itemId ${itemId}`
-    );
-
-    if (records.length > 0) {
-      console.log(
-        `📊 ✅ Sample of found records:`,
-        records.slice(0, 3).map((r) => ({
-          _id: r._id,
-          itemId: r.itemId,
-          newPrice: r.newPrice,
-          oldPrice: r.oldPrice,
-          strategyName: r.strategyName,
-          status: r.status,
-          success: r.success,
-          createdAt: r.createdAt,
-        }))
-      );
-    } else {
-      console.log(
-        `📊 ⚠️ No records found for itemId ${itemId} with query:`,
-        query
-      );
-    }
-
-    console.log(
-      `📊 🔍 ================================================================`
-    );
     return records;
   } catch (fetchError) {
-    console.error(`📊 ❌ Error fetching from MongoDB:`, fetchError);
     throw fetchError;
   }
 }
@@ -496,10 +321,6 @@ export async function getPaginatedPriceHistory({
   sortBy = 'createdAt',
   sortOrder = -1,
 }) {
-  console.log(
-    `📊 🔍 getPaginatedPriceHistory: ${itemId}, page: ${page}, limit: ${limit}`
-  );
-
   if (!itemId) {
     throw new Error('itemId is required');
   }
@@ -525,10 +346,6 @@ export async function getPaginatedPriceHistory({
     // Get statistics
     const stats = await PriceHistory.getProductStats(itemId, sku);
 
-    console.log(
-      `📊 ✅ Retrieved page ${page}/${totalPages} (${records.length}/${totalRecords} records)`
-    );
-
     return {
       records,
       pagination: {
@@ -542,7 +359,6 @@ export async function getPaginatedPriceHistory({
       statistics: stats[0] || null,
     };
   } catch (error) {
-    console.error(`📊 ❌ Error in getPaginatedPriceHistory:`, error);
     throw error;
   }
 }
@@ -551,10 +367,6 @@ export async function getPaginatedPriceHistory({
  * Bulk insert price history records (for batch operations)
  */
 export async function bulkInsertPriceHistory(records) {
-  console.log(
-    `📝 💾 Bulk inserting ${records.length} price history records...`
-  );
-
   try {
     // Validate all records first
     const validatedRecords = records.map((record) => {
@@ -585,17 +397,12 @@ export async function bulkInsertPriceHistory(records) {
       rawResult: true,
     });
 
-    console.log(
-      `📝 ✅ Bulk inserted ${result.insertedCount} records successfully`
-    );
-
     return {
       success: true,
       insertedCount: result.insertedCount,
       records: result.ops || [],
     };
   } catch (error) {
-    console.error(`📝 ❌ Bulk insert error:`, error);
     throw error;
   }
 }
@@ -604,10 +411,6 @@ export async function bulkInsertPriceHistory(records) {
  * Archive old price history records (keep recent 1000 per product)
  */
 export async function archiveOldPriceHistory(keepRecentCount = 1000) {
-  console.log(
-    `🗄️ Archiving old price history records (keeping ${keepRecentCount} per product)...`
-  );
-
   try {
     // Get unique itemIds
     const uniqueItems = await PriceHistory.distinct('itemId');
@@ -631,16 +434,11 @@ export async function archiveOldPriceHistory(keepRecentCount = 1000) {
         });
 
         totalArchived += deleteResult.deletedCount;
-        console.log(
-          `🗄️ Archived ${deleteResult.deletedCount} records for item ${itemId}`
-        );
       }
     }
 
-    console.log(`🗄️ ✅ Total archived: ${totalArchived} records`);
     return { success: true, archivedCount: totalArchived };
   } catch (error) {
-    console.error(`🗄️ ❌ Archive error:`, error);
     throw error;
   }
 }
@@ -649,8 +447,6 @@ export async function archiveOldPriceHistory(keepRecentCount = 1000) {
  * Get price history summary for dashboard display
  */
 export async function getPriceHistorySummary(itemId, sku = null) {
-  console.log(`📊 Getting price history summary for ${itemId}`);
-
   try {
     const query = { itemId, success: true };
     if (sku) query.sku = sku;
@@ -683,7 +479,6 @@ export async function getPriceHistorySummary(itemId, sku = null) {
       lastStrategy: latestRecord.strategyName,
     };
   } catch (error) {
-    console.error(`📊 ❌ Error getting price history summary:`, error);
     throw error;
   }
 }
@@ -692,8 +487,6 @@ export async function getPriceHistorySummary(itemId, sku = null) {
  * Clean up old failed price history records
  */
 export async function cleanupFailedRecords(daysOld = 30) {
-  console.log(`🧹 Cleaning up failed records older than ${daysOld} days...`);
-
   try {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
@@ -703,10 +496,8 @@ export async function cleanupFailedRecords(daysOld = 30) {
       createdAt: { $lt: cutoffDate },
     });
 
-    console.log(`🧹 ✅ Cleaned up ${result.deletedCount} failed records`);
     return { success: true, deletedCount: result.deletedCount };
   } catch (error) {
-    console.error(`🧹 ❌ Cleanup error:`, error);
     throw error;
   }
 }
@@ -715,10 +506,6 @@ export async function cleanupFailedRecords(daysOld = 30) {
  * Get price trend analysis for an item
  */
 export async function getPriceTrendAnalysis(itemId, sku = null, days = 30) {
-  console.log(
-    `📈 Getting price trend analysis for ${itemId} over ${days} days`
-  );
-
   try {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
@@ -787,7 +574,6 @@ export async function getPriceTrendAnalysis(itemId, sku = null, days = 30) {
       dataPoints: records.length,
     };
   } catch (error) {
-    console.error(`📈 ❌ Error in price trend analysis:`, error);
     throw error;
   }
 }

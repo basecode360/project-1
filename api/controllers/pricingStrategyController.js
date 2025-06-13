@@ -110,13 +110,7 @@ const getAllPricingStrategies = async (req, res) => {
     // Handle userId from multiple sources: query param, route-set userId, or authenticated user
     const userId = req.query.userId || req.userId || req.user?._id;
 
-    console.log(
-      'getAllPricingStrategies - userId:',
-      userId,
-      'isActive:',
-      isActive
-    );
-
+    
     const strategies = await getAllStrategies(isActive, userId);
 
     return res.status(200).json({
@@ -394,11 +388,7 @@ const getStrategyDisplayForProductController = async (req, res) => {
  */
 const executeAllStrategiesController = async (req, res) => {
   try {
-    console.log(
-      'Manual execution of all strategies triggered by user:',
-      req.user?._id
-    );
-
+  
     const results = await executeAllActiveStrategies();
 
     return res.status(200).json({
@@ -424,10 +414,7 @@ const executeStrategiesForItemController = async (req, res) => {
   try {
     const { itemId } = req.params;
 
-    console.log(
-      `Manual execution of strategies for item ${itemId} triggered by user:`,
-      req.user?._id
-    );
+
 
     const results = await executeStrategiesForItem(itemId);
 

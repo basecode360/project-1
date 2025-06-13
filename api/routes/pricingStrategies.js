@@ -21,14 +21,7 @@ const router = express.Router();
 //    POST /api/pricing-strategies
 router.post('/', requireAuth, async (req, res) => {
   try {
-    console.log(
-      'POST /api/pricing-strategies - User:',
-      req.user?.id || 'No user'
-    );
-    console.log(
-      'POST /api/pricing-strategies - Headers:',
-      req.headers.authorization ? 'Auth header present' : 'No auth header'
-    );
+
 
     const strategy = await createStrategy({
       ...req.body,
@@ -183,16 +176,13 @@ router.post('/products/:itemId', requireAuth, async (req, res) => {
 
     // After applying strategies, immediately execute them to update prices
     if (successCount > 0) {
-      console.log(
-        `🚀 Executing strategies for item ${itemId} after application...`
-      );
+   
       const { executeStrategiesForItem } = await import(
         '../services/strategyService.js'
       );
       const executeResult = await executeStrategiesForItem(itemId);
 
       if (executeResult.success) {
-        console.log(`✅ Price automatically updated for item ${itemId}`);
         return res.json({
           success: true,
           message: `Applied ${successCount} strategies and updated price for item ${itemId}`,
@@ -372,10 +362,7 @@ router.post('/products/:itemId/update-price', requireAuth, async (req, res) => {
     const { itemId } = req.params;
     const userId = req.user?.id;
 
-    console.log(
-      `🔄 Manual price update triggered for item ${itemId} by user ${userId}`
-    );
-
+   
     // Get strategies for this item
     const strategies = await getStrategiesForItem(itemId);
 
@@ -418,15 +405,10 @@ router.post('/products/:itemId/update-price', requireAuth, async (req, res) => {
           calculatedPrice = strategy.maxPrice;
         }
 
-        console.log(
-          `💰 Price calculation for ${itemId}: competitor: $${competitorPrice}, calculated: $${calculatedPrice}`
-        );
+  
       }
     } catch (competitorError) {
-      console.log(
-        'Could not get competitor price for logging:',
-        competitorError.message
-      );
+      console.error('Error getting competitor price:', competitorError.message);
     }
 
     return res.json({

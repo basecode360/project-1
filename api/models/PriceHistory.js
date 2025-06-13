@@ -276,9 +276,7 @@ priceHistorySchema.pre('save', function (next) {
 
 // Post-save middleware for logging (optional)
 priceHistorySchema.post('save', function (doc) {
-  console.log(
-    `📝 💾 Price history saved: ${doc.itemId} -> $${doc.newPrice} (${doc._id})`
-  );
+ 
 });
 
 const PriceHistory = mongoose.model('PriceHistory', priceHistorySchema);

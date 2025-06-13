@@ -12,7 +12,7 @@ const getInventoryItem = async (req, res) => {
   try {
     const itemId = req.params.id;
     const { userId } = req.query;
-    console.log(`item id = > ${itemId}`);
+    
 
     if (!userId) {
       return res.status(400).json({
@@ -69,7 +69,7 @@ const getInventoryItem = async (req, res) => {
     const errorMessage = error.response ? error.response.data : error.message;
     const statusCode = error.response ? error.response.status : 500;
 
-    console.log(`Error occurred while fetching the product: ${errorMessage}`);
+    
     return res.status(statusCode).json({
       success: false,
       message: 'Error fetching product',
@@ -157,7 +157,7 @@ const getActiveListings = async (req, res) => {
 
 const getActiveListingsViaFeed = async (req, res) => {
   try {
-    console.log('Creating feed request for active listings...');
+    
 
     // Create a feed request with the correct feedType
     const createFeedResponse = await ebayApi({
@@ -170,9 +170,7 @@ const getActiveListingsViaFeed = async (req, res) => {
       },
     });
 
-    console.log(
-      'Feed request response:',
-      JSON.stringify(createFeedResponse, null, 2)
+    
     );
 
     if (!createFeedResponse || !createFeedResponse.taskId) {
@@ -180,7 +178,7 @@ const getActiveListingsViaFeed = async (req, res) => {
     }
 
     const taskId = createFeedResponse.taskId;
-    console.log(`Feed task created with ID: ${taskId}`);
+    
 
     // In a real-world scenario, you would implement polling here
     // since feed generation can take some time. For this example,
@@ -210,14 +208,14 @@ const getActiveListingsViaFeed = async (req, res) => {
 // const getInventoryItem = async (req, res) => {
 //     try {
 //       const sku = req.params.id;
-//       console.log('sku => ', sku)
+//       
 //       const url = `${singleItem}${sku}`;
 
 //       const itemData = await ebayApi({
 //         url: url,
 //       })
 
-//       console.log("fetched single product form ebay", itemData)
+//       
 //       return res.status(200).json({
 //         success: true,
 //         itemData
@@ -227,7 +225,7 @@ const getActiveListingsViaFeed = async (req, res) => {
 //       const errorMessage = error.response ? error.response.data : error.message;
 //       const statusCode = error.response ? error.response.status : 500; // Default to 500 if no response status
 
-//       console.log(`Error occurred while fetching the product: ${errorMessage}`);
+//       
 //       return res.status(statusCode).json({
 //         success: false,
 //         message: "Error fetching product",

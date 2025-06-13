@@ -123,7 +123,6 @@ export async function getItemDetails(itemId) {
   try {
     // For now, we'll use the existing inventory service
     // In a full implementation, you'd call eBay's GetItem API
-    console.log(`Getting item details for ${itemId}`);
 
     // This is a placeholder - you'll need to implement actual eBay API call
     // using the Trading API GetItem call
@@ -142,7 +141,6 @@ export async function updateItemPrice(updateData) {
   try {
     const { itemId, newPrice } = updateData;
 
-    console.log(`Updating eBay price for item ${itemId} to $${newPrice}`);
 
     // Import the existing eBay price update function
     const { updateEbayItemPrice } = await import('./inventoryService.js');

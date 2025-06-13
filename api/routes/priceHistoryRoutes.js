@@ -277,9 +277,7 @@ router.get('/product/:itemId', requireAuth, async (req, res) => {
     const { itemId } = req.params;
     const { limit = 100 } = req.query;
 
-    console.log(
-      `📊 Fetching price history for product ${itemId}, limit: ${limit}`
-    );
+
 
     // Fetch records for this specific product, most recent first
     const records = await fetchRawPriceHistory({
@@ -389,9 +387,7 @@ router.get('/product/:itemId/paginated', requireAuth, async (req, res) => {
       sortOrder = -1,
     } = req.query;
 
-    console.log(
-      `📊 Fetching paginated price history for ${itemId}, page: ${page}`
-    );
+
 
     const { getPaginatedPriceHistory } = await import(
       '../services/historyService.js'

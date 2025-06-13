@@ -55,22 +55,22 @@ export default function ListingsTable() {
 
   // Fetch data from eBay when component mounts
   useEffect(() => {
-    console.log('🔄 AllProducts.length:', AllProducts?.length);
-    console.log('🔄 useEffect triggered, AllProducts:', AllProducts);
-    console.log('🔄 AllProducts.length:', AllProducts?.length);
-    console.log('🚀 Making API call to fetch eBay listings');
+    
+    
+    
+    
     fetchEbayListings();
   }, []); // Only run once on mount
 
   useEffect(() => {
-    console.log('🔄 AllProducts changed:', AllProducts);
+    
     if (AllProducts && AllProducts.length > 0) {
       setRows(AllProducts);
     }
   }, [AllProducts]);
 
   useEffect(() => {
-    console.log('🔍 Searching for:', searchProduct);
+    
     const searchP = searchProduct.toLowerCase();
     const filtered = AllProducts.filter(
       (row) =>
@@ -79,7 +79,7 @@ export default function ListingsTable() {
         row.status?.some((s) => s.toLowerCase().includes(searchP)) ||
         row.productId?.toLowerCase().includes(searchP)
     );
-    console.log('🔍 Filtered results:', filtered.length);
+    
     setRows(filtered);
   }, [searchProduct, AllProducts]);
 
@@ -88,7 +88,7 @@ export default function ListingsTable() {
       setLoading(true);
       const response = await apiService.inventory.getActiveListings();
       if (response.success) {
-        console.log('eBay data received:', response.data);
+        
         let ebayListings = [];
         if (
           response.data.GetMyeBaySellingResponse &&
@@ -102,7 +102,7 @@ export default function ListingsTable() {
             ebayListings = [itemArray.Item];
           }
         }
-        console.log('📦 Processing', ebayListings.length, 'eBay listings');
+        
         
         const formattedListings = await Promise.all(
           ebayListings.map(async (item, index) => {
@@ -169,7 +169,7 @@ export default function ListingsTable() {
           })
         );
         
-        console.log('📊 Finished processing all listings');
+        
         const validListings = formattedListings.filter(Boolean);
         if (validListings.length > 0) {
           setRows(validListings);
@@ -221,22 +221,19 @@ export default function ListingsTable() {
   // Refresh all strategy data
   const refreshAllStrategies = async () => {
     try {
-      console.log('🔄 Refreshing all strategy data...');
+      
       setLoading(true);
 
       const updatedProducts = await Promise.all(
         AllProducts.map(async (product) => {
           try {
-            console.log(`🔍 Fetching strategy for ${product.productId}`);
+            
             const strategyDisplayRes =
               await apiService.pricingStrategies.getStrategyDisplayForProduct(
                 product.productId
               );
 
-            console.log(
-              `✅ Strategy response for ${product.productId}:`,
-              strategyDisplayRes
-            );
+            
 
             const strategyDisplay = strategyDisplayRes?.data || {
               strategy: 'Assign Strategy',
@@ -263,7 +260,7 @@ export default function ListingsTable() {
       );
 
       modifyProductsArray(updatedProducts);
-      console.log('✅ Refreshed all strategy data:', updatedProducts);
+      
     } catch (error) {
       console.error('❌ Error refreshing all strategies:', error);
     } finally {
@@ -276,14 +273,14 @@ export default function ListingsTable() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Refresh strategy data when user comes back to the page
-        console.log('🔄 Page became visible, refreshing strategy data...');
+        
         refreshAllStrategies();
       }
     };
 
     const handleFocus = () => {
       // Also refresh when window gets focus (more reliable for navigation)
-      console.log('🔄 Window focused, refreshing strategy data...');
+      
       refreshAllStrategies();
     };
 
@@ -302,7 +299,7 @@ export default function ListingsTable() {
     const timeoutId = setTimeout(() => {
       // Small delay to ensure any pending strategy updates are completed
       if (AllProducts && AllProducts.length > 0) {
-        console.log('🔄 Component mounted/updated, refreshing strategies...');
+        
         refreshAllStrategies();
       }
     }, 500);
@@ -322,9 +319,7 @@ export default function ListingsTable() {
 
         // If update was within last 30 seconds, refresh
         if (now - updateTime < 30000) {
-          console.log(
-            `🔄 Strategy/Price updated ${Math.round(
-              (now - updateTime) / 1000
+           / 1000
             )}s ago - forcing immediate refresh...`
           );
 

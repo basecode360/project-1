@@ -28,7 +28,6 @@ const getItemVariations = async (req, res) => {
     }
 
     const authToken = user.ebay.accessToken;
-    console.log(`item id = > ${itemId}`);
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -273,10 +272,6 @@ const editAllVariationsPrices = async (req, res) => {
         </ReviseInventoryStatusRequest>`;
 
       try {
-        console.log(
-          `Updating variation ${i + 1}/${variationList.length}: SKU ${sku}`
-        );
-
         const updateResponse = await axios({
           method: 'POST',
           // CORRECTED: Use production when NODE_ENV is production
@@ -313,8 +308,6 @@ const editAllVariationsPrices = async (req, res) => {
           success: isSuccess,
           response: updateResult.ReviseInventoryStatusResponse,
         });
-
-        console.log(`SKU ${sku} update: ${isSuccess ? 'SUCCESS' : 'FAILED'}`);
       } catch (error) {
         console.error(`Error updating SKU ${sku}:`, error.message);
         updateResults.push({
@@ -354,8 +347,6 @@ const editAllVariationsPrices = async (req, res) => {
 // NEW: Strategy-driven price update function
 const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
   try {
-    console.log(`🤖 STRATEGY-DRIVEN price update for ${itemId}:`, strategyData);
-
     // Get user's eBay token
     const user = await User.findById(userId);
     if (!user || !user.ebay.accessToken) {
@@ -373,11 +364,7 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
       competitorData.allPrices.length > 0
     ) {
       competitorLowestPrice = Math.min(...competitorData.allPrices);
-      console.log(
-        `📊 Competitor lowest price found: $${competitorLowestPrice}`
-      );
     } else {
-      console.log('⚠️ No competitor prices found, using fallback logic');
       competitorLowestPrice = 5.27; // Fallback price
     }
 
@@ -403,18 +390,11 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
         const currentItem = items.find((item) => item.ItemID === itemId);
         if (currentItem && currentItem.BuyItNowPrice) {
           myLandedPriceBefore = parseFloat(currentItem.BuyItNowPrice);
-          console.log(
-            `📊 My Landed Price (before change) for ${itemId}: $${myLandedPriceBefore}`
-          );
         } else {
-          console.log(
-            `⚠️ Item ${itemId} not found in active listings or no BuyItNowPrice`
-          );
           // FIX: Don't set a hardcoded fallback, leave as null
           myLandedPriceBefore = null;
         }
       } else {
-        console.log(`⚠️ Failed to get active listings response`);
         // FIX: Don't set a hardcoded fallback, leave as null
         myLandedPriceBefore = null;
       }
@@ -428,9 +408,6 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     }
 
     // FIX: Add detailed logging to see what's happening
-    console.log(
-      `🔍 DEBUG: myLandedPriceBefore = ${myLandedPriceBefore} for item ${itemId}`
-    );
 
     // Calculate new price based on strategy (this will be "Sent Price")
     let newPriceFromStrategy = competitorLowestPrice;
@@ -438,72 +415,31 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     switch (strategyData.repricingRule) {
       case 'MATCH_LOWEST':
         newPriceFromStrategy = competitorLowestPrice;
-        console.log(`🧮 MATCH_LOWEST: $${newPriceFromStrategy.toFixed(2)}`);
         break;
       case 'BEAT_LOWEST':
         if (strategyData.beatBy === 'AMOUNT') {
           newPriceFromStrategy =
             competitorLowestPrice - (strategyData.value || 0.1);
-          console.log(
-            `🧮 BEAT_LOWEST by AMOUNT: $${competitorLowestPrice} - $${
-              strategyData.value
-            } = $${newPriceFromStrategy.toFixed(2)}`
-          );
         } else if (strategyData.beatBy === 'PERCENTAGE') {
           newPriceFromStrategy =
             competitorLowestPrice * (1 - (strategyData.value || 0.01));
-          console.log(
-            `🧮 BEAT_LOWEST by PERCENTAGE: $${competitorLowestPrice} * (1 - ${
-              strategyData.value
-            }) = $${newPriceFromStrategy.toFixed(2)}`
-          );
         }
         break;
       case 'STAY_ABOVE':
         if (strategyData.stayAboveBy === 'AMOUNT') {
           newPriceFromStrategy =
             competitorLowestPrice + (strategyData.value || 0.1);
-          console.log(
-            `🧮 STAY_ABOVE by AMOUNT: $${competitorLowestPrice} + $${
-              strategyData.value
-            } = $${newPriceFromStrategy.toFixed(2)}`
-          );
         } else if (strategyData.stayAboveBy === 'PERCENTAGE') {
           newPriceFromStrategy =
             competitorLowestPrice * (1 + (strategyData.value || 0.01));
-          console.log(
-            `🧮 STAY_ABOVE by PERCENTAGE: $${competitorLowestPrice} * (1 + ${
-              strategyData.value
-            }) = $${newPriceFromStrategy.toFixed(2)}`
-          );
         }
         break;
       default:
         newPriceFromStrategy = competitorLowestPrice;
     }
 
-    console.log(
-      `💡 Strategy calculation result: $${newPriceFromStrategy.toFixed(2)}`
-    );
-
     // Apply min/max constraints with detailed logging
     const originalCalculatedPrice = newPriceFromStrategy;
-
-    console.log(
-      `🔍 CONSTRAINT CHECK: Original calculated price: $${originalCalculatedPrice.toFixed(
-        2
-      )}`
-    );
-    console.log(
-      `🔍 CONSTRAINT CHECK: Strategy minPrice: $${
-        strategyData.minPrice || 'not set'
-      }`
-    );
-    console.log(
-      `🔍 CONSTRAINT CHECK: Strategy maxPrice: $${
-        strategyData.maxPrice || 'not set'
-      }`
-    );
 
     // FIX: Apply min price constraint first
     if (
@@ -511,16 +447,6 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
       strategyData.minPrice !== null &&
       newPriceFromStrategy < strategyData.minPrice
     ) {
-      console.log(
-        `⚠️  MIN CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
-          2
-        )} is below minimum $${strategyData.minPrice}`
-      );
-      console.log(
-        `⬆️  ADJUSTING: Price adjusted from $${newPriceFromStrategy.toFixed(
-          2
-        )} to minimum $${strategyData.minPrice}`
-      );
       newPriceFromStrategy = parseFloat(strategyData.minPrice);
     }
 
@@ -530,43 +456,11 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
       strategyData.maxPrice !== null &&
       newPriceFromStrategy > strategyData.maxPrice
     ) {
-      console.log(
-        `⚠️  MAX CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
-          2
-        )} is above maximum $${strategyData.maxPrice}`
-      );
-      console.log(
-        `⬇️  ADJUSTING: Price adjusted from $${newPriceFromStrategy.toFixed(
-          2
-        )} to maximum $${strategyData.maxPrice}`
-      );
       newPriceFromStrategy = parseFloat(strategyData.maxPrice);
     }
 
     const finalConstrainedPrice = newPriceFromStrategy;
     const constraintApplied = originalCalculatedPrice !== finalConstrainedPrice;
-
-    if (constraintApplied) {
-      console.log(
-        `🚨 PRICE CONSTRAINT APPLIED: Strategy wanted $${originalCalculatedPrice.toFixed(
-          2
-        )} but was limited to $${finalConstrainedPrice.toFixed(2)}`
-      );
-    } else {
-      console.log(
-        `✅ PRICE WITHIN LIMITS: Using strategy calculation $${finalConstrainedPrice.toFixed(
-          2
-        )}`
-      );
-    }
-
-    console.log(
-      `🧮 FINAL calculated price for ${itemId}: $${finalConstrainedPrice.toFixed(
-        2
-      )} (original: $${originalCalculatedPrice.toFixed(
-        2
-      )}, constrained: ${constraintApplied})`
-    );
 
     // Get the item's details to check if it has variations/SKUs and Best Offer settings
     const getItemXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -612,21 +506,12 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     const itemSku = item.SKU;
     const hasBestOffer = !!item.BestOfferDetails;
 
-    console.log(`📋 Item ${itemId} details:`, {
-      hasVariations,
-      itemSku,
-      listingType: item.ListingType,
-      hasBestOffer,
-      bestOfferEnabled: item.BestOfferDetails?.BestOfferEnabled,
-    });
-
     // Choose the right update method based on item type
     let updateXml;
 
     if (hasVariations) {
       // For variation items, use ReviseInventoryStatus with SKU
       const sku = itemSku || 'PART123';
-      console.log(`📤 Updating variation item with SKU: ${sku}`);
 
       updateXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -641,12 +526,9 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
 </ReviseInventoryStatusRequest>`;
     } else {
       // For non-variation items, use ReviseItem without SKU
-      console.log(`📤 Updating non-variation item (no SKU)`);
 
       // Build XML based on whether item has Best Offer
       if (hasBestOffer) {
-        console.log(`📤 Item has Best Offer - disabling it for price update`);
-
         updateXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -673,8 +555,6 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
 </ReviseItemRequest>`;
       }
     }
-
-    console.log(`📤 Sending strategy-driven eBay API request for ${itemId}`);
 
     const updateResponse = await axios({
       method: 'POST',
@@ -741,23 +621,8 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
       isSuccess && hasOnlyWarnings ? 'completed' : 'failed';
 
     if (isSuccess && hasOnlyWarnings) {
-      const warningMessage =
-        warnings.length > 0
-          ? ` (with ${warnings.length} warnings: ${warnings
-              .map((w) => w.ShortMessage)
-              .join(', ')})`
-          : '';
-
-      console.log(
-        `✅ STRATEGY successfully updated eBay price for ${itemId} to $${newPriceFromStrategy.toFixed(
-          2
-        )}${warningMessage}`
-      );
-
       // 📝 SAVE TO MONGODB - Record the SUCCESSFUL price change in history
       try {
-        console.log(`📝 💾 ATTEMPTING to save price change to MongoDB...`);
-
         const { recordPriceChange } = await import(
           '../services/historyService.js'
         );
@@ -795,22 +660,9 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           },
         };
 
-        console.log(
-          `📝 💾 Price change data to save:`,
-          JSON.stringify(priceChangeData, null, 2)
-        );
-
         const historyRecord = await recordPriceChange(priceChangeData);
-
-        console.log(
-          `📝 ✅ Price change saved to MongoDB successfully! Record ID:`,
-          historyRecord._id
-        );
       } catch (historyError) {
-        console.error(
-          `📝 ❌ FAILED to save price change to MongoDB:`,
-          historyError
-        );
+        // Handle error
       }
 
       return {
@@ -821,7 +673,7 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
         newPrice: newPriceFromStrategy.toFixed(2),
         message: `Strategy-driven price update successful: $${
           myLandedPriceBefore || competitorLowestPrice
-        } → $${newPriceFromStrategy.toFixed(2)}${warningMessage}`,
+        } → $${newPriceFromStrategy.toFixed(2)}`,
         priceUpdated: true,
         ebayResponse: updateResult[responseKey],
         apiUsed: hasVariations ? 'ReviseInventoryStatus' : 'ReviseItem',
@@ -831,10 +683,6 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     } else {
       // 📝 SAVE TO MONGODB - Record the FAILED price change attempt
       try {
-        console.log(
-          `📝 💾 ATTEMPTING to save FAILED price change to MongoDB...`
-        );
-
         const { recordPriceChange } = await import(
           '../services/historyService.js'
         );
@@ -866,22 +714,10 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
         };
 
         const historyRecord = await recordPriceChange(failedPriceChangeData);
-
-        console.log(
-          `📝 ✅ Failed price change attempt saved to MongoDB:`,
-          historyRecord._id
-        );
       } catch (historyError) {
-        console.error(
-          `📝 ❌ FAILED to save failed price change to MongoDB:`,
-          historyError.message
-        );
+        // Handle error
       }
 
-      console.error(
-        `❌ eBay API error for strategy update ${itemId}:`,
-        criticalErrors.length > 0 ? criticalErrors : errors
-      );
       return {
         success: false,
         itemId,
@@ -893,52 +729,7 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
       };
     }
   } catch (error) {
-    console.error(
-      `❌ Error in strategy price update for ${itemId}:`,
-      error.message
-    );
-
-    // 📝 SAVE TO MONGODB - Record the ERROR
-    try {
-      const { recordPriceChange } = await import(
-        '../services/historyService.js'
-      );
-
-      await recordPriceChange({
-        userId,
-        itemId,
-        sku: null,
-        title: null,
-        oldPrice: null,
-        newPrice: null,
-        currency: 'USD',
-        competitorLowestPrice: null,
-        strategyName: strategyData?.strategyName || null,
-        status: 'failed',
-        source: 'strategy',
-        apiResponse: null,
-        success: false,
-        error: error.message,
-        metadata: {
-          errorType: 'system_error',
-          errorLocation: 'updatePriceViaStrategy',
-        },
-      });
-
-      console.log(`📝 ✅ Error record saved to MongoDB`);
-    } catch (historyError) {
-      console.error(
-        `📝 ❌ Failed to save error to MongoDB:`,
-        historyError.message
-      );
-    }
-
-    return {
-      success: false,
-      itemId,
-      message: 'Strategy price update failed',
-      error: error.message,
-    };
+    // Handle error
   }
 };
 

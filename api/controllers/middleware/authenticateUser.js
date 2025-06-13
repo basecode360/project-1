@@ -13,7 +13,7 @@ const authenticateUser = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
-    console.log(user);
+   
      if (!user) {
       return res.status(401).json({ message: "Unauthorized" });
      }
@@ -66,8 +66,7 @@ export async function generateEbayAuthCode(options = {}) {
     `&scope=${scopes}` +
     `&state=${req.query.userId}`;
 
-  console.log('Starting automated eBay authorization...');
-  console.log('Auth URL:', authUrl);
+  
 
   const browser = await puppeteer.launch({
     headless: headless ? 'new' : false,
@@ -78,10 +77,8 @@ export async function generateEbayAuthCode(options = {}) {
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(timeout);
 
-    console.log('Navigating to eBay login page...');
     await page.goto(authUrl, { waitUntil: 'networkidle2' });
 
-    console.log('Filling login credentials...');
     await page.waitForSelector('#userid');
     await page.type('#userid', username);
     await page.click('#signin-continue-btn');
@@ -91,13 +88,11 @@ export async function generateEbayAuthCode(options = {}) {
     await page.click('#sgnBt');
 
     // Wait for either consent or final redirect page
-    console.log('Waiting for code to appear in final URL...');
     await page.waitForFunction(() => {
       return window.location.href.includes('code=');
     }, { timeout });
 
     const urlWithCode = await page.evaluate(() => window.location.href);
-    console.log('Redirected to:', urlWithCode);
 
     const codeMatch = urlWithCode.match(/[?&]code=([^&]+)/);
     if (!codeMatch) {
@@ -105,7 +100,6 @@ export async function generateEbayAuthCode(options = {}) {
     }
 
     const code = decodeURIComponent(codeMatch[1]);
-    console.log('Successfully extracted authorization code');
     return code;
   } catch (error) {
     console.error('Error during eBay authorization:', error);
@@ -118,7 +112,6 @@ export async function generateEbayAuthCode(options = {}) {
     throw error;
   } finally {
     await browser.close();
-    console.log('Browser closed');
   }
 }
 
@@ -186,18 +179,4 @@ export async function directTokenHandler(req, res) {
   }
 }
 
-// // For testing/CLI usage
-// if (process.argv[1] === fileURLToPath(import.meta.url)) {
-//   // This will run when the file is executed directly (not imported)
-//   generateEbayAuthCode()
-//     .then(code => {
-//       console.log('\nAuthorization Code:');
-//       console.log(code);
-//       console.log('\nUse this code with your callback endpoint:');
-//       console.log(`${process.env.REDIRECT_URI}?code=${encodeURIComponent(code)}`);
-//     })
-//     .catch(error => {
-//       console.error('Failed to generate authorization code:', error);
-//       process.exit(1);
-//     });
-// }
+

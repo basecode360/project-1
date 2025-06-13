@@ -11,10 +11,6 @@ import User from '../models/Users.js';
  */
 export async function getCompetitorPrice(itemId, userId = null) {
   try {
-    console.log(
-      `[inventoryService] Getting competitor price for item: ${itemId}`
-    );
-
     // For now, simulate competitor price data
     // In a real implementation, this would call your competitor price API
     const mockCompetitorData = {
@@ -25,16 +21,8 @@ export async function getCompetitorPrice(itemId, userId = null) {
       productInfo: [],
     };
 
-    console.log(
-      `[inventoryService] Returning competitor data:`,
-      mockCompetitorData
-    );
     return mockCompetitorData;
   } catch (error) {
-    console.error(
-      `[inventoryService] Error getting competitor price for ${itemId}:`,
-      error
-    );
     return {
       success: false,
       price: 'USD0.00',
@@ -52,9 +40,6 @@ export async function getCompetitorPrice(itemId, userId = null) {
 function getUpdatedPrice(itemId, sku) {
   // For now, just return null since we're updating eBay directly
   // The frontend should get the latest price from eBay API calls
-  console.log(
-    `📊 Checking for updated price: ${itemId}:${sku} - relying on eBay API`
-  );
   return null;
 }
 
@@ -63,10 +48,6 @@ function getUpdatedPrice(itemId, sku) {
  */
 export async function getActiveListings(userId = null) {
   try {
-    console.log(
-      `[inventoryService] Getting REAL eBay listings from Trading API...`
-    );
-
     // Get user token if userId provided
     let authToken = null;
     if (userId) {
@@ -85,12 +66,6 @@ export async function getActiveListings(userId = null) {
       throw new Error('No eBay access token available');
     }
 
-    console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-    console.log(
-      `🔑 Using eBay token starting with: ${authToken.substring(0, 20)}...`
-    );
-    console.log(`🔑 Token length: ${authToken.length} characters`);
-
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -105,8 +80,6 @@ export async function getActiveListings(userId = null) {
   </ActiveList>
   <DetailLevel>ReturnAll</DetailLevel>
 </GetMyeBaySellingRequest>`;
-
-    console.log(`📤 Sending request to eBay Trading API...`);
 
     const response = await axios({
       method: 'POST',
@@ -139,16 +112,12 @@ export async function getActiveListings(userId = null) {
     const ebayResponse = result.GetMyeBaySellingResponse;
 
     if (ebayResponse.Ack === 'Success' || ebayResponse.Ack === 'Warning') {
-      console.log(`✅ eBay API success: ${ebayResponse.Ack}`);
       return {
         success: true,
         data: result,
       };
     } else {
       const errors = ebayResponse.Errors;
-      console.error(`❌ eBay API returned error:`, errors);
-
-      // FIX: Don't fall back to mock data, return actual error
       throw new Error(
         `eBay API Error: ${
           errors?.LongMessage || errors?.ShortMessage || 'Unknown error'
@@ -156,9 +125,6 @@ export async function getActiveListings(userId = null) {
       );
     }
   } catch (error) {
-    console.error(`❌ eBay API Error in getActiveListings:`, error.message);
-
-    // FIX: Don't return mock data, throw the actual error
     throw new Error(`Failed to fetch eBay listings: ${error.message}`);
   }
 }
@@ -169,18 +135,6 @@ export async function getActiveListings(userId = null) {
  */
 export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
   try {
-    console.log(
-      `🤖 STRATEGY-DRIVEN price update: ${itemId}/${sku} to $${newPrice}`
-    );
-
-    // Debug environment settings
-    console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV}`);
-    console.log(
-      `🌍 Environment check: ${
-        process.env.NODE_ENV === 'production' ? 'PRODUCTION' : 'SANDBOX'
-      }`
-    );
-
     // Get user with eBay credentials
     let user = null;
     if (userId) {
@@ -192,7 +146,6 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
     }
 
     if (!user || !user.ebay.accessToken) {
-      console.log('🧪 No eBay credentials found, simulating update');
       return {
         success: true,
         itemId,
@@ -203,12 +156,6 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
     }
 
     const authToken = user.ebay.accessToken;
-
-    // Add debugging for token
-    console.log(
-      `🔑 Using eBay token starting with: ${authToken.substring(0, 20)}...`
-    );
-    console.log(`🔑 Token length: ${authToken.length} characters`);
 
     // Use eBay ReviseInventoryStatus API directly
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -223,17 +170,11 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
-    console.log(
-      `📤 Sending eBay API request for strategy update: ${itemId}/${sku}`
-    );
-
     // FIXED: Use correct environment logic
     const ebayUrl =
       process.env.NODE_ENV === 'production'
         ? 'https://api.ebay.com/ws/api.dll' // PRODUCTION
         : 'https://api.sandbox.ebay.com/ws/api.dll'; // SANDBOX
-
-    console.log(`🌍 Using eBay URL: ${ebayUrl}`);
 
     const response = await axios({
       method: 'POST',
@@ -263,10 +204,6 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
     const reviseResponse = result.ReviseInventoryStatusResponse;
 
     if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
-      console.log(
-        `✅ STRATEGY successfully updated eBay price for ${itemId} to $${newPrice}`
-      );
-
       // Log to price history with strategy context
       try {
         const PriceHistory = (await import('../models/PriceHistory.js'))
@@ -287,7 +224,7 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
           },
         }).save();
       } catch (historyError) {
-        console.warn('Could not save price history:', historyError.message);
+        // Handle error silently
       }
 
       return {
@@ -299,12 +236,6 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
         timestamp: new Date(),
       };
     } else {
-      console.error(
-        `❌ eBay API returned error for ${itemId}:`,
-        reviseResponse.Errors
-      );
-
-      console.log(`⚠️ eBay token issue - need to refresh authentication`);
       return {
         success: false,
         itemId,
@@ -315,10 +246,6 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
       };
     }
   } catch (error) {
-    console.error(
-      `❌ Error in strategy price update for ${itemId}:`,
-      error.message
-    );
     return {
       success: false,
       error: error.message,
@@ -335,24 +262,13 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
  */
 export async function syncPriceWithStrategy(itemId, userId = null) {
   try {
-    console.log(
-      `🔄 Syncing price for item ${itemId} with applied strategies...`
-    );
-
     // Import strategy service to execute pricing logic
     const { executeStrategiesForItem } = await import('./strategyService.js');
 
     const result = await executeStrategiesForItem(itemId);
 
-    if (result.success) {
-      console.log(`✅ Price sync completed for ${itemId}`);
-      return result;
-    } else {
-      console.log(`⚠️ Price sync failed for ${itemId}:`, result.message);
-      return result;
-    }
+    return result;
   } catch (error) {
-    console.error(`❌ Error syncing price for ${itemId}:`, error);
     return {
       success: false,
       error: error.message,
@@ -369,10 +285,6 @@ export async function syncPriceWithStrategy(itemId, userId = null) {
  */
 export async function getCurrentEbayPrice(itemId, sku = null, userId = null) {
   try {
-    console.log(
-      `💰 Getting current eBay price for ${itemId}${sku ? `/${sku}` : ''}`
-    );
-
     const listings = await getActiveListings(userId);
 
     if (listings.success && listings.data.GetMyeBaySellingResponse) {
@@ -390,7 +302,6 @@ export async function getCurrentEbayPrice(itemId, sku = null, userId = null) {
 
       if (item && item.BuyItNowPrice) {
         const currentPrice = parseFloat(item.BuyItNowPrice);
-        console.log(`💰 Current eBay price for ${itemId}: $${currentPrice}`);
         return {
           success: true,
           price: currentPrice,
@@ -400,7 +311,6 @@ export async function getCurrentEbayPrice(itemId, sku = null, userId = null) {
       }
     }
 
-    console.log(`⚠️ Could not get current price for item ${itemId}`);
     return {
       success: false,
       error: 'Item not found or no price available',
@@ -408,7 +318,6 @@ export async function getCurrentEbayPrice(itemId, sku = null, userId = null) {
       sku,
     };
   } catch (error) {
-    console.error(`❌ Error getting current eBay price for ${itemId}:`, error);
     return {
       success: false,
       error: error.message,

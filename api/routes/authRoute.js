@@ -33,11 +33,7 @@ const tokenManager = {
       ? new Date(user.ebay.expiresAt)
       : null;
 
-    console.log(
-      'Token manager initialized:',
-      this.tokens.accessToken ? '[accessToken exists]' : '[no accessToken]',
-      this.tokens.refreshToken ? '[refreshToken exists]' : ''
-    );
+
   },
 
   updateTokens(accessToken, refreshToken, expiresIn) {
@@ -45,7 +41,6 @@ const tokenManager = {
     if (refreshToken) this.tokens.refreshToken = refreshToken;
     this.tokens.expiryTime = new Date(Date.now() + expiresIn * 1000);
 
-    console.log('Tokens updated; new expiry:', this.tokens.expiryTime);
   },
 
   isTokenValid() {
@@ -181,7 +176,6 @@ router.get('/ebay-login', (req, res) => {
     `&scope=${scopes}` +
     `&state=${userId}`;
 
-  console.log('Redirecting to eBay login:', authUrl);
   res.redirect(authUrl);
 });
 
@@ -212,7 +206,6 @@ router.get('/automated-login', async (req, res) => {
 router.post('/exchange-code', async (req, res) => {
   try {
     const { code, userId } = req.body;
-    console.log('[Backend] Received code:', code, 'userId:', userId);
 
     if (!code || !userId) {
       return sendResponse(res, 400, false, 'Both code and userId are required');

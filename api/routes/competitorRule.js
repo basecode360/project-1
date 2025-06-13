@@ -434,7 +434,6 @@ router.post('/assign-to-all-active', async (req, res) => {
       </GetMyeBaySellingRequest>
     `;
 
-    console.log('Fetching active listings for competitor rule assignment...');
     const activeListingsResponse = await makeEBayAPICall(
       getActiveListingsXML,
       'GetMyeBaySelling'
@@ -459,9 +458,7 @@ router.post('/assign-to-all-active', async (req, res) => {
       ? activeList.ItemArray.Item
       : [activeList.ItemArray.Item];
 
-    console.log(
-      `Found ${items.length} active listings for competitor rule assignment`
-    );
+   
 
     // Step 2: Create competitor rule specifics
     const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
@@ -475,7 +472,6 @@ router.post('/assign-to-all-active', async (req, res) => {
       try {
         const itemId = item.ItemID;
 
-        console.log(`Applying competitor rule to item ${itemId}...`);
 
         const xmlRequest = `
           <?xml version="1.0" encoding="utf-8"?>
@@ -1065,7 +1061,6 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
     : [itemSpecifics];
   const ruleData = {};
 
-  console.log(`=== DEBUG: Parsing competitor rule for item ${itemId} ===`);
 
   // STRICT filtering: Only accept fields that are EXCLUSIVELY competitor rule fields
   const COMPETITOR_RULE_FIELDS = [
@@ -1101,21 +1096,16 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
       // STRICT check: only accept fields in the whitelist
       if (COMPETITOR_RULE_FIELDS.includes(name)) {
         ruleData[name] = value;
-        console.log(`Found competitor rule field: ${name} = ${value}`);
       } else {
         // Log what we're rejecting for debugging
-        console.log(
-          `Rejecting field (not a competitor rule field): ${name} = ${value}`
-        );
+  
       }
     }
   });
 
-  console.log(`Found competitor rule data for item ${itemId}:`, ruleData);
 
   // If no actual competitor rule data found, return null
   if (Object.keys(ruleData).length === 0) {
-    console.log(`No competitor rule data found for item ${itemId}`);
     return null;
   }
 
@@ -1162,7 +1152,6 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
       null,
   };
 
-  console.log(`Parsed competitor rule for item ${itemId}:`, rule);
   return rule;
 }
 

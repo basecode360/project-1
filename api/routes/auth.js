@@ -27,7 +27,6 @@ router.post('/update-ebay-token', requireAuth, async (req, res) => {
       'ebay.tokenExpires': new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours
     });
 
-    console.log(`✅ Updated eBay token for user ${userId}`);
 
     return res.json({
       success: true,

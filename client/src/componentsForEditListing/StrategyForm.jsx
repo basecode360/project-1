@@ -142,12 +142,12 @@ export default function EditStrategy() {
   const fetchCompetitorPrice = async (itemId) => {
     try {
       setFetchingCompetitorPrice(true);
-      console.log('Fetching competitor price for itemId:', itemId);
+      
 
       const competitorData = await apiService.inventory.getCompetitorPrice(
         itemId
       );
-      console.log('Competitor price data received:', competitorData);
+      
 
       if (
         competitorData &&
@@ -155,7 +155,7 @@ export default function EditStrategy() {
         competitorData.allPrices.length > 0
       ) {
         const lowestCompetitorPrice = Math.min(...competitorData.allPrices);
-        console.log('Lowest competitor price found:', lowestCompetitorPrice);
+        
 
         setFormData((prev) => ({
           ...prev,
@@ -169,7 +169,7 @@ export default function EditStrategy() {
           'info'
         );
       } else {
-        console.log('No competitor prices found');
+        
         setFormData((prev) => ({
           ...prev,
           lowestPrice: '0.00',
@@ -192,7 +192,7 @@ export default function EditStrategy() {
   const fetchPriceHistory = async () => {
     try {
       setLoadingHistory(true);
-      console.log(`📊 Fetching price history from MongoDB for ${productId}`);
+      
 
       // Use the corrected API call
       const historyData = await apiService.priceHistory.getProductHistory(
@@ -201,12 +201,10 @@ export default function EditStrategy() {
       );
 
       if (historyData.success && historyData.priceHistory) {
-        console.log(
-          `📊 ✅ Retrieved ${historyData.recordCount} price history records from MongoDB`
-        );
+        
         setPriceHistory(historyData.priceHistory);
       } else {
-        console.log('📊 No price history found in MongoDB');
+        
         setPriceHistory([]);
       }
     } catch (error) {
@@ -266,7 +264,7 @@ export default function EditStrategy() {
         isDefault: selectedStrategyObj.isDefault,
       };
 
-      console.log('Step 1: Updating strategy with payload:', updatePayload);
+      
 
       const strategyResponse =
         await apiService.pricingStrategies.updateStrategy(
@@ -283,8 +281,7 @@ export default function EditStrategy() {
       }
 
       // Step 2: Apply the strategy to the product (this will automatically trigger price update)
-      console.log(
-        'Step 2: Applying strategy to product (will auto-update price)'
+      '
       );
 
       const applyResponse =

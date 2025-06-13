@@ -26,16 +26,16 @@ export default function CompetitorPricesPage() {
   const [acceptedId, setAcceptedId] = useState(null);
   const competitors = useProductStore((state) => state.competitors);
   const productObj = useProductStore((state) => state.productObj);
-  // console.log(`CompetitorPricesPage itemId: ${competitors[0].allPrices}, itemIdFromStore: ${itemIdFromStore}`);
+  // 
   useEffect(() => {
     async function fetchData() {
       try {
         // Call the actual competitor prices API
-        console.log(`Fetching competitor prices for itemId: ${itemId}`);
+        
         const competitorResponse =
           await apiService.inventory.getCompetitorPrice(itemId);
 
-        console.log('Competitor API response:', competitorResponse);
+        
 
         if (productObj.title) setMyItemTitle(productObj.title);
 
@@ -60,7 +60,7 @@ export default function CompetitorPricesPage() {
             isbn: 'None',
           }));
 
-          console.log('Processed competitor data:', detailed);
+          
           setCompetitorData(detailed);
         } else {
           // Fallback to store data if API doesn't return data

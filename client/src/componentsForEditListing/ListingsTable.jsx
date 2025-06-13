@@ -29,7 +29,7 @@ export default function PriceChangeSubmissions() {
   const fetchPriceHistory = async () => {
     try {
       setLoading(true);
-      console.log(`📊 Fetching price history from MongoDB for ${productId}`);
+      
 
       // Use the price history API to get MongoDB data
       const historyData = await apiService.priceHistory.getProductHistory(
@@ -38,13 +38,11 @@ export default function PriceChangeSubmissions() {
       );
 
       if (historyData.success && historyData.priceHistory) {
-        console.log(
-          `📊 ✅ Retrieved ${historyData.recordCount} price history records from MongoDB`
-        );
+        
         setPriceHistory(historyData.priceHistory);
         setError(null);
       } else {
-        console.log('📊 No price history found in MongoDB');
+        
         setPriceHistory([]);
         setError('No price history found');
       }

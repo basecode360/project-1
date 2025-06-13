@@ -4,7 +4,6 @@ import ebayApi from "../helper/authEbay";
 async function getInventory() {
   const url = "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
   const data = await ebayApi({ method: "GET", url });
-  console.log("Inventory:", data);
 }
 
 getInventory();

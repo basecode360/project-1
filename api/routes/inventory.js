@@ -19,9 +19,6 @@ router.post('/sync-price/:itemId', requireAuth, async (req, res) => {
     const { itemId } = req.params;
     const userId = req.user?.id;
 
-    console.log(
-      `🔄 Manual price sync triggered for item ${itemId} by user ${userId}`
-    );
 
     const result = await syncPriceWithStrategy(itemId, userId);
 

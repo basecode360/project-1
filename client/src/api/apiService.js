@@ -54,9 +54,7 @@ pricingClient.interceptors.request.use((config) => {
   const token = getAppJwtToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
-    console.log(
-      '✅ JWT attached to pricingClient:',
-      token.slice(0, 20) + '...'
+     + '...'
     );
   } else {
     console.warn('❌ Missing JWT for pricingClient');
@@ -71,6 +69,26 @@ competitorClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+/** ————————————— GLOBAL RESPONSE INTERCEPTOR ————————————— **/
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Check if it's an eBay token expiry
+      const errorData = error.response.data;
+      if (errorData?.errors?.[0]?.errorId === 932) {
+        console.warn('⚠️ eBay token expired, clearing tokens');
+        localStorage.removeItem('ebay_user_token');
+        localStorage.removeItem('ebay_refresh_token');
+
+        // Dispatch a custom event to notify components
+        window.dispatchEvent(new CustomEvent('ebayTokenExpired'));
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 /** ————————— INVENTORY & SYNC & COMPETITOR → EBAY ROUTES ————————— **/
 const inventory = {
@@ -111,10 +129,10 @@ const inventory = {
     }
   },
   getCompetitorPrice: async (itemId) => {
-    console.log('[api] Fetching competitor price for:', itemId);
+    
     try {
       const userId = localStorage.getItem('user_id');
-      console.log('[api] Using userId:', userId);
+      
 
       if (!userId) {
         console.error('[api] No userId found in localStorage');
@@ -124,7 +142,7 @@ const inventory = {
       const resp = await apiClient.get(`/competitor-prices/${itemId}`, {
         params: { userId },
       });
-      console.log('[api] RAW competitor API response:', resp.data);
+      
 
       // Check if the response has the expected structure
       if (!resp.data || !resp.data.success) {
@@ -134,7 +152,7 @@ const inventory = {
 
       // Updated to match the actual API response structure
       const competitorPrices = resp.data?.competitorPrices || {};
-      console.log('[api] Extracted competitorPrices:', competitorPrices);
+      
 
       const allPrices = Array.isArray(competitorPrices.allPrices)
         ? competitorPrices.allPrices
@@ -143,8 +161,8 @@ const inventory = {
         ? competitorPrices.allData
         : [];
 
-      console.log('[api] Extracted allPrices:', allPrices);
-      console.log('[api] Extracted allData length:', allData.length);
+      
+      
 
       const result = {
         price:
@@ -156,7 +174,7 @@ const inventory = {
         productInfo: allData,
       };
 
-      console.log('[api] Final result:', result);
+      
       return result;
     } catch (err) {
       console.error(`[api] Error @ getCompetitorPrice(${itemId}):`, err);
@@ -343,7 +361,7 @@ const pricingStrategies = {
         params: { userId, active: true },
       });
 
-      console.log('getAllUniqueStrategies response:', resp.data);
+      
 
       return {
         success: resp.data.success,
@@ -357,10 +375,7 @@ const pricingStrategies = {
   },
   getStrategyDisplayForProduct: async (itemId, sku = null) => {
     try {
-      console.log(
-        `🔍 Fetching strategy display for item ${itemId}`,
-        sku ? `with SKU ${sku}` : ''
-      );
+      
 
       const params = sku ? `?sku=${encodeURIComponent(sku)}` : '';
 
@@ -371,7 +386,7 @@ const pricingStrategies = {
         `/products/${itemId}/display${params}${cacheBuster}`
       );
 
-      console.log(`✅ Strategy display response for ${itemId}:`, response.data);
+      
       return response.data;
     } catch (error) {
       console.error(
@@ -399,7 +414,7 @@ const pricingStrategies = {
 
   updatePrice: async (itemId) => {
     try {
-      console.log(`🔄 Triggering price update for item ${itemId}`);
+      
       const response = await pricingClient.post(
         `/products/${itemId}/update-price`
       );
@@ -415,7 +430,7 @@ const pricingStrategies = {
 
   updateStrategy: async (strategyId, updateData) => {
     try {
-      console.log(`🔄 Updating strategy ${strategyId} with:`, updateData);
+      
       const response = await pricingClient.put(`/${strategyId}`, updateData);
       return response.data;
     } catch (error) {
@@ -595,7 +610,7 @@ const combined = {
             rulesRes.status === 'rejected' ? rulesRes.reason.message : null,
         },
       };
-      console.log('All options from API:', allOptions); // Debug log added
+       // Debug log added
       return allOptions;
     } catch (err) {
       console.error('Error @ combined.getAllOptionsForDropdowns:', err);
@@ -666,9 +681,7 @@ const priceHistory = {
     try {
       const { headers } = await createAuthenticatedRequest();
 
-      console.log(
-        `📊 🔍 Fetching price history from MongoDB for product ${itemId}`
-      );
+      
 
       const response = await fetch(
         `${BASE_URL}/price-history/product/${itemId}?limit=${limit}`,
@@ -678,7 +691,7 @@ const priceHistory = {
         }
       );
 
-      console.log(`📊 Response status: ${response.status}`);
+      
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -687,13 +700,8 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(`📊 ✅ Raw response data:`, data);
-      console.log(`📊 ✅ Retrieved price history for ${itemId}:`, {
-        recordCount: data.recordCount,
-        hasData: data.priceHistory && data.priceHistory.length > 0,
-        summary: data.summary,
-        firstRecord: data.priceHistory?.[0],
-      });
+      
+      
       return data;
     } catch (error) {
       console.error(
@@ -708,9 +716,7 @@ const priceHistory = {
     try {
       const { headers } = await createAuthenticatedRequest();
 
-      console.log(
-        `📊 🔍 Fetching price history summary from MongoDB for ${itemId}`
-      );
+      
 
       const response = await fetch(
         `${BASE_URL}/price-history/summary/${itemId}`,
@@ -725,10 +731,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(
-        `📊 ✅ Retrieved price history summary from MongoDB for ${itemId}:`,
-        data.summary
-      );
+      
       return data;
     } catch (error) {
       console.error(
@@ -769,9 +772,7 @@ const priceHistory = {
 
       if (sku) queryParams.append('sku', sku);
 
-      console.log(
-        `📊 🔍 Fetching paginated price history for ${itemId}, page: ${page}`
-      );
+      
 
       const response = await fetch(
         `${BASE_URL}/price-history/product/${itemId}/paginated?${queryParams}`,
@@ -786,12 +787,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(`📊 ✅ Retrieved paginated price history:`, {
-        itemId,
-        currentPage: data.pagination?.currentPage,
-        totalPages: data.pagination?.totalPages,
-        totalRecords: data.pagination?.totalRecords,
-      });
+      
       return data;
     } catch (error) {
       console.error(
@@ -806,7 +802,7 @@ const priceHistory = {
     try {
       const { headers } = await createAuthenticatedRequest();
 
-      console.log(`📝 Adding manual price history record:`, recordData);
+      
 
       const response = await fetch(`${BASE_URL}/price-history/history/manual`, {
         method: 'POST',
@@ -822,7 +818,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(`📝 ✅ Manual record added successfully:`, data);
+      
       return data;
     } catch (error) {
       console.error(`📝 ❌ Error adding manual price record:`, error);
@@ -839,9 +835,7 @@ const priceHistory = {
       const queryParams = new URLSearchParams({ period });
       if (sku) queryParams.append('sku', sku);
 
-      console.log(
-        `📈 Fetching price analytics for ${itemId}, period: ${period}`
-      );
+      
 
       const response = await fetch(
         `${BASE_URL}/price-history/analytics/${itemId}?${queryParams}`,
@@ -856,10 +850,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(
-        `📈 ✅ Retrieved price analytics for ${itemId}:`,
-        data.analytics
-      );
+      
       return data;
     } catch (error) {
       console.error(
@@ -879,9 +870,7 @@ const priceHistory = {
       const queryParams = new URLSearchParams({ format });
       if (sku) queryParams.append('sku', sku);
 
-      console.log(
-        `📤 Exporting price history for ${itemId}, format: ${format}`
-      );
+      
 
       const response = await fetch(
         `${BASE_URL}/price-history/export/${itemId}?${queryParams}`,
@@ -897,13 +886,11 @@ const priceHistory = {
 
       if (format === 'csv') {
         const csvData = await response.text();
-        console.log(`📤 ✅ Retrieved CSV export for ${itemId}`);
+        
         return { success: true, data: csvData, format: 'csv' };
       } else {
         const data = await response.json();
-        console.log(`📤 ✅ Retrieved JSON export for ${itemId}:`, {
-          recordCount: data.recordCount,
-        });
+        
         return data;
       }
     } catch (error) {
@@ -919,7 +906,7 @@ const priceHistory = {
     try {
       const { headers } = await createAuthenticatedRequest();
 
-      console.log(`📝 Bulk inserting ${records.length} price history records`);
+      
 
       const response = await fetch(`${BASE_URL}/price-history/bulk`, {
         method: 'POST',
@@ -935,7 +922,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(`📝 ✅ Bulk insert completed:`, data);
+      
       return data;
     } catch (error) {
       console.error(`📝 ❌ Error in bulk insert:`, error);
@@ -947,9 +934,7 @@ const priceHistory = {
     try {
       const { headers } = await createAuthenticatedRequest();
 
-      console.log(
-        `🗄️ Archiving old records, keeping ${keepRecentCount} recent per product`
-      );
+      
 
       const response = await fetch(`${BASE_URL}/price-history/archive`, {
         method: 'POST',
@@ -965,7 +950,7 @@ const priceHistory = {
       }
 
       const data = await response.json();
-      console.log(`🗄️ ✅ Archive completed:`, data);
+      
       return data;
     } catch (error) {
       console.error(`🗄️ ❌ Error archiving records:`, error);

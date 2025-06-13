@@ -37,8 +37,7 @@ export function getEbayAuthUrl(stateJwt) {
  * Returns { access_token, refresh_token, expires_in }.
  */
 export async function exchangeCodeForToken(code, userId) {
-  console.log('[exchangeCodeForToken] Exchanging code for user:', userId);
-  console.log('[exchangeCodeForToken] Code received:', code);
+  
 
   try {
     const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
@@ -59,19 +58,13 @@ export async function exchangeCodeForToken(code, userId) {
       },
     });
 
-    console.log(
-      '[exchangeCodeForToken] Token exchange response from eBay:',
-      response.data
-    );
+ 
 
     // 1) Save tokens on the User model:
     const tokens = response.data; // { access_token, refresh_token, expires_in, … }
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-    console.log(
-      '[exchangeCodeForToken] Storing tokens in DB for user:',
-      userId
-    );
+
 
     await User.findByIdAndUpdate(userId, {
       $set: {

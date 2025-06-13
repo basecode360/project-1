@@ -7,7 +7,6 @@ const router = express.Router();
 const authenticateAPI = (req, res, next) => {
   const apiKey = req.headers['x-api-key'] || req.headers['authorization'];
 
-  console.log(`🔑 API Key Check: ${apiKey}`);
   if (!apiKey || apiKey !== process.env.API_KEY) {
     return res.status(401).json({
       success: false,
@@ -20,7 +19,6 @@ const authenticateAPI = (req, res, next) => {
 
 // Middleware for request logging
 const logRequest = (req, res, next) => {
-  console.log(`🔔 API Request: ${req.method} ${req.path} from ${req.ip}`);
   next();
 };
 
