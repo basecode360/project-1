@@ -19,8 +19,7 @@ export default function PopupCallback() {
       expiresIn = hashParams.get('expires_in');
     }
 
-    
-    :', state);
+  
 
     if (!code) {
       setError(
@@ -31,7 +30,6 @@ export default function PopupCallback() {
 
     try {
       if (window.opener && typeof window.opener.postMessage === 'function') {
-        
         window.opener.postMessage(
           { code, state, expires_in: expiresIn },
           window.location.origin

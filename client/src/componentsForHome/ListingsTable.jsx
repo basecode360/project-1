@@ -55,22 +55,17 @@ export default function ListingsTable() {
 
   // Fetch data from eBay when component mounts
   useEffect(() => {
-    
-    
-    
-    
+   
     fetchEbayListings();
   }, []); // Only run once on mount
 
   useEffect(() => {
-    
     if (AllProducts && AllProducts.length > 0) {
       setRows(AllProducts);
     }
   }, [AllProducts]);
 
   useEffect(() => {
-    
     const searchP = searchProduct.toLowerCase();
     const filtered = AllProducts.filter(
       (row) =>
@@ -79,7 +74,6 @@ export default function ListingsTable() {
         row.status?.some((s) => s.toLowerCase().includes(searchP)) ||
         row.productId?.toLowerCase().includes(searchP)
     );
-    
     setRows(filtered);
   }, [searchProduct, AllProducts]);
 
@@ -88,7 +82,6 @@ export default function ListingsTable() {
       setLoading(true);
       const response = await apiService.inventory.getActiveListings();
       if (response.success) {
-        
         let ebayListings = [];
         if (
           response.data.GetMyeBaySellingResponse &&
@@ -102,7 +95,6 @@ export default function ListingsTable() {
             ebayListings = [itemArray.Item];
           }
         }
-        
         
         const formattedListings = await Promise.all(
           ebayListings.map(async (item, index) => {
@@ -169,7 +161,6 @@ export default function ListingsTable() {
           })
         );
         
-        
         const validListings = formattedListings.filter(Boolean);
         if (validListings.length > 0) {
           setRows(validListings);
@@ -221,19 +212,17 @@ export default function ListingsTable() {
   // Refresh all strategy data
   const refreshAllStrategies = async () => {
     try {
-      
       setLoading(true);
 
       const updatedProducts = await Promise.all(
         AllProducts.map(async (product) => {
           try {
-            
             const strategyDisplayRes =
               await apiService.pricingStrategies.getStrategyDisplayForProduct(
                 product.productId
               );
 
-            
+           
 
             const strategyDisplay = strategyDisplayRes?.data || {
               strategy: 'Assign Strategy',
@@ -260,7 +249,6 @@ export default function ListingsTable() {
       );
 
       modifyProductsArray(updatedProducts);
-      
     } catch (error) {
       console.error('❌ Error refreshing all strategies:', error);
     } finally {
@@ -273,14 +261,12 @@ export default function ListingsTable() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Refresh strategy data when user comes back to the page
-        
         refreshAllStrategies();
       }
     };
 
     const handleFocus = () => {
       // Also refresh when window gets focus (more reliable for navigation)
-      
       refreshAllStrategies();
     };
 
@@ -299,7 +285,6 @@ export default function ListingsTable() {
     const timeoutId = setTimeout(() => {
       // Small delay to ensure any pending strategy updates are completed
       if (AllProducts && AllProducts.length > 0) {
-        
         refreshAllStrategies();
       }
     }, 500);
@@ -319,9 +304,7 @@ export default function ListingsTable() {
 
         // If update was within last 30 seconds, refresh
         if (now - updateTime < 30000) {
-           / 1000
-            )}s ago - forcing immediate refresh...`
-          );
+          
 
           // Clear all storage flags first
           localStorage.removeItem('strategyUpdated');

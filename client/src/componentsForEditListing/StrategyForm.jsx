@@ -142,12 +142,10 @@ export default function EditStrategy() {
   const fetchCompetitorPrice = async (itemId) => {
     try {
       setFetchingCompetitorPrice(true);
-      
 
       const competitorData = await apiService.inventory.getCompetitorPrice(
         itemId
       );
-      
 
       if (
         competitorData &&
@@ -155,7 +153,6 @@ export default function EditStrategy() {
         competitorData.allPrices.length > 0
       ) {
         const lowestCompetitorPrice = Math.min(...competitorData.allPrices);
-        
 
         setFormData((prev) => ({
           ...prev,
@@ -169,7 +166,6 @@ export default function EditStrategy() {
           'info'
         );
       } else {
-        
         setFormData((prev) => ({
           ...prev,
           lowestPrice: '0.00',
@@ -192,7 +188,6 @@ export default function EditStrategy() {
   const fetchPriceHistory = async () => {
     try {
       setLoadingHistory(true);
-      
 
       // Use the corrected API call
       const historyData = await apiService.priceHistory.getProductHistory(
@@ -204,7 +199,6 @@ export default function EditStrategy() {
         
         setPriceHistory(historyData.priceHistory);
       } else {
-        
         setPriceHistory([]);
       }
     } catch (error) {
@@ -264,7 +258,6 @@ export default function EditStrategy() {
         isDefault: selectedStrategyObj.isDefault,
       };
 
-      
 
       const strategyResponse =
         await apiService.pricingStrategies.updateStrategy(
@@ -280,9 +273,7 @@ export default function EditStrategy() {
         return;
       }
 
-      // Step 2: Apply the strategy to the product (this will automatically trigger price update)
-      '
-      );
+      
 
       const applyResponse =
         await apiService.pricingStrategies.applyStrategyToProduct(productId, [

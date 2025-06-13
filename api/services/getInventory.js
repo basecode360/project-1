@@ -12,7 +12,6 @@ const getInventoryItem = async (req, res) => {
   try {
     const itemId = req.params.id;
     const { userId } = req.query;
-    
 
     if (!userId) {
       return res.status(400).json({
@@ -69,7 +68,6 @@ const getInventoryItem = async (req, res) => {
     const errorMessage = error.response ? error.response.data : error.message;
     const statusCode = error.response ? error.response.status : 500;
 
-    
     return res.status(statusCode).json({
       success: false,
       message: 'Error fetching product',
@@ -146,7 +144,6 @@ const getActiveListings = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    console.error('Error with Trading API:', error);
     return res.status(500).json({
       success: false,
       message: 'Error fetching listings via Trading API',
@@ -157,8 +154,6 @@ const getActiveListings = async (req, res) => {
 
 const getActiveListingsViaFeed = async (req, res) => {
   try {
-    
-
     // Create a feed request with the correct feedType
     const createFeedResponse = await ebayApi({
       method: 'POST',
@@ -166,19 +161,14 @@ const getActiveListingsViaFeed = async (req, res) => {
       data: {
         feedType: 'ACTIVE_INVENTORY_REPORT', // This is the correct value for active listings
         schemaVersion: '1.0',
-        // Note: filterCriteria is optional and can be omitted
       },
     });
-
-    
-    );
 
     if (!createFeedResponse || !createFeedResponse.taskId) {
       throw new Error('Failed to create feed task - no taskId returned');
     }
 
     const taskId = createFeedResponse.taskId;
-    
 
     // In a real-world scenario, you would implement polling here
     // since feed generation can take some time. For this example,
@@ -192,10 +182,6 @@ const getActiveListingsViaFeed = async (req, res) => {
         'Check the feed status using the GET /sell/feed/v1/task/{taskId} endpoint, then download the report when ready.',
     });
   } catch (error) {
-    console.error(
-      'Error creating feed request:',
-      error.response?.data || error.message
-    );
     return res.status(500).json({
       success: false,
       message: 'Error fetching listing feed',
@@ -203,36 +189,6 @@ const getActiveListingsViaFeed = async (req, res) => {
     });
   }
 };
-
-//   const singleItem = 'https://api.ebay.com/sell/inventory/v1/inventory_item/';
-// const getInventoryItem = async (req, res) => {
-//     try {
-//       const sku = req.params.id;
-//       
-//       const url = `${singleItem}${sku}`;
-
-//       const itemData = await ebayApi({
-//         url: url,
-//       })
-
-//       
-//       return res.status(200).json({
-//         success: true,
-//         itemData
-//       })
-
-//     } catch (error) {
-//       const errorMessage = error.response ? error.response.data : error.message;
-//       const statusCode = error.response ? error.response.status : 500; // Default to 500 if no response status
-
-//       
-//       return res.status(statusCode).json({
-//         success: false,
-//         message: "Error fetching product",
-//         error: error.response ? error.response.data : error.message
-//       })
-//     }
-//   }
 
 export default {
   getInventoryItem,
