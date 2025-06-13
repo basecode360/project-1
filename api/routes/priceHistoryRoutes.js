@@ -354,6 +354,14 @@ router.get('/product/:itemId', requireAuth, async (req, res) => {
         error: record.error,
         sku: record.sku,
         title: record.title,
+        // FIX: Extract min/max prices from metadata with proper number conversion
+        minPrice: record.metadata?.strategyData?.minPriceLimit
+          ? Number(record.metadata.strategyData.minPriceLimit).toFixed(2)
+          : null,
+        maxPrice: record.metadata?.strategyData?.maxPriceLimit
+          ? Number(record.metadata.strategyData.maxPriceLimit).toFixed(2)
+          : null,
+        metadata: record.metadata, // Include full metadata for debugging
       })),
     });
   } catch (error) {

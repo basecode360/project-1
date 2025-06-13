@@ -4,7 +4,7 @@ import axios from 'axios';
 import ebayService from '../services/ebayService.js';
 import getEbayListings from '../controllers/ebayController.js';
 import fetchProducts from '../services/getInventory.js';
-import editRoute from '../services/editProduct.js';
+import editProductService from '../services/editProduct.js';
 import User from '../models/Users.js';
 
 const router = express.Router();
@@ -183,17 +183,20 @@ router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
 /**
  * Get item variations for a specific item
  */
-router.get('/item-variations/:itemId', editRoute.getItemVariations);
+router.get('/item-variations/:itemId', editProductService.getItemVariations);
 
 /**
  * Edit variation price for a specific variation
  */
-router.post('/edit-variation-price', editRoute.editVariationPrice);
+router.post('/edit-variation-price', editProductService.editVariationPrice);
 
 /**
  * Edit all variations prices for an item
  */
-router.post('/edit-all-variations-price', editRoute.editAllVariationsPrices);
+router.post(
+  '/edit-all-variations-price',
+  editProductService.editAllVariationsPrices
+);
 
 /**
  * Get item details by ID

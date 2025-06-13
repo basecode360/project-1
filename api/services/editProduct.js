@@ -406,14 +406,31 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           console.log(
             `📊 My Landed Price (before change) for ${itemId}: $${myLandedPriceBefore}`
           );
+        } else {
+          console.log(
+            `⚠️ Item ${itemId} not found in active listings or no BuyItNowPrice`
+          );
+          // FIX: Don't set a hardcoded fallback, leave as null
+          myLandedPriceBefore = null;
         }
+      } else {
+        console.log(`⚠️ Failed to get active listings response`);
+        // FIX: Don't set a hardcoded fallback, leave as null
+        myLandedPriceBefore = null;
       }
     } catch (priceError) {
       console.warn(
         'Could not get current eBay price for history:',
         priceError.message
       );
+      // FIX: Don't set a hardcoded fallback, leave as null
+      myLandedPriceBefore = null;
     }
+
+    // FIX: Add detailed logging to see what's happening
+    console.log(
+      `🔍 DEBUG: myLandedPriceBefore = ${myLandedPriceBefore} for item ${itemId}`
+    );
 
     // Calculate new price based on strategy (this will be "Sent Price")
     let newPriceFromStrategy = competitorLowestPrice;
@@ -472,9 +489,30 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     // Apply min/max constraints with detailed logging
     const originalCalculatedPrice = newPriceFromStrategy;
 
-    if (strategyData.minPrice && newPriceFromStrategy < strategyData.minPrice) {
+    console.log(
+      `🔍 CONSTRAINT CHECK: Original calculated price: $${originalCalculatedPrice.toFixed(
+        2
+      )}`
+    );
+    console.log(
+      `🔍 CONSTRAINT CHECK: Strategy minPrice: $${
+        strategyData.minPrice || 'not set'
+      }`
+    );
+    console.log(
+      `🔍 CONSTRAINT CHECK: Strategy maxPrice: $${
+        strategyData.maxPrice || 'not set'
+      }`
+    );
+
+    // FIX: Apply min price constraint first
+    if (
+      strategyData.minPrice !== undefined &&
+      strategyData.minPrice !== null &&
+      newPriceFromStrategy < strategyData.minPrice
+    ) {
       console.log(
-        `⚠️  CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
+        `⚠️  MIN CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
           2
         )} is below minimum $${strategyData.minPrice}`
       );
@@ -483,12 +521,17 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           2
         )} to minimum $${strategyData.minPrice}`
       );
-      newPriceFromStrategy = strategyData.minPrice;
+      newPriceFromStrategy = parseFloat(strategyData.minPrice);
     }
 
-    if (strategyData.maxPrice && newPriceFromStrategy > strategyData.maxPrice) {
+    // FIX: Apply max price constraint second
+    if (
+      strategyData.maxPrice !== undefined &&
+      strategyData.maxPrice !== null &&
+      newPriceFromStrategy > strategyData.maxPrice
+    ) {
       console.log(
-        `⚠️  CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
+        `⚠️  MAX CONSTRAINT: Calculated price $${newPriceFromStrategy.toFixed(
           2
         )} is above maximum $${strategyData.maxPrice}`
       );
@@ -497,27 +540,32 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           2
         )} to maximum $${strategyData.maxPrice}`
       );
-      newPriceFromStrategy = strategyData.maxPrice;
+      newPriceFromStrategy = parseFloat(strategyData.maxPrice);
     }
 
-    if (originalCalculatedPrice !== newPriceFromStrategy) {
+    const finalConstrainedPrice = newPriceFromStrategy;
+    const constraintApplied = originalCalculatedPrice !== finalConstrainedPrice;
+
+    if (constraintApplied) {
       console.log(
         `🚨 PRICE CONSTRAINT APPLIED: Strategy wanted $${originalCalculatedPrice.toFixed(
           2
-        )} but was limited to $${newPriceFromStrategy.toFixed(2)}`
+        )} but was limited to $${finalConstrainedPrice.toFixed(2)}`
       );
     } else {
       console.log(
-        `✅ PRICE WITHIN LIMITS: Using strategy calculation $${newPriceFromStrategy.toFixed(
+        `✅ PRICE WITHIN LIMITS: Using strategy calculation $${finalConstrainedPrice.toFixed(
           2
         )}`
       );
     }
 
     console.log(
-      `🧮 Final calculated price for ${itemId}: $${newPriceFromStrategy.toFixed(
+      `🧮 FINAL calculated price for ${itemId}: $${finalConstrainedPrice.toFixed(
         2
-      )}`
+      )} (original: $${originalCalculatedPrice.toFixed(
+        2
+      )}, constrained: ${constraintApplied})`
     );
 
     // Get the item's details to check if it has variations/SKUs and Best Offer settings
@@ -714,18 +762,17 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           '../services/historyService.js'
         );
 
-        // FIX: Ensure all required data is properly formatted
         const priceChangeData = {
           userId: user._id,
           itemId,
-          sku: itemSku || null, // Allow null SKU
+          sku: itemSku || null,
           title: item.Title || null,
           oldPrice: myLandedPriceBefore, // My Landed Price (before change)
           newPrice: parseFloat(newPriceFromStrategy.toFixed(2)), // Sent Price (new price from strategy)
           currency: 'USD',
           competitorLowestPrice: competitorLowestPrice, // Competition Lowest Price
           strategyName: strategyData.strategyName, // Strategy Name from dropdown
-          status: 'completed', // Use 'completed' instead of statusForHistory variable
+          status: statusForHistory, // "completed" for successful API calls
           source: 'strategy',
           apiResponse: {
             ack: updateResult[responseKey].Ack,
@@ -764,11 +811,6 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
           `📝 ❌ FAILED to save price change to MongoDB:`,
           historyError
         );
-        console.error(`📝 ❌ Full error details:`, {
-          message: historyError.message,
-          stack: historyError.stack,
-          name: historyError.name,
-        });
       }
 
       return {
@@ -800,7 +842,7 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
         const failedPriceChangeData = {
           userId: user._id,
           itemId,
-          sku: itemSku || null, // Allow null SKU
+          sku: itemSku || null,
           title: item.Title || null,
           oldPrice: myLandedPriceBefore, // My Landed Price (before change)
           newPrice: parseFloat(newPriceFromStrategy.toFixed(2)), // Sent Price (attempted)
@@ -827,3 +869,82 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
 
         console.log(
           `📝 ✅ Failed price change attempt saved to MongoDB:`,
+          historyRecord._id
+        );
+      } catch (historyError) {
+        console.error(
+          `📝 ❌ FAILED to save failed price change to MongoDB:`,
+          historyError.message
+        );
+      }
+
+      console.error(
+        `❌ eBay API error for strategy update ${itemId}:`,
+        criticalErrors.length > 0 ? criticalErrors : errors
+      );
+      return {
+        success: false,
+        itemId,
+        sku: itemSku || null,
+        newPrice: newPriceFromStrategy.toFixed(2),
+        message: 'Strategy calculation successful but eBay update failed',
+        error: criticalErrors.length > 0 ? criticalErrors : errors,
+        warnings: warnings,
+      };
+    }
+  } catch (error) {
+    console.error(
+      `❌ Error in strategy price update for ${itemId}:`,
+      error.message
+    );
+
+    // 📝 SAVE TO MONGODB - Record the ERROR
+    try {
+      const { recordPriceChange } = await import(
+        '../services/historyService.js'
+      );
+
+      await recordPriceChange({
+        userId,
+        itemId,
+        sku: null,
+        title: null,
+        oldPrice: null,
+        newPrice: null,
+        currency: 'USD',
+        competitorLowestPrice: null,
+        strategyName: strategyData?.strategyName || null,
+        status: 'failed',
+        source: 'strategy',
+        apiResponse: null,
+        success: false,
+        error: error.message,
+        metadata: {
+          errorType: 'system_error',
+          errorLocation: 'updatePriceViaStrategy',
+        },
+      });
+
+      console.log(`📝 ✅ Error record saved to MongoDB`);
+    } catch (historyError) {
+      console.error(
+        `📝 ❌ Failed to save error to MongoDB:`,
+        historyError.message
+      );
+    }
+
+    return {
+      success: false,
+      itemId,
+      message: 'Strategy price update failed',
+      error: error.message,
+    };
+  }
+};
+
+export default {
+  getItemVariations,
+  editVariationPrice,
+  editAllVariationsPrices,
+  updatePriceViaStrategy, // Export the new strategy function
+};

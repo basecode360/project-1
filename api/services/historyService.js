@@ -49,31 +49,62 @@ export async function recordPriceChange({
   error = null,
   metadata = {},
 }) {
-  console.log(`📝 💾 recordPriceChange called with:`, {
-    userId,
+  console.log(
+    `📝 💾 =================== recordPriceChange CALLED ===================`
+  );
+  console.log(`📝 💾 Function parameters received:`, {
+    userId: userId ? userId.toString() : 'NULL',
     itemId,
     sku,
+    title,
     oldPrice,
     newPrice,
+    currency,
+    competitorLowestPrice,
     strategyName,
     status,
+    source,
     success,
+    error,
+    metadataKeys: Object.keys(metadata),
   });
 
-  // Check MongoDB connection
+  // Check MongoDB connection with more detail
   const mongoose = (await import('mongoose')).default;
+  console.log(`📝 💾 MongoDB connection details:`);
   console.log(
-    `📝 💾 MongoDB connection state: ${mongoose.connection.readyState}`
+    `📝 💾   - Connection state: ${mongoose.connection.readyState} (0=disconnected, 1=connected, 2=connecting, 3=disconnecting)`
   );
-  console.log(`📝 💾 MongoDB database name: ${mongoose.connection.name}`);
-  console.log(`📝 💾 MongoDB host: ${mongoose.connection.host}`);
+  console.log(`📝 💾   - Database name: ${mongoose.connection.name}`);
+  console.log(`📝 💾   - Database host: ${mongoose.connection.host}`);
+  console.log(`📝 💾   - Database port: ${mongoose.connection.port}`);
+
+  // Check if PriceHistory model is available
+  try {
+    console.log(`📝 💾 PriceHistory model check:`);
+    console.log(`📝 💾   - Model name: ${PriceHistory.modelName}`);
+    console.log(`📝 💾   - Collection name: ${PriceHistory.collection.name}`);
+    console.log(
+      `📝 💾   - Collection namespace: ${PriceHistory.collection.namespace}`
+    );
+  } catch (modelError) {
+    console.error(`📝 ❌ PriceHistory model error:`, modelError);
+  }
 
   // FIX: Allow sku to be null or empty string (not require it to be defined)
   if (!itemId || newPrice == null || status == null || success == null) {
     const errorMsg = 'itemId, newPrice, status, and success are all required.';
     console.error(`📝 ❌ Validation error:`, errorMsg);
+    console.error(`📝 ❌ Received values:`, {
+      itemId,
+      newPrice,
+      status,
+      success,
+    });
     throw new Error(errorMsg);
   }
+
+  console.log(`📝 ✅ Basic validation passed`);
 
   // FIX: Handle sku properly - allow null/undefined/empty string
   const cleanSku = sku || null;
@@ -95,12 +126,19 @@ export async function recordPriceChange({
     else changeDirection = 'unchanged';
   }
 
-  console.log(`📝 💾 Creating PriceHistory record in MongoDB...`);
+  console.log(`📝 💾 Calculated values:`, {
+    cleanSku,
+    changeAmount,
+    changePercentage,
+    changeDirection,
+  });
 
-  const record = new PriceHistory({
+  console.log(`📝 💾 Creating PriceHistory record object...`);
+
+  const recordData = {
     userId,
     itemId,
-    sku: cleanSku, // Use cleaned SKU
+    sku: cleanSku,
     title,
     oldPrice: oldPrice != null ? Number(oldPrice) : null,
     newPrice: Number(newPrice),
@@ -118,41 +156,101 @@ export async function recordPriceChange({
     success,
     error,
     metadata,
-  });
+  };
 
   console.log(
-    `📝 💾 Record before save:`,
-    JSON.stringify(record.toObject(), null, 2)
+    `📝 💾 =================== RECORD DATA OBJECT ===================`
   );
+  console.log(JSON.stringify(recordData, null, 2));
   console.log(
-    `📝 💾 Saving record to MongoDB collection: ${PriceHistory.collection.name}`
+    `📝 💾 =========================================================`
   );
 
   try {
+    console.log(`📝 💾 Creating new PriceHistory instance...`);
+    const record = new PriceHistory(recordData);
+
+    console.log(`📝 💾 PriceHistory instance created:`, {
+      _id: record._id,
+      itemId: record.itemId,
+      newPrice: record.newPrice,
+      status: record.status,
+      success: record.success,
+    });
+
+    console.log(`📝 💾 Validating record before save...`);
+    const validationError = record.validateSync();
+    if (validationError) {
+      console.error(`📝 ❌ Validation failed:`, validationError.errors);
+      throw validationError;
+    }
+    console.log(`📝 ✅ Record validation passed`);
+
+    console.log(`📝 💾 ATTEMPTING TO SAVE TO MONGODB...`);
+    console.log(`📝 💾 Collection: ${PriceHistory.collection.name}`);
+    console.log(`📝 💾 Database: ${mongoose.connection.name}`);
+
     const savedRecord = await record.save();
+
     console.log(
-      `📝 ✅ SUCCESSFULLY saved to MongoDB! Collection: ${PriceHistory.collection.name}`
+      `📝 ✅ =================== MONGODB SAVE SUCCESSFUL ===================`
     );
+    console.log(`📝 ✅ SUCCESSFULLY saved to MongoDB!`);
+    console.log(`📝 ✅ Collection: ${PriceHistory.collection.name}`);
     console.log(`📝 ✅ Record ID: ${savedRecord._id}`);
+    console.log(`📝 ✅ Saved record summary:`, {
+      _id: savedRecord._id,
+      itemId: savedRecord.itemId,
+      newPrice: savedRecord.newPrice,
+      oldPrice: savedRecord.oldPrice,
+      strategyName: savedRecord.strategyName,
+      status: savedRecord.status,
+      success: savedRecord.success,
+      createdAt: savedRecord.createdAt,
+      updatedAt: savedRecord.updatedAt,
+    });
     console.log(
       `📝 ✅ Full saved record:`,
       JSON.stringify(savedRecord.toObject(), null, 2)
     );
 
-    // Verify the save by querying immediately
+    // Immediate verification
+    console.log(`📝 🔍 IMMEDIATE VERIFICATION: Querying saved record...`);
     const verification = await PriceHistory.findById(savedRecord._id);
-    console.log(`📝 ✅ Verification query successful:`, !!verification);
+    if (verification) {
+      console.log(
+        `📝 ✅ VERIFICATION SUCCESSFUL: Record found immediately after save`
+      );
+      console.log(`📝 ✅ Verification record ID: ${verification._id}`);
+    } else {
+      console.log(
+        `📝 ❌ VERIFICATION FAILED: Record NOT found immediately after save`
+      );
+    }
 
+    console.log(
+      `📝 ✅ ================================================================`
+    );
     return savedRecord;
   } catch (saveError) {
+    console.error(
+      `📝 ❌ =================== MONGODB SAVE FAILED ===================`
+    );
     console.error(`📝 ❌ FAILED to save to MongoDB:`, saveError);
+    console.error(`📝 ❌ Error name: ${saveError.name}`);
+    console.error(`📝 ❌ Error message: ${saveError.message}`);
+    console.error(`📝 ❌ Error code: ${saveError.code}`);
     console.error(`📝 ❌ Collection name: ${PriceHistory.collection.name}`);
-    console.error(`📝 ❌ MongoDB save error details:`, {
-      message: saveError.message,
-      code: saveError.code,
-      name: saveError.name,
-      validationErrors: saveError.errors,
-    });
+    if (saveError.errors) {
+      console.error(`📝 ❌ Validation errors:`);
+      Object.keys(saveError.errors).forEach((key) => {
+        console.error(`📝 ❌   - ${key}: ${saveError.errors[key].message}`);
+      });
+    }
+    console.error(`📝 ❌ Full error object:`, saveError);
+    console.error(
+      `📝 ❌ ================================================================`
+    );
     throw saveError;
   }
 }
@@ -171,8 +269,9 @@ export async function fetchRawPriceHistory({
   limit = 100,
 }) {
   console.log(
-    `📊 🔍 fetchRawPriceHistory called for itemId: ${itemId}, limit: ${limit}`
+    `📊 🔍 =================== fetchRawPriceHistory CALLED ===================`
   );
+  console.log(`📊 🔍 Parameters: itemId=${itemId}, sku=${sku}, limit=${limit}`);
   console.log(`📊 🔍 Collection name: ${PriceHistory.collection.name}`);
 
   // Check MongoDB connection
@@ -189,72 +288,65 @@ export async function fetchRawPriceHistory({
   const query = { itemId };
   if (sku) query.sku = sku;
 
-  console.log(`📊 🔍 Querying MongoDB with:`, query);
+  console.log(`📊 🔍 Query object:`, JSON.stringify(query, null, 2));
 
   try {
-    // First, let's check ALL collections in the database
-    const collections = await mongoose.connection.db.collections();
-    console.log(
-      `📊 💾 All collections in database:`,
-      collections.map((c) => c.collectionName)
-    );
-
-    // Check if our collection exists
-    const priceHistoryExists = collections.some(
-      (c) => c.collectionName === 'pricehistories'
-    );
-    console.log(`📊 💾 PriceHistory collection exists: ${priceHistoryExists}`);
-
-    // First, let's check if ANY records exist for this itemId
-    const totalCount = await PriceHistory.countDocuments({ itemId });
-    console.log(
-      `📊 💾 Total records in MongoDB for itemId ${itemId}: ${totalCount}`
-    );
-
-    // Also check total records in collection
+    // First check total records in collection
     const totalInCollection = await PriceHistory.countDocuments({});
     console.log(
       `📊 💾 Total records in entire PriceHistory collection: ${totalInCollection}`
     );
 
-    // Let's also check what itemIds exist in the collection
+    // Check records for this specific itemId
+    const totalCount = await PriceHistory.countDocuments({ itemId });
+    console.log(`📊 💾 Total records for itemId ${itemId}: ${totalCount}`);
+
+    // List all unique itemIds in collection
     const uniqueItemIds = await PriceHistory.distinct('itemId');
-    console.log(`📊 💾 Unique itemIds in collection:`, uniqueItemIds);
+    console.log(
+      `📊 💾 Unique itemIds in collection (${uniqueItemIds.length}):`,
+      uniqueItemIds
+    );
 
-    // If we have records, let's see a sample
-    if (totalCount > 0) {
-      const sampleRecord = await PriceHistory.findOne({ itemId }).sort({
-        createdAt: -1,
-      });
-      console.log(`📊 💾 Sample record for ${itemId}:`, {
-        _id: sampleRecord._id,
-        itemId: sampleRecord.itemId,
-        newPrice: sampleRecord.newPrice,
-        changeAmount: sampleRecord.changeAmount,
-        strategyName: sampleRecord.strategyName,
-        success: sampleRecord.success,
-        createdAt: sampleRecord.createdAt,
-      });
-    }
+    // Get sample of latest records in collection
+    const latestRecords = await PriceHistory.find({})
+      .sort({ createdAt: -1 })
+      .limit(5);
+    console.log(
+      `📊 💾 Latest 5 records in collection:`,
+      latestRecords.map((r) => ({
+        _id: r._id,
+        itemId: r.itemId,
+        newPrice: r.newPrice,
+        strategyName: r.strategyName,
+        createdAt: r.createdAt,
+      }))
+    );
 
+    // Now query for specific records
+    console.log(`📊 🔍 Executing main query with limit ${limit}...`);
     const records = await PriceHistory.find(query)
       .sort({ createdAt: -1 })
       .limit(limit);
+
     console.log(
-      `📊 ✅ Found ${
-        records.length
-      } records in MongoDB for ${itemId} (query: ${JSON.stringify(query)})`
+      `📊 ✅ Query completed. Found ${records.length} records for itemId ${itemId}`
     );
 
     if (records.length > 0) {
-      console.log(`📊 ✅ Latest record sample:`, {
-        _id: records[0]._id,
-        itemId: records[0].itemId,
-        newPrice: records[0].newPrice,
-        changeAmount: records[0].changeAmount,
-        strategyName: records[0].strategyName,
-        createdAt: records[0].createdAt,
-      });
+      console.log(
+        `📊 ✅ Sample of found records:`,
+        records.slice(0, 3).map((r) => ({
+          _id: r._id,
+          itemId: r.itemId,
+          newPrice: r.newPrice,
+          oldPrice: r.oldPrice,
+          strategyName: r.strategyName,
+          status: r.status,
+          success: r.success,
+          createdAt: r.createdAt,
+        }))
+      );
     } else {
       console.log(
         `📊 ⚠️ No records found for itemId ${itemId} with query:`,
@@ -262,6 +354,9 @@ export async function fetchRawPriceHistory({
       );
     }
 
+    console.log(
+      `📊 🔍 ================================================================`
+    );
     return records;
   } catch (fetchError) {
     console.error(`📊 ❌ Error fetching from MongoDB:`, fetchError);

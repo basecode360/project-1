@@ -333,17 +333,20 @@ async function getCurrentEbayPrice(itemId) {
     );
     const result = await getRealPrice(itemId);
 
-    if (result.success) {
+    if (result.success && result.price) {
+      console.log(`💰 Got real current price for ${itemId}: $${result.price}`);
       return result.price;
     } else {
       console.log(
-        `Could not get current price for item ${itemId}, using fallback`
+        `Could not get current price for item ${itemId} - no fallback used`
       );
-      return 54.65; // Fallback price
+      // FIX: Return null instead of hardcoded fallback
+      return null;
     }
   } catch (error) {
     console.error(`Error getting current eBay price for ${itemId}:`, error);
-    return 54.65; // Fallback price
+    // FIX: Return null instead of hardcoded fallback
+    return null;
   }
 }
 
@@ -674,140 +677,138 @@ export async function executeAllActiveStrategies() {
 /**
  * Execute strategies for a specific item using the proven editProduct method
  */
-export async function executeStrategiesForItem(itemId) {
+export async function executeStrategiesForItem(itemId, userId = null) {
   try {
-    console.log(`🚀 Executing pricing strategy for ${itemId}...`);
+    console.log(`🚀 Executing strategies for item: ${itemId}`);
 
-    // Get strategies for this item
+    // Get all strategies for this item
     const strategies = await getStrategiesForItem(itemId);
 
     if (!strategies || strategies.length === 0) {
-      console.log(`❌ No strategies found for item ${itemId}`);
+      console.log(`⚠️ No strategies found for item ${itemId}`);
       return {
         success: false,
         message: `No strategies found for item ${itemId}`,
-        itemId,
+        results: [],
       };
     }
 
-    // Use the first (most recent) strategy
-    const strategy = strategies[0];
-    console.log(`🚀 Executing pricing strategy for item ${itemId}:`, {
-      strategyName: strategy.strategyName,
-      repricingRule: strategy.repricingRule,
-      value: strategy.value,
-      minPrice: strategy.minPrice,
-      maxPrice: strategy.maxPrice,
-    });
+    console.log(`📋 Found ${strategies.length} strategies for item ${itemId}`);
 
-    // Get the user who created this strategy
-    const User = (await import('../models/Users.js')).default;
-    const user = await User.findById(strategy.createdBy);
+    const results = [];
 
-    if (!user) {
-      // Fallback: get any user with eBay credentials
-      const fallbackUser = await User.findOne({
-        'ebay.accessToken': { $exists: true },
-      });
-      if (!fallbackUser) {
-        throw new Error('No user with eBay credentials found');
-      }
-    }
-
-    const userId =
-      user?._id ||
-      (await User.findOne({ 'ebay.accessToken': { $exists: true } }))._id;
-
-    // Import the editProduct module and get the function
-    const editProductModule = await import('./editProduct.js');
-
-    // Check if the function exists
-    if (
-      !editProductModule.default ||
-      !editProductModule.default.updatePriceViaStrategy
-    ) {
-      console.error(
-        '❌ updatePriceViaStrategy function not found in editProduct module'
-      );
-      console.log(
-        'Available exports:',
-        Object.keys(editProductModule.default || {})
-      );
-
-      // Fallback to the direct strategy execution
-      const result = await executePricingStrategy(itemId, strategy);
-
-      if (result.success) {
+    // Execute each strategy
+    for (const strategy of strategies) {
+      try {
         console.log(
-          `✅ Successfully updated price for item ${itemId} (fallback method)`
+          `🔧 Executing strategy: ${strategy.strategyName} for item ${itemId}`
         );
 
-        // Update strategy usage statistics
-        strategy.lastUsed = new Date();
-        strategy.usageCount = (strategy.usageCount || 0) + 1;
-        await strategy.save();
-
-        return {
-          success: true,
-          message: `Successfully updated price for item ${itemId} (fallback)`,
-          itemId,
-          results: [result],
-          priceUpdated: true,
+        // FIX: Ensure min/max prices are properly passed to the strategy execution
+        const strategyData = {
+          strategyName: strategy.strategyName,
+          repricingRule: strategy.repricingRule,
+          beatBy: strategy.beatBy,
+          stayAboveBy: strategy.stayAboveBy,
+          value: strategy.value,
+          minPrice: strategy.minPrice, // ✅ Make sure this is included
+          maxPrice: strategy.maxPrice, // ✅ Make sure this is included
+          noCompetitionAction: strategy.noCompetitionAction,
         };
-      } else {
-        console.log(
-          `❌ Failed to update price for item ${itemId}: ${result.reason}`
+
+        console.log(`📊 Strategy data being passed:`, {
+          strategyName: strategyData.strategyName,
+          repricingRule: strategyData.repricingRule,
+          minPrice: strategyData.minPrice,
+          maxPrice: strategyData.maxPrice,
+          value: strategyData.value,
+        });
+
+        // Get userId from strategy if not provided
+        const executionUserId = userId || strategy.createdBy;
+
+        if (!executionUserId) {
+          console.log(`❌ No userId found for strategy execution`);
+          results.push({
+            success: false,
+            itemId,
+            strategyName: strategy.strategyName,
+            error: 'No userId found for execution',
+          });
+          continue;
+        }
+
+        // FIX: Import the function properly using default export
+        const editProductModule = await import('./editProduct.js');
+        const updatePriceViaStrategy =
+          editProductModule.default.updatePriceViaStrategy;
+
+        if (!updatePriceViaStrategy) {
+          console.error(
+            `❌ updatePriceViaStrategy function not found in editProduct module`
+          );
+          results.push({
+            success: false,
+            itemId,
+            strategyName: strategy.strategyName,
+            error: 'updatePriceViaStrategy function not available',
+          });
+          continue;
+        }
+
+        const result = await updatePriceViaStrategy(
+          itemId,
+          strategyData,
+          executionUserId
         );
-        return {
+
+        console.log(
+          `✅ Strategy execution result for ${strategy.strategyName}:`,
+          {
+            success: result.success,
+            priceUpdated: result.priceUpdated,
+            newPrice: result.newPrice,
+            message: result.message,
+          }
+        );
+
+        results.push({
+          success: result.success,
+          itemId,
+          strategyName: strategy.strategyName,
+          oldPrice: result.oldPrice,
+          newPrice: result.newPrice,
+          priceUpdated: result.priceUpdated,
+          message: result.message,
+          constraintApplied: result.constraintApplied,
+        });
+      } catch (strategyError) {
+        console.error(
+          `❌ Error executing strategy ${strategy.strategyName}:`,
+          strategyError
+        );
+        results.push({
           success: false,
-          message: `Failed to update price for item ${itemId}: ${result.reason}`,
           itemId,
-          results: [result],
-        };
+          strategyName: strategy.strategyName,
+          error: strategyError.message,
+        });
       }
     }
 
-    // Use the proven editProduct method for price updates
-    const result = await editProductModule.default.updatePriceViaStrategy(
-      itemId,
-      strategy,
-      userId
-    );
+    const successCount = results.filter((r) => r.success).length;
 
-    if (result.success) {
-      console.log(
-        `✅ Successfully updated price for item ${itemId}: ${result.oldPrice} → ${result.newPrice}`
-      );
-
-      // Update strategy usage statistics
-      strategy.lastUsed = new Date();
-      strategy.usageCount = (strategy.usageCount || 0) + 1;
-      await strategy.save();
-
-      return {
-        success: true,
-        message: `Successfully updated price for item ${itemId}`,
-        itemId,
-        results: [result],
-        priceUpdated: true,
-      };
-    } else {
-      console.log(
-        `❌ Failed to update price for item ${itemId}: ${result.error}`
-      );
-      return {
-        success: false,
-        message: `Failed to update price for item ${itemId}: ${result.error}`,
-        itemId,
-        results: [result],
-      };
-    }
+    return {
+      success: successCount > 0,
+      message: `Executed ${successCount}/${strategies.length} strategies for item ${itemId}`,
+      results,
+    };
   } catch (error) {
     console.error(`❌ Error executing strategies for item ${itemId}:`, error);
     return {
       success: false,
-      error: error.message,
-      itemId,
+      message: `Error executing strategies: ${error.message}`,
+      results: [],
     };
   }
 }
@@ -965,17 +966,15 @@ export async function applyStrategiesToProduct(
         `📋 Strategy ${strategy.strategyName} applied to item ${itemId}`
       );
 
-      // Execute pricing strategy immediately to update the price
-      console.log(`🚀 Executing pricing strategy for ${itemId}...`);
-      const priceUpdateResult = await executePricingStrategy(itemId, strategy);
-
+      // FIX: Don't execute pricing strategy immediately here since we'll do it after all strategies are applied
       results.push({
         strategyId,
         success: true,
         strategyName: strategy.strategyName,
         repricingRule: strategy.repricingRule,
-        priceUpdated: priceUpdateResult.success,
-        priceUpdateDetails: priceUpdateResult,
+        minPrice: strategy.minPrice,
+        maxPrice: strategy.maxPrice,
+        message: `Strategy ${strategy.strategyName} applied successfully`,
       });
     } catch (error) {
       results.push({

@@ -59,85 +59,38 @@ function getUpdatedPrice(itemId, sku) {
 }
 
 /**
- * Fallback mock listings when eBay API is not available
- */
-function getMockListings() {
-  console.log('📊 Using mock listings as fallback');
-
-  // Since we're updating eBay directly, just use the standard mock data
-  // The real solution is to fix the eBay token authentication
-  return {
-    success: true,
-    data: {
-      GetMyeBaySellingResponse: {
-        ActiveList: {
-          ItemArray: {
-            Item: [
-              {
-                ItemID: '388431853501',
-                Title:
-                  'Front Fog Light Cover Right Passenger Side Textured For 2013-2015 Nissan Altima',
-                BuyItNowPrice: '54.65', // This should come from real eBay once token is fixed
-                Quantity: '9',
-                SKU: 'PART123',
-                SellingStatus: {
-                  ListingStatus: 'Active',
-                },
-                ConditionDisplayName: 'New',
-              },
-              {
-                ItemID: '388431851660',
-                Title:
-                  'Interior Door Handle Driver Left Side For 2001-2005 Kia Rio',
-                BuyItNowPrice: '25.99',
-                Quantity: '15',
-                SKU: 'PART124',
-                SellingStatus: {
-                  ListingStatus: 'Active',
-                },
-                ConditionDisplayName: 'New',
-              },
-            ],
-          },
-        },
-      },
-    },
-  };
-}
-
-/**
  * Get active eBay listings using Trading API
  */
 export async function getActiveListings(userId = null) {
   try {
     console.log(
-      '[inventoryService] Getting REAL eBay listings from Trading API...'
+      `[inventoryService] Getting REAL eBay listings from Trading API...`
     );
 
-    // Get user with eBay credentials
-    let user = null;
+    // Get user token if userId provided
+    let authToken = null;
     if (userId) {
-      user = await User.findById(userId);
-    } else {
-      // Get any user with eBay credentials as fallback
-      user = await User.findOne({ 'ebay.accessToken': { $exists: true } });
+      const user = await User.findById(userId);
+      if (user && user.ebay.accessToken) {
+        authToken = user.ebay.accessToken;
+      }
     }
 
-    if (!user || !user.ebay.accessToken) {
-      console.log('No eBay credentials found, falling back to mock data');
-      return getMockListings();
+    if (!authToken) {
+      // Use environment token as fallback
+      authToken = process.env.EBAY_ACCESS_TOKEN;
     }
 
-    const authToken = user.ebay.accessToken;
+    if (!authToken) {
+      throw new Error('No eBay access token available');
+    }
 
-    // Add environment debugging
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
     console.log(
       `🔑 Using eBay token starting with: ${authToken.substring(0, 20)}...`
     );
     console.log(`🔑 Token length: ${authToken.length} characters`);
 
-    // Use eBay Trading API to get real listings
     const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -146,22 +99,21 @@ export async function getActiveListings(userId = null) {
   <ActiveList>
     <Include>true</Include>
     <Pagination>
-      <EntriesPerPage>50</EntriesPerPage>
+      <EntriesPerPage>200</EntriesPerPage>
       <PageNumber>1</PageNumber>
     </Pagination>
   </ActiveList>
   <DetailLevel>ReturnAll</DetailLevel>
 </GetMyeBaySellingRequest>`;
 
-    console.log('📤 Sending request to eBay Trading API...');
+    console.log(`📤 Sending request to eBay Trading API...`);
 
     const response = await axios({
       method: 'POST',
-      // FIXED: Use same logic as editProduct.js
       url:
-        process.env.NODE_ENV === 'development'
-          ? 'https://api.ebay.com/ws/api.dll' // PRODUCTION when development
-          : 'https://api.sandbox.ebay.com/ws/api.dll', // SANDBOX when production
+        process.env.NODE_ENV === 'production'
+          ? 'https://api.ebay.com/ws/api.dll'
+          : 'https://api.sandbox.ebay.com/ws/api.dll',
       headers: {
         'Content-Type': 'text/xml',
         'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
@@ -184,52 +136,30 @@ export async function getActiveListings(userId = null) {
       });
     });
 
-    const sellingResponse = result.GetMyeBaySellingResponse;
+    const ebayResponse = result.GetMyeBaySellingResponse;
 
-    if (
-      sellingResponse.Ack === 'Success' ||
-      sellingResponse.Ack === 'Warning'
-    ) {
-      console.log('✅ Successfully retrieved real eBay listings');
-
-      // Process real eBay data
-      const activeList = sellingResponse.ActiveList;
-      let items = [];
-
-      if (activeList && activeList.ItemArray) {
-        if (Array.isArray(activeList.ItemArray.Item)) {
-          items = activeList.ItemArray.Item;
-        } else if (activeList.ItemArray.Item) {
-          items = [activeList.ItemArray.Item];
-        }
-      }
-
-      console.log(`📊 Found ${items.length} real eBay listings`);
-
+    if (ebayResponse.Ack === 'Success' || ebayResponse.Ack === 'Warning') {
+      console.log(`✅ eBay API success: ${ebayResponse.Ack}`);
       return {
         success: true,
-        data: {
-          GetMyeBaySellingResponse: {
-            ActiveList: {
-              ItemArray: {
-                Item: items,
-              },
-            },
-          },
-        },
+        data: result,
       };
     } else {
-      console.error('❌ eBay API returned error:', sellingResponse.Errors);
-      console.log('📊 Falling back to mock listings due to eBay API error');
-      return getMockListings();
+      const errors = ebayResponse.Errors;
+      console.error(`❌ eBay API returned error:`, errors);
+
+      // FIX: Don't fall back to mock data, return actual error
+      throw new Error(
+        `eBay API Error: ${
+          errors?.LongMessage || errors?.ShortMessage || 'Unknown error'
+        }`
+      );
     }
   } catch (error) {
-    console.error(
-      '[inventoryService] Error getting real eBay listings:',
-      error
-    );
-    console.log('📊 Falling back to mock listings due to exception');
-    return getMockListings();
+    console.error(`❌ eBay API Error in getActiveListings:`, error.message);
+
+    // FIX: Don't return mock data, throw the actual error
+    throw new Error(`Failed to fetch eBay listings: ${error.message}`);
   }
 }
 
