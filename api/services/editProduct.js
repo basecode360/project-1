@@ -126,23 +126,41 @@ const editVariationPrice = async (req, res) => {
       userId = null,
     } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId is required in request body',
-      });
+    // Handle system calls (from strategy service)
+    let user = null;
+    if (userId === 'system_update') {
+      // For system updates, we need to get a default user with eBay credentials
+      // This is a temporary solution - in production you'd handle this differently
+      console.log('System price update - using default eBay credentials');
+      user = await User.findOne({ 'ebay.accessToken': { $exists: true } });
+      if (!user) {
+        console.error('No user with eBay credentials found for system update');
+        return res.status(400).json({
+          success: false,
+          message: 'No eBay credentials available for system update',
+        });
+      }
+    } else {
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'userId is required in request body',
+        });
+      }
+
+      // Get user's eBay token
+      user = await User.findById(userId);
+      if (!user || !user.ebay.accessToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'No eBay credentials found for this user',
+        });
+      }
     }
 
-    // Get user's eBay token
-    const user = await User.findById(userId);
-    if (!user || !user.ebay.accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'No eBay credentials found for this user',
-      });
-    }
-
-    console.log(`itemId => ${itemId}, price => ${price}, sku => ${sku}`);
+    console.log(
+      `🔄 Updating eBay price: itemId => ${itemId}, price => ${price}, sku => ${sku}`
+    );
 
     if (!itemId || !price || !sku) {
       return res.status(400).json({
@@ -195,9 +213,9 @@ const editVariationPrice = async (req, res) => {
       changeAmount,
       changePercentage,
       changeDirection,
-      source: 'api',
+      source: userId === 'system_update' ? 'strategy' : 'api',
       success: false,
-      userId,
+      userId: userId === 'system_update' ? user._id : userId,
     });
 
     // Save the initial record to track the attempt
@@ -216,6 +234,10 @@ const editVariationPrice = async (req, res) => {
     <StartPrice>${price}</StartPrice>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
+
+    console.log(
+      `📤 Sending eBay API request to update price for ${itemId}/${sku}`
+    );
 
     const response = await axios({
       method: 'POST',
@@ -265,6 +287,10 @@ const editVariationPrice = async (req, res) => {
       // Save the updated record
       await priceRecord.save();
 
+      console.log(
+        `✅ eBay price update successful for ${itemId}: $${oldPrice} → $${price}`
+      );
+
       return res.status(200).json({
         success: true,
         message: `Price updated successfully to ${price} ${currency} for SKU: ${sku}`,
@@ -289,7 +315,7 @@ const editVariationPrice = async (req, res) => {
     }
   } catch (error) {
     const errorMessage = error.response?.data || error.message;
-    console.error('Error updating variation price:', errorMessage);
+    console.error('❌ Error updating variation price:', errorMessage);
 
     // Update the price history record with error info
     if (priceRecord) {

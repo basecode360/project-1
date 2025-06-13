@@ -66,14 +66,17 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/active-listings', requireAuth, async (req, res) => {
   try {
     const { userId, active } = req.query;
-    const isActive = active === 'true';
 
-    const strategies = await getAllStrategies(isActive, userId);
-    return res.status(200).json({
-      success: true,
-      strategies, // Wrap strategies in the specified format
-      rules: [], // Placeholder for rulesData if applicable
-    });
+    // Set the userId in req for the controller to use
+    if (userId) {
+      req.userId = userId;
+    }
+
+    // Call the controller function instead of service directly
+    const { getAllPricingStrategies } = await import(
+      '../controllers/pricingStrategyController.js'
+    );
+    return getAllPricingStrategies(req, res);
   } catch (err) {
     console.error('Error in GET /active-listings:', err.message);
     return res.status(500).json({ success: false, message: err.message });
@@ -188,7 +191,78 @@ router.post('/products/:itemId', requireAuth, async (req, res) => {
   }
 });
 
-// 6.6) Get strategies applied to a specific product
+// 6.7) Update/Apply strategy to a specific product/item (PUT method)
+//      PUT /api/pricing-strategies/products/:itemId
+router.put('/products/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const strategyData = req.body;
+
+    // If the request contains a strategy ID, apply it to the product
+    if (strategyData._id || strategyData.strategyId) {
+      const strategyId = strategyData._id || strategyData.strategyId;
+      const results = await applyStrategiesToProduct(
+        itemId,
+        [strategyId],
+        null
+      );
+
+      return res.json({
+        success: true,
+        message: `Strategy applied to item ${itemId}`,
+        results,
+      });
+    }
+
+    // If strategyIds array is provided, apply multiple strategies
+    if (strategyData.strategyIds && Array.isArray(strategyData.strategyIds)) {
+      const results = await applyStrategiesToProduct(
+        itemId,
+        strategyData.strategyIds,
+        strategyData.sku || null
+      );
+      const successCount = results.filter((r) => r.success).length;
+
+      return res.json({
+        success: true,
+        message: `Applied ${successCount} of ${strategyData.strategyIds.length} strategies to item ${itemId}`,
+        results,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Strategy ID or strategyIds array is required',
+    });
+  } catch (err) {
+    console.error('Error updating strategies for product:', err);
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 6.8) Get strategy display information for a product (MOVE THIS BEFORE THE GENERAL GET)
+//      GET /api/pricing-strategies/products/:itemId/display
+router.get('/products/:itemId/display', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { sku = null } = req.query;
+
+    const { getStrategyDisplayForProduct } = await import(
+      '../services/strategyService.js'
+    );
+    const displayInfo = await getStrategyDisplayForProduct(itemId, sku);
+
+    return res.json({
+      success: true,
+      data: displayInfo,
+    });
+  } catch (err) {
+    console.error('Error in GET /products/:itemId/display:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 6.6) Get strategies applied to a specific product (MOVE THIS AFTER THE DISPLAY ROUTE)
 //      GET /api/pricing-strategies/products/:itemId
 router.get('/products/:itemId', requireAuth, async (req, res) => {
   try {
@@ -238,6 +312,109 @@ router.delete('/:id/item/:itemId', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: err.message });
     }
     return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 6.9) Execute all active strategies manually
+//      POST /api/pricing-strategies/execute-all
+router.post('/execute-all', requireAuth, async (req, res) => {
+  try {
+    const { executeAllStrategiesController } = await import(
+      '../controllers/pricingStrategyController.js'
+    );
+    return executeAllStrategiesController(req, res);
+  } catch (err) {
+    console.error('Error in POST /execute-all:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 6.10) Execute strategies for a specific item
+//       POST /api/pricing-strategies/products/:itemId/execute
+router.post('/products/:itemId/execute', requireAuth, async (req, res) => {
+  try {
+    const { executeStrategiesForItemController } = await import(
+      '../controllers/pricingStrategyController.js'
+    );
+    return executeStrategiesForItemController(req, res);
+  } catch (err) {
+    console.error('Error in POST /products/:itemId/execute:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 6.11) Force price update for a specific item
+//       POST /api/pricing-strategies/products/:itemId/update-price
+router.post('/products/:itemId/update-price', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const userId = req.user?.id;
+
+    console.log(
+      `🔄 Manual price update triggered for item ${itemId} by user ${userId}`
+    );
+
+    // Get strategies for this item
+    const strategies = await getStrategiesForItem(itemId);
+
+    if (!strategies || strategies.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No strategies found for this item',
+      });
+    }
+
+    // Execute the most recent strategy
+    const { executeStrategiesForItem } = await import(
+      '../services/strategyService.js'
+    );
+    const result = await executeStrategiesForItem(itemId);
+
+    // Also try to get competitor price for logging
+    try {
+      const { getCompetitorPrice } = await import(
+        '../services/inventoryService.js'
+      );
+      const competitorData = await getCompetitorPrice(itemId);
+
+      if (competitorData.success && competitorData.price) {
+        const competitorPrice = parseFloat(
+          competitorData.price.replace('USD', '')
+        );
+        const strategy = strategies[0]; // Use first strategy
+
+        let calculatedPrice = competitorPrice;
+        if (strategy.repricingRule === 'MATCH_LOWEST') {
+          calculatedPrice = competitorPrice;
+        }
+
+        // Apply min/max constraints
+        if (strategy.minPrice && calculatedPrice < strategy.minPrice) {
+          calculatedPrice = strategy.minPrice;
+        }
+        if (strategy.maxPrice && calculatedPrice > strategy.maxPrice) {
+          calculatedPrice = strategy.maxPrice;
+        }
+
+        console.log(
+          `💰 Price calculation for ${itemId}: competitor: $${competitorPrice}, calculated: $${calculatedPrice}`
+        );
+      }
+    } catch (competitorError) {
+      console.log(
+        'Could not get competitor price for logging:',
+        competitorError.message
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: `Price update completed for item ${itemId}`,
+      data: result,
+    });
+  } catch (err) {
+    console.error('Error in POST /products/:itemId/update-price:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 

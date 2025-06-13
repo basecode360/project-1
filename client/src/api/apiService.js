@@ -111,24 +111,61 @@ const inventory = {
     }
   },
   getCompetitorPrice: async (itemId) => {
+    console.log('[api] Fetching competitor price for:', itemId);
     try {
-      const resp = await apiClient.get(`/competitor-prices/${itemId}`);
-      const data = resp.data?.competitorPrices || {
-        allData: [],
-        allPrices: [],
-      };
-      const allPrices = Array.isArray(data.allPrices) ? data.allPrices : [];
-      return {
+      const userId = localStorage.getItem('user_id');
+      console.log('[api] Using userId:', userId);
+
+      if (!userId) {
+        console.error('[api] No userId found in localStorage');
+        return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
+      }
+
+      const resp = await apiClient.get(`/competitor-prices/${itemId}`, {
+        params: { userId },
+      });
+      console.log('[api] RAW competitor API response:', resp.data);
+
+      // Check if the response has the expected structure
+      if (!resp.data || !resp.data.success) {
+        console.error('[api] API response indicates failure:', resp.data);
+        return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
+      }
+
+      // Updated to match the actual API response structure
+      const competitorPrices = resp.data?.competitorPrices || {};
+      console.log('[api] Extracted competitorPrices:', competitorPrices);
+
+      const allPrices = Array.isArray(competitorPrices.allPrices)
+        ? competitorPrices.allPrices
+        : [];
+      const allData = Array.isArray(competitorPrices.allData)
+        ? competitorPrices.allData
+        : [];
+
+      console.log('[api] Extracted allPrices:', allPrices);
+      console.log('[api] Extracted allData length:', allData.length);
+
+      const result = {
         price:
           allPrices.length > 0
             ? `USD${parseFloat(Math.min(...allPrices)).toFixed(2)}`
             : 'USD0.00',
         count: allPrices.length,
         allPrices,
-        productInfo: data.allData,
+        productInfo: allData,
       };
+
+      console.log('[api] Final result:', result);
+      return result;
     } catch (err) {
-      console.error(`Error @ getCompetitorPrice(${itemId}):`, err);
+      console.error(`[api] Error @ getCompetitorPrice(${itemId}):`, err);
+      console.error('[api] Error details:', {
+        message: err.message,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+      });
       return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
     }
   },
@@ -290,15 +327,6 @@ const pricingStrategies = {
       throw err;
     }
   },
-  applyStrategyToProduct: async (itemId, applyData) => {
-    try {
-      const resp = await pricingClient.post(`/${itemId}/apply`, applyData);
-      return resp.data;
-    } catch (err) {
-      console.error('Error @ applyStrategyToProduct:', err);
-      throw err;
-    }
-  },
   applyStrategyBulk: async (applyData) => {
     try {
       const resp = await pricingClient.post(`/apply-bulk`, applyData);
@@ -314,10 +342,88 @@ const pricingStrategies = {
       const resp = await pricingClient.get(`/active-listings`, {
         params: { userId, active: true },
       });
-      return resp.data;
+
+      console.log('getAllUniqueStrategies response:', resp.data);
+
+      return {
+        success: resp.data.success,
+        strategies: resp.data.strategies || [],
+        count: resp.data.count || 0,
+      };
     } catch (err) {
       console.error('Error @ getAllUniqueStrategies:', err);
-      return { success: false, error: err.message };
+      return { success: false, error: err.message, strategies: [] };
+    }
+  },
+  getStrategyDisplayForProduct: async (itemId, sku = null) => {
+    try {
+      console.log(
+        `🔍 Fetching strategy display for item ${itemId}`,
+        sku ? `with SKU ${sku}` : ''
+      );
+
+      const params = sku ? `?sku=${encodeURIComponent(sku)}` : '';
+
+      // Add cache-busting timestamp to prevent stale data
+      const cacheBuster = `${params ? '&' : '?'}t=${Date.now()}`;
+
+      const response = await pricingClient.get(
+        `/products/${itemId}/display${params}${cacheBuster}`
+      );
+
+      console.log(`✅ Strategy display response for ${itemId}:`, response.data);
+      return response.data;
+    } catch (error) {
+      console.error(
+        `❌ Error getting strategy display for product ${itemId}:`,
+        error
+      );
+      console.error('Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+      });
+
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: {
+          strategy: 'Assign Strategy',
+          minPrice: 'Set',
+          maxPrice: 'Set',
+          hasStrategy: false,
+        },
+      };
+    }
+  },
+
+  updatePrice: async (itemId) => {
+    try {
+      console.log(`🔄 Triggering price update for item ${itemId}`);
+      const response = await pricingClient.post(
+        `/products/${itemId}/update-price`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating price for item ${itemId}:`, error);
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+      };
+    }
+  },
+
+  updateStrategy: async (strategyId, updateData) => {
+    try {
+      console.log(`🔄 Updating strategy ${strategyId} with:`, updateData);
+      const response = await pricingClient.put(`/${strategyId}`, updateData);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating strategy ${strategyId}:`, error);
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+      };
     }
   },
 };

@@ -51,7 +51,6 @@ async function makeEBayAPICall(xmlRequest, callName) {
 
 // ── Routes ──────────────────────────────────────────────────────────────────────
 
-
 router.get('/active-listings', fetchProducts.getActiveListings);
 
 /**
@@ -122,7 +121,7 @@ router.get('/competitor-prices/:itemId', async (req, res) => {
       `https://api.ebay.com/buy/browse/v1/item_summary/search?${query.toString()}`,
       {
         headers: {
-          Authorization: `Bearer ${appId}`,
+          Authorization: `Bearer ${oauthToken}`, // Fixed to use oauthToken
           'Content-Type': 'application/json',
         },
         timeout: 10000,

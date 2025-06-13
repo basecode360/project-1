@@ -10,6 +10,9 @@ import {
   getStrategiesForItem,
   removeStrategyFromItem,
   getActiveStrategies,
+  getStrategyDisplayForProduct,
+  executeAllActiveStrategies,
+  executeStrategiesForItem,
 } from '../services/strategyService.js';
 
 /**
@@ -104,12 +107,22 @@ const getAllPricingStrategies = async (req, res) => {
       isActive = false;
     }
 
-    const userId = req.user?._id; // Ensure userId is extracted correctly
+    // Handle userId from multiple sources: query param, route-set userId, or authenticated user
+    const userId = req.query.userId || req.userId || req.user?._id;
+
+    console.log(
+      'getAllPricingStrategies - userId:',
+      userId,
+      'isActive:',
+      isActive
+    );
+
     const strategies = await getAllStrategies(isActive, userId);
 
     return res.status(200).json({
       success: true,
       count: strategies.length,
+      strategies, // Return in the format expected by frontend
       data: strategies,
     });
   } catch (error) {
@@ -238,7 +251,7 @@ const deletePricingStrategy = async (req, res) => {
  * Apply a strategy to items
  * POST /api/pricing-strategies/:id/apply
  */
-const applyStrategyToItems = async (req, res) => {
+const applyStrategyToItemsController = async (req, res) => {
   try {
     const { id } = req.params;
     const { items } = req.body;
@@ -275,7 +288,7 @@ const applyStrategyToItems = async (req, res) => {
  * Get strategies applied to an item
  * GET /api/pricing-strategies/item/:itemId
  */
-const getStrategiesForItem = async (req, res) => {
+const getStrategiesForItemController = async (req, res) => {
   try {
     const { itemId } = req.params;
     const { sku } = req.query;
@@ -302,9 +315,8 @@ const getStrategiesForItem = async (req, res) => {
 
 /**
  * Remove a strategy from an item
- * DELETE /api/pricing-strategies/:id/item/:itemId
  */
-const removeStrategyFromItem = async (req, res) => {
+const removeStrategyFromItemController = async (req, res) => {
   try {
     const { id, itemId } = req.params;
     const { sku } = req.query;
@@ -351,14 +363,103 @@ const getActivePricingStrategies = async (req, res) => {
   }
 };
 
+/**
+ * Get strategy display information for a product
+ * GET /api/pricing-strategies/products/:itemId/display
+ */
+const getStrategyDisplayForProductController = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { sku } = req.query;
+
+    const displayInfo = await getStrategyDisplayForProduct(itemId, sku);
+
+    return res.status(200).json({
+      success: true,
+      data: displayInfo,
+    });
+  } catch (error) {
+    console.error('Error getting strategy display for product:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error getting strategy display information',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Execute all active strategies manually
+ * POST /api/pricing-strategies/execute-all
+ */
+const executeAllStrategiesController = async (req, res) => {
+  try {
+    console.log(
+      'Manual execution of all strategies triggered by user:',
+      req.user?._id
+    );
+
+    const results = await executeAllActiveStrategies();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Strategy execution completed',
+      data: results,
+    });
+  } catch (error) {
+    console.error('Error executing all strategies:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error executing strategies',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Execute strategies for a specific item
+ * POST /api/pricing-strategies/products/:itemId/execute
+ */
+const executeStrategiesForItemController = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+
+    console.log(
+      `Manual execution of strategies for item ${itemId} triggered by user:`,
+      req.user?._id
+    );
+
+    const results = await executeStrategiesForItem(itemId);
+
+    return res.status(200).json({
+      success: true,
+      message: `Strategy execution completed for item ${itemId}`,
+      data: results,
+    });
+  } catch (error) {
+    console.error(
+      `Error executing strategies for item ${req.params.itemId}:`,
+      error.message
+    );
+    return res.status(500).json({
+      success: false,
+      message: 'Error executing strategies for item',
+      error: error.message,
+    });
+  }
+};
+
 export {
   createPricingStrategy,
   getAllPricingStrategies,
   getPricingStrategy,
   updatePricingStrategy,
   deletePricingStrategy,
-  applyStrategyToItems,
-  getStrategiesForItem,
-  removeStrategyFromItem,
+  applyStrategyToItemsController,
+  getStrategiesForItemController,
+  removeStrategyFromItemController,
   getActivePricingStrategies,
+  getStrategyDisplayForProductController,
+  executeAllStrategiesController,
+  executeStrategiesForItemController,
 };

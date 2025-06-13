@@ -101,7 +101,68 @@ export async function editPrice(userId, { itemId, price, sku }) {
   return parsed.ReviseInventoryStatusResponse;
 }
 
+/**
+ * Get eBay user token from database
+ */
+async function getEbayUserToken(userId) {
+  try {
+    // Import user service to get token
+    const { getUserEbayToken } = await import('./userService.js');
+    return await getUserEbayToken(userId);
+  } catch (error) {
+    console.error('Error getting eBay user token:', error);
+    return null;
+  }
+}
+
+/**
+ * Get item details from eBay
+ * @param {String} itemId
+ */
+export async function getItemDetails(itemId) {
+  try {
+    // For now, we'll use the existing inventory service
+    // In a full implementation, you'd call eBay's GetItem API
+    console.log(`Getting item details for ${itemId}`);
+
+    // This is a placeholder - you'll need to implement actual eBay API call
+    // using the Trading API GetItem call
+    return null;
+  } catch (error) {
+    console.error(`Error getting item details for ${itemId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Update item price on eBay
+ * @param {Object} updateData
+ */
+export async function updateItemPrice(updateData) {
+  try {
+    const { itemId, newPrice } = updateData;
+
+    console.log(`Updating eBay price for item ${itemId} to $${newPrice}`);
+
+    // Import the existing eBay price update function
+    const { updateEbayItemPrice } = await import('./inventoryService.js');
+
+    const result = await updateEbayItemPrice({
+      ItemID: itemId,
+      StartPrice: newPrice,
+      BuyItNowPrice: newPrice,
+    });
+
+    return result;
+  } catch (error) {
+    console.error(`Error updating eBay price for ${itemId}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
 export default {
   fetchEbayListings,
   editPrice,
+  getItemDetails,
+  updateItemPrice,
 };

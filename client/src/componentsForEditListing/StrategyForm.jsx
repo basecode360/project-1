@@ -24,6 +24,7 @@ export default function EditStrategy() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [oldPrice, setOldPrice] = useState(0);
+  const [fetchingCompetitorPrice, setFetchingCompetitorPrice] = useState(false);
   const navigate = useNavigate();
 
   // Form state
@@ -70,12 +71,15 @@ export default function EditStrategy() {
         setFormData((prev) => ({
           ...prev,
           myLandedPrice: priceValue,
-          minPrice: (parseFloat(priceValue) * 0.9).toFixed(2),
+          minPrice: (parseFloat(priceValue) * 0.1).toFixed(2), // 10% of current price instead of 90%
           maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2),
         }));
 
         // Strategy/Rule fetching
         await fetchExistingData(productId);
+
+        // Fetch competitor prices to populate lowest price
+        await fetchCompetitorPrice(productId);
       } catch (err) {
         setError('Failed to load product: ' + err.message);
       } finally {
@@ -118,6 +122,56 @@ export default function EditStrategy() {
     }
   };
 
+  // Fetch competitor price for the product
+  const fetchCompetitorPrice = async (itemId) => {
+    try {
+      setFetchingCompetitorPrice(true);
+      console.log('Fetching competitor price for itemId:', itemId);
+
+      const competitorData = await apiService.inventory.getCompetitorPrice(
+        itemId
+      );
+      console.log('Competitor price data received:', competitorData);
+
+      if (
+        competitorData &&
+        competitorData.allPrices &&
+        competitorData.allPrices.length > 0
+      ) {
+        const lowestCompetitorPrice = Math.min(...competitorData.allPrices);
+        console.log('Lowest competitor price found:', lowestCompetitorPrice);
+
+        setFormData((prev) => ({
+          ...prev,
+          lowestPrice: lowestCompetitorPrice.toFixed(2),
+        }));
+
+        showAlert(
+          `Found ${
+            competitorData.count
+          } competitor prices. Lowest: $${lowestCompetitorPrice.toFixed(2)}`,
+          'info'
+        );
+      } else {
+        console.log('No competitor prices found');
+        setFormData((prev) => ({
+          ...prev,
+          lowestPrice: '0.00',
+        }));
+        showAlert('No competitor prices found for this product', 'warning');
+      }
+    } catch (err) {
+      console.error('Error fetching competitor price:', err);
+      showAlert('Failed to fetch competitor prices: ' + err.message, 'error');
+      setFormData((prev) => ({
+        ...prev,
+        lowestPrice: '0.00',
+      }));
+    } finally {
+      setFetchingCompetitorPrice(false);
+    }
+  };
+
   // Handle input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -152,20 +206,89 @@ export default function EditStrategy() {
         return;
       }
 
+      // Step 1: Update the strategy with new min/max prices
       const updatePayload = {
-        ...selectedStrategyObj,
+        strategyName: selectedStrategyObj.strategyName,
+        repricingRule: selectedStrategyObj.repricingRule,
+        description: selectedStrategyObj.description,
+        beatBy: selectedStrategyObj.beatBy,
+        stayAboveBy: selectedStrategyObj.stayAboveBy,
+        value: selectedStrategyObj.value,
+        noCompetitionAction: selectedStrategyObj.noCompetitionAction,
         minPrice: parseFloat(formData.minPrice),
         maxPrice: parseFloat(formData.maxPrice),
-        notes: formData.notes,
+        isActive: selectedStrategyObj.isActive,
+        isDefault: selectedStrategyObj.isDefault,
       };
 
-      await apiService.pricingStrategies.updateStrategyOnProduct(
-        productId,
-        updatePayload
+      console.log('Step 1: Updating strategy with payload:', updatePayload);
+
+      const strategyResponse =
+        await apiService.pricingStrategies.updateStrategy(
+          selectedStrategyObj._id,
+          updatePayload
+        );
+
+      if (!strategyResponse.success) {
+        showAlert(
+          'Failed to update strategy: ' + strategyResponse.message,
+          'error'
+        );
+        return;
+      }
+
+      // Step 2: Apply the strategy to the product (this will automatically trigger price update)
+      console.log(
+        'Step 2: Applying strategy to product (will auto-update price)'
       );
-      showAlert('Strategy updated successfully!', 'success');
-      await fetchExistingData(productId);
+
+      const applyResponse =
+        await apiService.pricingStrategies.applyStrategyToProduct(productId, [
+          selectedStrategyObj._id,
+        ]);
+
+      if (!applyResponse.success) {
+        showAlert(
+          'Strategy updated but failed to apply to product: ' +
+            applyResponse.message,
+          'warning'
+        );
+        return;
+      }
+
+      // Check if price was updated
+      const priceUpdated =
+        applyResponse.results &&
+        applyResponse.results.some((r) => r.priceUpdated);
+
+      if (priceUpdated) {
+        showAlert(
+          'Strategy updated, applied to product, and price updated automatically!',
+          'success'
+        );
+      } else {
+        showAlert('Strategy updated and applied successfully!', 'success');
+      }
+
+      // Mark the global price update timestamp for simulation AND force refresh
+      if (typeof window !== 'undefined') {
+        window.lastPriceUpdate = {
+          timestamp: Date.now(),
+          newPrice: parseFloat(formData.lowestPrice) || 5.27, // Use competitor price
+        };
+      }
+
+      // Force immediate refresh with stronger signals
+      localStorage.setItem('strategyUpdated', Date.now().toString());
+      localStorage.setItem('priceUpdated', Date.now().toString());
+      localStorage.setItem('forceRefresh', Date.now().toString());
+
+      // Navigate back to home to trigger refresh
+      setTimeout(() => {
+        navigate('/home');
+      }, 2000);
     } catch (err) {
+      console.error('Strategy update error:', err);
       showAlert('Failed to update: ' + err.message, 'error');
     } finally {
       setSubmitting(false);
@@ -352,6 +475,19 @@ export default function EditStrategy() {
             onChange={handleInputChange}
             type="number"
             inputProps={{ step: '0.01', min: '0' }}
+            InputProps={{
+              endAdornment: fetchingCompetitorPrice ? (
+                <CircularProgress size={20} />
+              ) : (
+                <Button
+                  size="small"
+                  onClick={() => fetchCompetitorPrice(productId)}
+                  sx={{ minWidth: 'auto', p: 0.5 }}
+                >
+                  Refresh
+                </Button>
+              ),
+            }}
             sx={{
               '& .MuiInputLabel-root': { fontSize: '16px' },
               '& .MuiInputBase-root': { fontSize: '16px' },

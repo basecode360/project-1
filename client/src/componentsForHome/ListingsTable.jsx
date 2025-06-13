@@ -15,8 +15,11 @@ import {
   CircularProgress,
   AlertTitle,
   Alert,
+  Button,
+  IconButton,
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { Refresh as RefreshIcon } from '@mui/icons-material';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useProductStore } from '../store/productStore';
 
 // Import your API service
@@ -24,6 +27,7 @@ import apiService from '../api/apiService';
 
 export default function ListingsTable() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -36,58 +40,46 @@ export default function ListingsTable() {
     modifyCompetitors,
     modifyProductsObj,
   } = useProductStore();
+
   // Fetch data from eBay when component mounts
   useEffect(() => {
-    if (AllProducts && AllProducts.length > 0 && AllProducts[0].productId) {
-      setLoading(false);
-      return;
-    }
+    console.log('🔄 AllProducts.length:', AllProducts?.length);
+    console.log('🔄 useEffect triggered, AllProducts:', AllProducts);
+    console.log('🔄 AllProducts.length:', AllProducts?.length);
+    console.log('🚀 Making API call to fetch eBay listings');
     fetchEbayListings();
-  }, []);
-
-  // useEffect(() => {
-  //   console.log("AllProducts updated:", AllProducts);
-  //   console.log(`Item id =>  ${ItemId}`)
-  // }, [AllProducts]);
+  }, []); // Only run once on mount
 
   useEffect(() => {
-    if (!searchProduct) {
+    console.log('🔄 AllProducts changed:', AllProducts);
+    if (AllProducts && AllProducts.length > 0) {
       setRows(AllProducts);
-      return;
     }
+  }, [AllProducts]);
+
+  useEffect(() => {
+    console.log('🔍 Searching for:', searchProduct);
     const searchP = searchProduct.toLowerCase();
-    const filtered = rows.filter(
+    const filtered = AllProducts.filter(
       (row) =>
-        row.productTitle.toLowerCase().includes(searchP) ||
+        row.productTitle?.toLowerCase().includes(searchP) ||
         row.sku?.toLowerCase().includes(searchP) ||
-        row.productId.toLowerCase().includes(searchP) ||
-        row.status.some((s) => s.toLowerCase().includes(searchP))
+        row.status?.some((s) => s.toLowerCase().includes(searchP)) ||
+        row.productId?.toLowerCase().includes(searchP)
     );
-
+    console.log('🔍 Filtered results:', filtered.length);
     setRows(filtered);
-  }, [searchProduct]);
-
-  // // Helper to fetch competitor price
-  // const fetchCompetitorPrice = async (itemId) => {
-  //   const result = await apiService.inventory.getCompetitorPrice(itemId);
-  //   if (result.success && result.competitorPrices.length > 0) {
-  //     return `USD${parseFloat(result.competitorPrices[0]).toFixed(2)}`;
-  //   }
-  //   return "N/A";
-  // };
+  }, [searchProduct, AllProducts]);
 
   const fetchEbayListings = async () => {
     try {
       setLoading(true);
-      // Fetch active listings from eBay API
       const response = await apiService.inventory.getActiveListings();
       if (response.success) {
         console.log('eBay data received:', response.data);
-        // Process the data for your table
         let ebayListings = [];
         if (
           response.data.GetMyeBaySellingResponse &&
-          response.data.GetMyeBaySellingResponse.ActiveList &&
           response.data.GetMyeBaySellingResponse.ActiveList.ItemArray
         ) {
           const itemArray =
@@ -98,123 +90,275 @@ export default function ListingsTable() {
             ebayListings = [itemArray.Item];
           }
         }
-
-        // Transform the eBay data to match your table structure (async/await version)
-        const formattedListings = [];
-
-        for (const item of ebayListings) {
-          const hasVariations = Array.isArray(item.Variations?.Variation);
-          const itemID = item.ItemID;
-          const response = await apiService.inventory.getCompetitorPrice(
-            itemID
-          );
-          response.itemID = itemID;
-          const { price, count } = response;
-          console.log('Competitor Price => ', price, 'Count => ', count);
-          modifyCompetitors(response.productInfo);
-          console.log('Competitors => ', response.productInfo);
-          if (hasVariations) {
-            for (const variation of item.Variations.Variation) {
-              formattedListings.push({
-                productTitle: variation.VariationTitle,
+        console.log('📦 Processing', ebayListings.length, 'eBay listings');
+        const formattedListings = await Promise.all(
+          ebayListings.map(async (item, index) => {
+            const itemID = item.ItemID;
+            if (!itemID) return null;
+            try {
+              const [competitorRes, strategyDisplayRes] = await Promise.all([
+                apiService.inventory.getCompetitorPrice(itemID),
+                apiService.pricingStrategies.getStrategyDisplayForProduct(
+                  itemID
+                ),
+              ]);
+              const { price, count } = competitorRes;
+              const strategyDisplay = strategyDisplayRes?.data || {
+                strategy: 'Assign Strategy',
+                minPrice: 'Set',
+                maxPrice: 'Set',
+                hasStrategy: false,
+              };
+              return {
+                productTitle: item.Title,
                 productId: item.ItemID,
-                sku: variation.SKU,
+                sku: item.SKU || ' ',
                 status: [
+                  item.SellingStatus?.ListingStatus || 'Active',
                   item.ConditionDisplayName || 'New',
                   item.SellingStatus?.ListingStatus || 'Active',
                 ],
-                qty: parseInt(variation.Quantity || item.Quantity || '0', 10),
-                myPrice: `USD ${parseFloat(
-                  variation.StartPrice || item.BuyItNowPrice || 0
-                ).toFixed(2)}`,
+                price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
+                qty: parseInt(item.Quantity || '0', 10),
+                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
+                  2
+                )}`,
                 competition: price,
-                strategy: '0.01',
-                minPrice: `USD${(
-                  parseFloat(item.CurrentPrice?.Value || 0) - 10
-                ).toFixed(2)}`,
-                maxPrice: `USD${(
-                  parseFloat(item.CurrentPrice?.Value || 0) + 20
-                ).toFixed(2)}`,
-                competitors: count == 1 ? 0 : count,
-              });
+                strategy: strategyDisplay.strategy,
+                minPrice: strategyDisplay.minPrice,
+                maxPrice: strategyDisplay.maxPrice,
+                hasStrategy: strategyDisplay.hasStrategy,
+                competitors: count,
+              };
+            } catch (error) {
+              console.error(
+                `❌ [${index + 1}/${
+                  ebayListings.length
+                }] Error fetching data for ${itemID}:`,
+                error
+              );
+              return {
+                productTitle: item.Title,
+                productId: item.ItemID,
+                sku: item.SKU || ' ',
+                status: [
+                  item.SellingStatus?.ListingStatus || 'Active',
+                  item.ConditionDisplayName || 'New',
+                  item.SellingStatus?.ListingStatus || 'Active',
+                ],
+                price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
+                qty: parseInt(item.Quantity || '0', 10),
+                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
+                  2
+                )}`,
+                competition: 'Error',
+                strategy: 'Assign Strategy',
+                minPrice: 'Set',
+                maxPrice: 'Set',
+                hasStrategy: false,
+                competitors: 0,
+              };
             }
-          } else {
-            formattedListings.push({
-              productTitle: item.Title,
-              productId: item.ItemID,
-              sku: item.SKU || ' ',
-              status: [
-                item.ConditionDisplayName || 'New',
-                item.SellingStatus?.ListingStatus || 'Active',
-              ],
-              qty: parseInt(item.Quantity || '0', 10),
-              myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
-              competition: price,
-              strategy: '0.01',
-              minPrice: `USD${(
-                parseFloat(item.CurrentPrice?.Value || 0) - 10
-              ).toFixed(2)}`,
-              maxPrice: `USD${(
-                parseFloat(item.CurrentPrice?.Value || 0) + 20
-              ).toFixed(2)}`,
-              competitors: count == 1 ? 0 : count,
-            });
-          }
-        }
-
-        if (formattedListings.length > 0) {
-          setRows(formattedListings);
-          modifyProductsArray(formattedListings);
-          console.log('modufy pr  => ', formattedListings);
+          })
+        );
+        console.log('📊 Finished processing all listings');
+        const validListings = formattedListings.filter(Boolean);
+        if (validListings.length > 0) {
+          setRows(validListings);
+          modifyProductsArray(validListings);
         } else {
-          // Fall back to sample data if no listings found
           setError('There are no products');
         }
       } else {
-        console.error('API error:', response.error);
         setError('Failed to fetch eBay listings');
-
-        // Use sample data as fallback
-        setRows([
-          {
-            productTitle:
-              'Front Fog Light Cover Right Passenger Side Textured For 2013-2015 Nissan Altima',
-            productId: '186855612214',
-            status: ['New', 'Active'],
-            qty: 9,
-            myPrice: 'USD7.74',
-            competition: 'USD7.75',
-            strategy: '0.01',
-            minPrice: 'USD7.00',
-            maxPrice: 'USD25.00',
-            competitors: 13,
-          },
-        ]);
+        console.error('API error:', response.error);
       }
     } catch (error) {
-      console.error('Error fetching eBay data:', error);
       setError(error.message);
-
-      // Use sample data as fallback
-      setRows([
-        {
-          productTitle:
-            'Front Fog Light Cover Right Passenger Side Textured For 2013-2015 Nissan Altima',
-          productId: '186855612214',
-          status: ['New', 'Active'],
-          qty: 9,
-          myPrice: 'USD7.74',
-          competition: 'USD7.75',
-          strategy: '0.01',
-          minPrice: 'USD7.00',
-          maxPrice: 'USD25.00',
-          competitors: 13,
-        },
-      ]);
+      console.error('Error fetching eBay data:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  // Refresh strategy data for a specific item
+  const refreshStrategyForItem = async (itemId) => {
+    try {
+      const strategyDisplayRes =
+        await apiService.pricingStrategies.getStrategyDisplayForProduct(itemId);
+      const strategyDisplay = strategyDisplayRes?.data || {
+        strategy: 'Assign Strategy',
+        minPrice: 'Set',
+        maxPrice: 'Set',
+        hasStrategy: false,
+      };
+      modifyProductsArray((products) =>
+        products.map((product) =>
+          product.productId === itemId
+            ? {
+                ...product,
+                strategy: strategyDisplay.strategy,
+                minPrice: strategyDisplay.minPrice,
+                maxPrice: strategyDisplay.maxPrice,
+                hasStrategy: strategyDisplay.hasStrategy,
+              }
+            : product
+        )
+      );
+    } catch (error) {
+      console.error(`❌ Error refreshing strategy for item ${itemId}:`, error);
+    }
+  };
+
+  // Refresh all strategy data
+  const refreshAllStrategies = async () => {
+    try {
+      console.log('🔄 Refreshing all strategy data...');
+      setLoading(true);
+
+      const updatedProducts = await Promise.all(
+        AllProducts.map(async (product) => {
+          try {
+            console.log(`🔍 Fetching strategy for ${product.productId}`);
+            const strategyDisplayRes =
+              await apiService.pricingStrategies.getStrategyDisplayForProduct(
+                product.productId
+              );
+
+            console.log(
+              `✅ Strategy response for ${product.productId}:`,
+              strategyDisplayRes
+            );
+
+            const strategyDisplay = strategyDisplayRes?.data || {
+              strategy: 'Assign Strategy',
+              minPrice: 'Set',
+              maxPrice: 'Set',
+              hasStrategy: false,
+            };
+
+            return {
+              ...product,
+              strategy: strategyDisplay.strategy,
+              minPrice: strategyDisplay.minPrice,
+              maxPrice: strategyDisplay.maxPrice,
+              hasStrategy: strategyDisplay.hasStrategy,
+            };
+          } catch (error) {
+            console.error(
+              `Error refreshing strategy for ${product.productId}:`,
+              error
+            );
+            return product; // Return original product if refresh fails
+          }
+        })
+      );
+
+      modifyProductsArray(updatedProducts);
+      console.log('✅ Refreshed all strategy data:', updatedProducts);
+    } catch (error) {
+      console.error('❌ Error refreshing all strategies:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add function to manually trigger price updates
+  const triggerPriceUpdate = async (itemId) => {
+    try {
+      console.log(`🔄 Manually triggering price update for item ${itemId}`);
+
+      const response = await apiService.pricingStrategies.updatePrice(itemId);
+
+      if (response.success) {
+        console.log(`✅ Price update completed for ${itemId}:`, response.data);
+        // Refresh the strategy display for this specific item
+        await refreshStrategyForItem(itemId);
+        // Also refresh the entire listings to get updated eBay prices
+        await fetchEbayListings();
+      } else {
+        console.error(`❌ Price update failed for ${itemId}:`, response.error);
+      }
+    } catch (error) {
+      console.error(`Error triggering price update for ${itemId}:`, error);
+    }
+  };
+
+  // Listen for navigation back to refresh strategy data
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Refresh strategy data when user comes back to the page
+        console.log('🔄 Page became visible, refreshing strategy data...');
+        refreshAllStrategies();
+      }
+    };
+
+    const handleFocus = () => {
+      // Also refresh when window gets focus (more reliable for navigation)
+      console.log('🔄 Window focused, refreshing strategy data...');
+      refreshAllStrategies();
+    };
+
+    // Add both visibility and focus listeners
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [AllProducts]);
+
+  // Also add a useEffect that runs when the component mounts or when we navigate back
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      // Small delay to ensure any pending strategy updates are completed
+      if (AllProducts && AllProducts.length > 0) {
+        console.log('🔄 Component mounted/updated, refreshing strategies...');
+        refreshAllStrategies();
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [location?.pathname]); // Add location dependency if using react-router
+
+  // Check for strategy updates from localStorage with more aggressive checking
+  useEffect(() => {
+    const checkForUpdates = () => {
+      const lastUpdate = localStorage.getItem('strategyUpdated');
+      const lastPriceUpdate = localStorage.getItem('priceUpdated');
+
+      if (lastUpdate || lastPriceUpdate) {
+        const updateTime = parseInt(lastUpdate || lastPriceUpdate);
+        const now = Date.now();
+
+        // If update was within last 15 seconds, refresh (increased from 10)
+        if (now - updateTime < 15000) {
+          console.log(
+            `🔄 Strategy/Price updated ${Math.round(
+              (now - updateTime) / 1000
+            )}s ago - forcing hard refresh...`
+          );
+
+          // Clear all storage flags first
+          localStorage.removeItem('strategyUpdated');
+          localStorage.removeItem('priceUpdated');
+          localStorage.removeItem('forceRefresh');
+
+          // Force a complete refresh by clearing the cache and refetching
+          fetchEbayListings();
+        }
+      }
+    };
+
+    // Check immediately on mount
+    checkForUpdates();
+
+    // Check more frequently for faster updates
+    const interval = setInterval(checkForUpdates, 500); // Check every 500ms instead of 1000ms
+    return () => clearInterval(interval);
+  }, [location.pathname]);
 
   if (loading) {
     return (
@@ -242,6 +386,29 @@ export default function ListingsTable() {
 
   return (
     <Container sx={{ mt: 4, mb: 2 }}>
+      {/* Add refresh button */}
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 2,
+        }}
+      >
+        <Typography variant="h5" component="h1">
+          Active Listings
+        </Typography>
+        <Button
+          variant="outlined"
+          startIcon={<RefreshIcon />}
+          onClick={refreshAllStrategies}
+          disabled={loading}
+          sx={{ ml: 2 }}
+        >
+          Refresh Strategies
+        </Button>
+      </Box>
+
       <TableContainer
         component={Paper}
         sx={{ borderRadius: 2, border: '1px solid #ddd' }}
@@ -269,18 +436,17 @@ export default function ListingsTable() {
                 'Min Price',
                 'Max Price',
                 'Competitors',
-                'Actions',
               ].map((header) => (
                 <TableCell
                   key={header}
                   sx={{
                     fontWeight: '600',
                     fontSize: '15px',
-                    textAlign: 'left',
                     padding: '8px',
                     borderRight: '1px solid #ddd',
                     color: '#333',
                     backgroundColor: '#fafafa',
+                    textAlign: 'left',
                     '&:last-child': {
                       borderRight: 'none',
                     },
@@ -296,7 +462,6 @@ export default function ListingsTable() {
               ))}
             </TableRow>
           </TableHead>
-
           <TableBody>
             {AllProducts.map((row, idx) => (
               <TableRow
@@ -338,8 +503,11 @@ export default function ListingsTable() {
                         <Typography
                           key={i}
                           component="span"
-                          color={s === 'Active' ? '#1e852b' : 'gray'}
-                          sx={{ mx: 0.5 }}
+                          sx={{
+                            fontSize: '14px',
+                            color: s === 'Active' ? '#1e852b' : 'gray',
+                            mx: 0.5,
+                          }}
                         >
                           {s}
                         </Typography>
@@ -382,7 +550,7 @@ export default function ListingsTable() {
                     onClick={() => {
                       modifyProductsId(row.productId);
                       modifySku(row.sku ? row.sku : '');
-                      navigate('/home/edit-listing');
+                      navigate(`/home/update-strategy/${row.productId}`);
                     }}
                   >
                     Assign Rule
@@ -404,23 +572,27 @@ export default function ListingsTable() {
                     backgroundColor: '#fff',
                   }}
                 >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    }}
-                    onClick={() => {
-                      modifyProductsId(row.productId);
-                      modifySku(row.sku ? row.sku : '');
-                      navigate(`/home/update-strategy/${row.productId}`);
-                    }}
+                  <Box
+                    sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}
                   >
-                    {row.strategy}
-                  </Typography>
+                    <Typography
+                      color="primary"
+                      sx={{
+                        cursor: 'pointer',
+                        fontSize: '16px',
+                        '&:hover': {
+                          textDecoration: 'underline',
+                        },
+                      }}
+                      onClick={() => {
+                        modifyProductsId(row.productId);
+                        modifySku(row.sku ? row.sku : '');
+                        navigate(`/home/update-strategy/${row.productId}`);
+                      }}
+                    >
+                      {row.strategy}
+                    </Typography>
+                  </Box>
                 </TableCell>
 
                 <TableCell
@@ -439,7 +611,9 @@ export default function ListingsTable() {
                         textDecoration: 'underline',
                       },
                     }}
-                    onClick={() => navigate('/home/edit-listing')}
+                    onClick={() =>
+                      navigate(`/home/update-strategy/${row.productId}`)
+                    }
                   >
                     {row.minPrice}
                   </Typography>
@@ -460,31 +634,11 @@ export default function ListingsTable() {
                         textDecoration: 'underline',
                       },
                     }}
-                    onClick={() => navigate('/home/edit-listing')}
+                    onClick={() =>
+                      navigate(`/home/update-strategy/${row.productId}`)
+                    }
                   >
                     {row.maxPrice}
-                  </Typography>
-                </TableCell>
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => {
-                    modifyProductsObj(row);
-                    navigate(`/home/competitors/${row.productId}`);
-                  }}
-                >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      fontSize: '16px',
-                      textDecoration: 'underline',
-                    }}
-                  >
-                    {row.competitors}
                   </Typography>
                 </TableCell>
                 <TableCell
@@ -498,18 +652,15 @@ export default function ListingsTable() {
                     color="primary"
                     sx={{
                       cursor: 'pointer',
+                      textDecoration: 'underline',
                       fontSize: '16px',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
                     }}
                     onClick={() => {
-                      modifyProductsId(row.productId);
-                      modifySku(row.sku ? row.sku : '');
-                      navigate('/home/edit-price');
+                      modifyProductsObj(row);
+                      navigate(`/home/competitors/${row.productId}`);
                     }}
                   >
-                    Edit Price
+                    {row.competitors}
                   </Typography>
                 </TableCell>
               </TableRow>
