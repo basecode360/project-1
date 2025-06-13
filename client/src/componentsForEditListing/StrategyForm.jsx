@@ -10,11 +10,25 @@ import {
   Collapse,
   IconButton,
   CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProductStore } from '../store/productStore';
 import apiService from '../api/apiService';
+import {
+  TrendingUp,
+  TrendingDown,
+  TrendingFlat,
+  Refresh as RefreshIcon,
+} from '@mui/icons-material';
 
 export default function EditStrategy() {
   const { productId } = useParams(); // Get dynamic ID from route
@@ -25,6 +39,8 @@ export default function EditStrategy() {
   const [error, setError] = useState('');
   const [oldPrice, setOldPrice] = useState(0);
   const [fetchingCompetitorPrice, setFetchingCompetitorPrice] = useState(false);
+  const [priceHistory, setPriceHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const navigate = useNavigate();
 
   // Form state
@@ -172,6 +188,35 @@ export default function EditStrategy() {
     }
   };
 
+  // Fetch price history from MongoDB
+  const fetchPriceHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      console.log(`📊 Fetching price history from MongoDB for ${productId}`);
+
+      // Use the corrected API call
+      const historyData = await apiService.priceHistory.getProductHistory(
+        productId,
+        100
+      );
+
+      if (historyData.success && historyData.priceHistory) {
+        console.log(
+          `📊 ✅ Retrieved ${historyData.recordCount} price history records from MongoDB`
+        );
+        setPriceHistory(historyData.priceHistory);
+      } else {
+        console.log('📊 No price history found in MongoDB');
+        setPriceHistory([]);
+      }
+    } catch (error) {
+      console.error('📊 ❌ Error fetching price history from MongoDB:', error);
+      setPriceHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   // Handle input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -270,23 +315,30 @@ export default function EditStrategy() {
         showAlert('Strategy updated and applied successfully!', 'success');
       }
 
-      // Mark the global price update timestamp for simulation AND force refresh
+      // Force immediate refresh with multiple signals
+      const timestamp = Date.now().toString();
+      localStorage.setItem('strategyUpdated', timestamp);
+      localStorage.setItem('priceUpdated', timestamp);
+      localStorage.setItem('forceRefresh', timestamp);
+      localStorage.setItem('lastStrategyUpdate', timestamp);
+
+      // Set a global flag for immediate detection
       if (typeof window !== 'undefined') {
         window.lastPriceUpdate = {
           timestamp: Date.now(),
-          newPrice: parseFloat(formData.lowestPrice) || 5.27, // Use competitor price
+          itemId: productId,
+          newPrice: parseFloat(formData.lowestPrice) || 5.27,
         };
       }
 
-      // Force immediate refresh with stronger signals
-      localStorage.setItem('strategyUpdated', Date.now().toString());
-      localStorage.setItem('priceUpdated', Date.now().toString());
-      localStorage.setItem('forceRefresh', Date.now().toString());
-
-      // Navigate back to home to trigger refresh
+      // Navigate back immediately
       setTimeout(() => {
-        navigate('/home');
-      }, 2000);
+        navigate('/home', { replace: true });
+        // Force a page reload to ensure updates show
+        setTimeout(() => {
+          window.location.reload();
+        }, 100);
+      }, 1500);
     } catch (err) {
       console.error('Strategy update error:', err);
       showAlert('Failed to update: ' + err.message, 'error');
@@ -294,6 +346,13 @@ export default function EditStrategy() {
       setSubmitting(false);
     }
   };
+
+  // Add useEffect to fetch price history for this product
+  useEffect(() => {
+    if (productId) {
+      fetchPriceHistory();
+    }
+  }, [productId]);
 
   if (loading) {
     return (
@@ -562,6 +621,152 @@ export default function EditStrategy() {
               'Update'
             )}
           </Button>
+        </Box>
+
+        {/* Enhanced Price Change Submissions Table - Connected to MongoDB */}
+        <Box sx={{ mt: 4 }}>
+          <Typography
+            variant="h6"
+            gutterBottom
+            sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+          >
+            Price Change Submissions (Last 100)
+            <Chip
+              label="MongoDB"
+              size="small"
+              color="success"
+              variant="outlined"
+            />
+            {loadingHistory && <CircularProgress size={16} />}
+          </Typography>
+
+          {priceHistory.length > 0 ? (
+            <TableContainer
+              component={Paper}
+              variant="outlined"
+              sx={{ maxHeight: 400 }}
+            >
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Sent Price</TableCell>
+                    <TableCell>Old Price</TableCell>
+                    <TableCell>Competition Lowest Price</TableCell>
+                    <TableCell>Strategy Name</TableCell>
+                    <TableCell>Min Price</TableCell>
+                    <TableCell>Max Price</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Submitted</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {priceHistory.map((record, index) => (
+                    <TableRow key={record.id || index}>
+                      <TableCell>
+                        <Typography
+                          variant="body2"
+                          sx={{ color: '#1976d2', fontWeight: 'bold' }}
+                        >
+                          ${record.newPrice}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          ${record.oldPrice || 'N/A'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          ${record.competitorPrice || 'N/A'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ color: '#1976d2' }}>
+                          {record.strategyName || 'Manual'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          $
+                          {record.metadata?.strategyData?.minPriceLimit ||
+                            'N/A'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          $
+                          {record.metadata?.strategyData?.maxPriceLimit ||
+                            'N/A'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: record.success ? '#4caf50' : '#f44336',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {record.success ? 'Done' : 'Error'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {new Date(record.date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}{' '}
+                          {new Date(record.date).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false,
+                          })}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Box
+              sx={{
+                p: 3,
+                textAlign: 'center',
+                border: '1px dashed #ccc',
+                borderRadius: 1,
+              }}
+            >
+              <Typography color="text.secondary">
+                {loadingHistory
+                  ? 'Loading price history...'
+                  : 'No price changes recorded yet'}
+              </Typography>
+              {!loadingHistory && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ mt: 1 }}
+                >
+                  Price changes will appear here when strategies are executed
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {/* Refresh button */}
+          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              size="small"
+              startIcon={<RefreshIcon />}
+              onClick={fetchPriceHistory}
+              disabled={loadingHistory}
+            >
+              Refresh History
+            </Button>
+          </Box>
         </Box>
       </Box>
     </Container>

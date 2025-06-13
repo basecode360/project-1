@@ -642,10 +642,343 @@ const combined = {
   },
 };
 
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+// Helper function to create authenticated requests
+const createAuthenticatedRequest = async () => {
+  // Use the same token retrieval logic as the other clients
+  const token = getAppJwtToken();
+  if (!token) {
+    throw new Error('No authentication token found');
+  }
+
+  return {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  };
+};
+
+// Price History endpoints
+const priceHistory = {
+  getProductHistory: async (itemId, limit = 100) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      console.log(
+        `📊 🔍 Fetching price history from MongoDB for product ${itemId}`
+      );
+
+      const response = await fetch(
+        `${BASE_URL}/price-history/product/${itemId}?limit=${limit}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      );
+
+      console.log(`📊 Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`📊 ❌ HTTP error ${response.status}:`, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`📊 ✅ Raw response data:`, data);
+      console.log(`📊 ✅ Retrieved price history for ${itemId}:`, {
+        recordCount: data.recordCount,
+        hasData: data.priceHistory && data.priceHistory.length > 0,
+        summary: data.summary,
+        firstRecord: data.priceHistory?.[0],
+      });
+      return data;
+    } catch (error) {
+      console.error(
+        `📊 ❌ Error fetching price history from MongoDB for ${itemId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  getProductSummary: async (itemId) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      console.log(
+        `📊 🔍 Fetching price history summary from MongoDB for ${itemId}`
+      );
+
+      const response = await fetch(
+        `${BASE_URL}/price-history/summary/${itemId}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(
+        `📊 ✅ Retrieved price history summary from MongoDB for ${itemId}:`,
+        data.summary
+      );
+      return data;
+    } catch (error) {
+      console.error(
+        `📊 ❌ Error fetching price history summary from MongoDB for ${itemId}:`,
+        error
+      );
+      return {
+        success: false,
+        summary: {
+          hasHistory: false,
+          totalChanges: 0,
+          latestChange: null,
+          currentPrice: null,
+          priceDirection: 'unchanged',
+        },
+      };
+    }
+  },
+
+  getPaginatedHistory: async (itemId, options = {}) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      const {
+        sku = null,
+        limit = 100,
+        page = 1,
+        sortBy = 'createdAt',
+        sortOrder = -1,
+      } = options;
+
+      const queryParams = new URLSearchParams({
+        limit: limit.toString(),
+        page: page.toString(),
+        sortBy,
+        sortOrder: sortOrder.toString(),
+      });
+
+      if (sku) queryParams.append('sku', sku);
+
+      console.log(
+        `📊 🔍 Fetching paginated price history for ${itemId}, page: ${page}`
+      );
+
+      const response = await fetch(
+        `${BASE_URL}/price-history/product/${itemId}/paginated?${queryParams}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`📊 ✅ Retrieved paginated price history:`, {
+        itemId,
+        currentPage: data.pagination?.currentPage,
+        totalPages: data.pagination?.totalPages,
+        totalRecords: data.pagination?.totalRecords,
+      });
+      return data;
+    } catch (error) {
+      console.error(
+        `📊 ❌ Error fetching paginated price history for ${itemId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  addManualRecord: async (recordData) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      console.log(`📝 Adding manual price history record:`, recordData);
+
+      const response = await fetch(`${BASE_URL}/price-history/history/manual`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(recordData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      console.log(`📝 ✅ Manual record added successfully:`, data);
+      return data;
+    } catch (error) {
+      console.error(`📝 ❌ Error adding manual price record:`, error);
+      throw error;
+    }
+  },
+
+  getAnalytics: async (itemId, options = {}) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      const { sku = null, period = '30d' } = options;
+
+      const queryParams = new URLSearchParams({ period });
+      if (sku) queryParams.append('sku', sku);
+
+      console.log(
+        `📈 Fetching price analytics for ${itemId}, period: ${period}`
+      );
+
+      const response = await fetch(
+        `${BASE_URL}/price-history/analytics/${itemId}?${queryParams}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(
+        `📈 ✅ Retrieved price analytics for ${itemId}:`,
+        data.analytics
+      );
+      return data;
+    } catch (error) {
+      console.error(
+        `📈 ❌ Error fetching price analytics for ${itemId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  exportHistory: async (itemId, options = {}) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      const { sku = null, format = 'json' } = options;
+
+      const queryParams = new URLSearchParams({ format });
+      if (sku) queryParams.append('sku', sku);
+
+      console.log(
+        `📤 Exporting price history for ${itemId}, format: ${format}`
+      );
+
+      const response = await fetch(
+        `${BASE_URL}/price-history/export/${itemId}?${queryParams}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (format === 'csv') {
+        const csvData = await response.text();
+        console.log(`📤 ✅ Retrieved CSV export for ${itemId}`);
+        return { success: true, data: csvData, format: 'csv' };
+      } else {
+        const data = await response.json();
+        console.log(`📤 ✅ Retrieved JSON export for ${itemId}:`, {
+          recordCount: data.recordCount,
+        });
+        return data;
+      }
+    } catch (error) {
+      console.error(
+        `📤 ❌ Error exporting price history for ${itemId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  bulkInsert: async (records) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      console.log(`📝 Bulk inserting ${records.length} price history records`);
+
+      const response = await fetch(`${BASE_URL}/price-history/bulk`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ records }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      console.log(`📝 ✅ Bulk insert completed:`, data);
+      return data;
+    } catch (error) {
+      console.error(`📝 ❌ Error in bulk insert:`, error);
+      throw error;
+    }
+  },
+
+  archiveOldRecords: async (keepRecentCount = 1000) => {
+    try {
+      const { headers } = await createAuthenticatedRequest();
+
+      console.log(
+        `🗄️ Archiving old records, keeping ${keepRecentCount} recent per product`
+      );
+
+      const response = await fetch(`${BASE_URL}/price-history/archive`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ keepRecentCount }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      console.log(`🗄️ ✅ Archive completed:`, data);
+      return data;
+    } catch (error) {
+      console.error(`🗄️ ❌ Error archiving records:`, error);
+      throw error;
+    }
+  },
+};
+
 export default {
   inventory,
   auth,
   pricingStrategies,
   competitorRules,
   combined,
+  priceHistory, // Add the price history service
 };

@@ -17,8 +17,20 @@ import {
   Alert,
   Button,
   IconButton,
+  Chip,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import {
+  Refresh as RefreshIcon,
+  History as HistoryIcon,
+  TrendingUp,
+  TrendingDown,
+  TrendingFlat,
+} from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useProductStore } from '../store/productStore';
 
@@ -91,6 +103,7 @@ export default function ListingsTable() {
           }
         }
         console.log('📦 Processing', ebayListings.length, 'eBay listings');
+        
         const formattedListings = await Promise.all(
           ebayListings.map(async (item, index) => {
             const itemID = item.ItemID;
@@ -98,10 +111,9 @@ export default function ListingsTable() {
             try {
               const [competitorRes, strategyDisplayRes] = await Promise.all([
                 apiService.inventory.getCompetitorPrice(itemID),
-                apiService.pricingStrategies.getStrategyDisplayForProduct(
-                  itemID
-                ),
+                apiService.pricingStrategies.getStrategyDisplayForProduct(itemID),
               ]);
+              
               const { price, count } = competitorRes;
               const strategyDisplay = strategyDisplayRes?.data || {
                 strategy: 'Assign Strategy',
@@ -109,6 +121,7 @@ export default function ListingsTable() {
                 maxPrice: 'Set',
                 hasStrategy: false,
               };
+
               return {
                 productTitle: item.Title,
                 productId: item.ItemID,
@@ -120,9 +133,7 @@ export default function ListingsTable() {
                 ],
                 price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 qty: parseInt(item.Quantity || '0', 10),
-                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
-                  2
-                )}`,
+                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 competition: price,
                 strategy: strategyDisplay.strategy,
                 minPrice: strategyDisplay.minPrice,
@@ -132,9 +143,7 @@ export default function ListingsTable() {
               };
             } catch (error) {
               console.error(
-                `❌ [${index + 1}/${
-                  ebayListings.length
-                }] Error fetching data for ${itemID}:`,
+                `❌ [${index + 1}/${ebayListings.length}] Error fetching data for ${itemID}:`,
                 error
               );
               return {
@@ -148,9 +157,7 @@ export default function ListingsTable() {
                 ],
                 price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 qty: parseInt(item.Quantity || '0', 10),
-                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
-                  2
-                )}`,
+                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 competition: 'Error',
                 strategy: 'Assign Strategy',
                 minPrice: 'Set',
@@ -161,6 +168,7 @@ export default function ListingsTable() {
             }
           })
         );
+        
         console.log('📊 Finished processing all listings');
         const validListings = formattedListings.filter(Boolean);
         if (validListings.length > 0) {
@@ -263,27 +271,6 @@ export default function ListingsTable() {
     }
   };
 
-  // Add function to manually trigger price updates
-  const triggerPriceUpdate = async (itemId) => {
-    try {
-      console.log(`🔄 Manually triggering price update for item ${itemId}`);
-
-      const response = await apiService.pricingStrategies.updatePrice(itemId);
-
-      if (response.success) {
-        console.log(`✅ Price update completed for ${itemId}:`, response.data);
-        // Refresh the strategy display for this specific item
-        await refreshStrategyForItem(itemId);
-        // Also refresh the entire listings to get updated eBay prices
-        await fetchEbayListings();
-      } else {
-        console.error(`❌ Price update failed for ${itemId}:`, response.error);
-      }
-    } catch (error) {
-      console.error(`Error triggering price update for ${itemId}:`, error);
-    }
-  };
-
   // Listen for navigation back to refresh strategy data
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -333,12 +320,12 @@ export default function ListingsTable() {
         const updateTime = parseInt(lastUpdate || lastPriceUpdate);
         const now = Date.now();
 
-        // If update was within last 15 seconds, refresh (increased from 10)
-        if (now - updateTime < 15000) {
+        // If update was within last 30 seconds, refresh
+        if (now - updateTime < 30000) {
           console.log(
             `🔄 Strategy/Price updated ${Math.round(
               (now - updateTime) / 1000
-            )}s ago - forcing hard refresh...`
+            )}s ago - forcing immediate refresh...`
           );
 
           // Clear all storage flags first
@@ -346,7 +333,8 @@ export default function ListingsTable() {
           localStorage.removeItem('priceUpdated');
           localStorage.removeItem('forceRefresh');
 
-          // Force a complete refresh by clearing the cache and refetching
+          // Force a complete refresh by clearing cache and refetching
+          setLoading(true);
           fetchEbayListings();
         }
       }
@@ -355,8 +343,8 @@ export default function ListingsTable() {
     // Check immediately on mount
     checkForUpdates();
 
-    // Check more frequently for faster updates
-    const interval = setInterval(checkForUpdates, 500); // Check every 500ms instead of 1000ms
+    // Check very frequently for immediate updates
+    const interval = setInterval(checkForUpdates, 200); // Check every 200ms
     return () => clearInterval(interval);
   }, [location.pathname]);
 
@@ -386,7 +374,6 @@ export default function ListingsTable() {
 
   return (
     <Container sx={{ mt: 4, mb: 2 }}>
-      {/* Add refresh button */}
       <Box
         sx={{
           display: 'flex',
@@ -396,23 +383,11 @@ export default function ListingsTable() {
         }}
       >
         <Typography variant="h5" component="h1">
-          Active Listings
+          Active Listings - Strategy Managed
         </Typography>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={refreshAllStrategies}
-          disabled={loading}
-          sx={{ ml: 2 }}
-        >
-          Refresh Strategies
-        </Button>
       </Box>
 
-      <TableContainer
-        component={Paper}
-        sx={{ borderRadius: 2, border: '1px solid #ddd' }}
-      >
+      <TableContainer component={Paper} sx={{ borderRadius: 2, border: '1px solid #ddd' }}>
         <Table sx={{ minWidth: 650 }}>
           <TableHead>
             <TableRow
@@ -515,6 +490,7 @@ export default function ListingsTable() {
                     </Typography>
                   </Box>
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -524,6 +500,7 @@ export default function ListingsTable() {
                 >
                   {row.qty}
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -533,6 +510,7 @@ export default function ListingsTable() {
                 >
                   {row.myPrice}
                 </TableCell>
+
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -556,6 +534,7 @@ export default function ListingsTable() {
                     Assign Rule
                   </Typography>
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -565,6 +544,7 @@ export default function ListingsTable() {
                 >
                   {row.competition}
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -618,6 +598,7 @@ export default function ListingsTable() {
                     {row.minPrice}
                   </Typography>
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',
@@ -641,6 +622,7 @@ export default function ListingsTable() {
                     {row.maxPrice}
                   </Typography>
                 </TableCell>
+                
                 <TableCell
                   sx={{
                     border: '1px solid #ddd',

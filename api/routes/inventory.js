@@ -60,4 +60,71 @@ router.get('/current-price/:itemId', requireAuth, async (req, res) => {
   }
 });
 
+// Add new route to check stored prices
+router.get('/stored-prices', requireAuth, async (req, res) => {
+  try {
+    if (!global.priceStore) {
+      global.priceStore = new Map();
+    }
+
+    const storedPrices = Array.from(global.priceStore.entries()).map(
+      ([key, data]) => ({
+        key,
+        itemId: data.itemId,
+        sku: data.sku,
+        price: data.price,
+        timestamp: new Date(data.timestamp).toISOString(),
+        ageSeconds: Math.round((Date.now() - data.timestamp) / 1000),
+      })
+    );
+
+    return res.json({
+      success: true,
+      message: 'Current stored prices',
+      count: storedPrices.length,
+      data: storedPrices,
+    });
+  } catch (error) {
+    console.error('Error getting stored prices:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error getting stored prices',
+      error: error.message,
+    });
+  }
+});
+
+// Add route to manually force price update in listings
+router.post('/force-price-update/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { price, sku = 'PART123' } = req.body;
+
+    if (!price) {
+      return res.status(400).json({
+        success: false,
+        message: 'Price is required',
+      });
+    }
+
+    const { storeUpdatedPrice } = await import(
+      '../services/inventoryService.js'
+    );
+    const result = storeUpdatedPrice(itemId, sku, price);
+
+    return res.json({
+      success: true,
+      message: `Manually stored price $${price} for ${itemId}/${sku}`,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error forcing price update:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error forcing price update',
+      error: error.message,
+    });
+  }
+});
+
 export default router;

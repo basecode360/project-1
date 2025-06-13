@@ -265,4 +265,297 @@ router.get('/export/:itemId', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/price-history/product/:itemId
+ * Get price history for a specific product (for the listings table)
+ * Query params:
+ *   - limit (optional, defaults to 100)
+ */
+router.get('/product/:itemId', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { itemId } = req.params;
+    const { limit = 100 } = req.query;
+
+    console.log(
+      `📊 Fetching price history for product ${itemId}, limit: ${limit}`
+    );
+
+    // Fetch records for this specific product, most recent first
+    const records = await fetchRawPriceHistory({
+      itemId,
+      sku: null, // Get all SKUs for this item
+      limit: Number(limit),
+    });
+
+    // Calculate summary statistics
+    let summary = null;
+    if (records.length > 0) {
+      const successfulRecords = records.filter((r) => r.success);
+
+      if (successfulRecords.length > 0) {
+        const latestRecord = successfulRecords[0];
+        const oldestRecord = successfulRecords[successfulRecords.length - 1];
+
+        const currentPrice = latestRecord.newPrice;
+        const startPrice = oldestRecord.newPrice;
+        const totalChange = currentPrice - startPrice;
+        const percentChange =
+          startPrice > 0 ? (totalChange / startPrice) * 100 : 0;
+
+        // Count changes by strategy
+        const strategyChanges = {};
+        successfulRecords.forEach((record) => {
+          if (record.strategyName) {
+            strategyChanges[record.strategyName] =
+              (strategyChanges[record.strategyName] || 0) + 1;
+          }
+        });
+
+        summary = {
+          currentPrice,
+          startPrice,
+          totalChange: parseFloat(totalChange.toFixed(2)),
+          percentChange: parseFloat(percentChange.toFixed(2)),
+          totalRecords: records.length,
+          successfulChanges: successfulRecords.length,
+          failedChanges: records.length - successfulRecords.length,
+          latestUpdate: latestRecord.createdAt,
+          firstRecord: oldestRecord.createdAt,
+          strategyBreakdown: strategyChanges,
+          priceDirection:
+            totalChange > 0
+              ? 'increased'
+              : totalChange < 0
+              ? 'decreased'
+              : 'unchanged',
+        };
+      }
+    }
+
+    return res.json({
+      success: true,
+      itemId,
+      recordCount: records.length,
+      summary,
+      priceHistory: records.map((record) => ({
+        id: record._id,
+        date: record.createdAt,
+        oldPrice: record.oldPrice,
+        newPrice: record.newPrice,
+        changeAmount: record.changeAmount,
+        changePercentage: record.changePercentage,
+        changeDirection: record.changeDirection,
+        strategyName: record.strategyName,
+        competitorPrice: record.competitorLowestPrice,
+        status: record.status,
+        source: record.source,
+        success: record.success,
+        error: record.error,
+        sku: record.sku,
+        title: record.title,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching product price history:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching price history',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/price-history/product/:itemId/paginated
+ * Get paginated price history for products with 100+ records
+ */
+router.get('/product/:itemId/paginated', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const {
+      sku = null,
+      limit = 100,
+      page = 1,
+      sortBy = 'createdAt',
+      sortOrder = -1,
+    } = req.query;
+
+    console.log(
+      `📊 Fetching paginated price history for ${itemId}, page: ${page}`
+    );
+
+    const { getPaginatedPriceHistory } = await import(
+      '../services/historyService.js'
+    );
+
+    const result = await getPaginatedPriceHistory({
+      itemId,
+      sku,
+      limit: Number(limit),
+      page: Number(page),
+      sortBy,
+      sortOrder: Number(sortOrder),
+    });
+
+    return res.json({
+      success: true,
+      itemId,
+      sku,
+      ...result,
+      priceHistory: result.records.map((record) => ({
+        id: record._id,
+        date: record.createdAt,
+        oldPrice: record.oldPrice,
+        newPrice: record.newPrice,
+        changeAmount: record.changeAmount,
+        changePercentage: record.changePercentage,
+        changeDirection: record.changeDirection,
+        strategyName: record.strategyName,
+        competitorPrice: record.competitorLowestPrice,
+        status: record.status,
+        source: record.source,
+        success: record.success,
+        error: record.error,
+        sku: record.sku,
+        title: record.title,
+        executedAt: record.executedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching paginated price history:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching paginated price history',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/price-history/bulk
+ * Bulk insert price history records
+ */
+router.post('/bulk', requireAuth, async (req, res) => {
+  try {
+    const { records } = req.body;
+    const userId = req.user.id;
+
+    if (!records || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Records array is required',
+      });
+    }
+
+    // Add userId to all records
+    const recordsWithUser = records.map((record) => ({
+      ...record,
+      userId,
+    }));
+
+    const { bulkInsertPriceHistory } = await import(
+      '../services/historyService.js'
+    );
+    const result = await bulkInsertPriceHistory(recordsWithUser);
+
+    return res.json({
+      success: true,
+      message: `Bulk inserted ${result.insertedCount} price history records`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error bulk inserting price history:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error bulk inserting price history',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/price-history/archive
+ * Archive old price history records
+ */
+router.post('/archive', requireAuth, async (req, res) => {
+  try {
+    const { keepRecentCount = 1000 } = req.body;
+
+    const { archiveOldPriceHistory } = await import(
+      '../services/historyService.js'
+    );
+    const result = await archiveOldPriceHistory(Number(keepRecentCount));
+
+    return res.json({
+      success: true,
+      message: `Archived old price history records`,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error archiving price history:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error archiving price history',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/price-history/summary/:itemId
+ * Get just the summary statistics for a product (lightweight for table display)
+ */
+router.get('/summary/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+
+    // Fetch only recent records for summary
+    const records = await fetchRawPriceHistory({
+      itemId,
+      sku: null,
+      limit: 10, // Just need recent records for summary
+    });
+
+    let summary = {
+      hasHistory: false,
+      totalChanges: 0,
+      latestChange: null,
+      currentPrice: null,
+      priceDirection: 'unchanged',
+    };
+
+    if (records.length > 0) {
+      const successfulRecords = records.filter((r) => r.success);
+
+      if (successfulRecords.length > 0) {
+        const latestRecord = successfulRecords[0];
+
+        summary = {
+          hasHistory: true,
+          totalChanges: successfulRecords.length,
+          latestChange: latestRecord.createdAt,
+          currentPrice: latestRecord.newPrice,
+          lastChangeAmount: latestRecord.changeAmount,
+          priceDirection: latestRecord.changeDirection || 'unchanged',
+          lastStrategy: latestRecord.strategyName,
+        };
+      }
+    }
+
+    return res.json({
+      success: true,
+      itemId,
+      summary,
+    });
+  } catch (error) {
+    console.error('Error fetching price history summary:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching price history summary',
+      error: error.message,
+    });
+  }
+});
+
 export default router;

@@ -177,8 +177,30 @@ router.post('/products/:itemId', requireAuth, async (req, res) => {
       });
     }
 
+    // Apply strategies using the proven editProduct method
     const results = await applyStrategiesToProduct(itemId, strategyIds, sku);
     const successCount = results.filter((r) => r.success).length;
+
+    // After applying strategies, immediately execute them to update prices
+    if (successCount > 0) {
+      console.log(
+        `🚀 Executing strategies for item ${itemId} after application...`
+      );
+      const { executeStrategiesForItem } = await import(
+        '../services/strategyService.js'
+      );
+      const executeResult = await executeStrategiesForItem(itemId);
+
+      if (executeResult.success) {
+        console.log(`✅ Price automatically updated for item ${itemId}`);
+        return res.json({
+          success: true,
+          message: `Applied ${successCount} strategies and updated price for item ${itemId}`,
+          results: results.concat(executeResult.results || []),
+          priceUpdated: true,
+        });
+      }
+    }
 
     return res.json({
       success: true,

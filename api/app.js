@@ -58,7 +58,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/pricing-strategies', pricingStrategiesRouter);
 
 // 5) Price-history endpoints (history/:itemId, analytics/:itemId, export/:itemId)
-app.use('/api/ebay', priceHistoryRoutes);
+app.use('/api/price-history', priceHistoryRoutes); // Add price history routes
 
 // 6) Competitor‐rules endpoints (create/edit/delete competitor rules, debug, etc.)
 app.use('/api/competitor-rules', competitorRulesRouter);

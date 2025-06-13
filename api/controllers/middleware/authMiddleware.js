@@ -2,42 +2,78 @@
 import jwt from 'jsonwebtoken';
 import User from '../../models/Users.js';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error('Missing JWT_SECRET environment variable');
+// Provide a fallback JWT secret if not set in environment
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  'fallback_jwt_secret_for_development_only_not_secure';
+
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    '⚠️  WARNING: JWT_SECRET not set in environment variables. Using fallback secret.'
+  );
+  console.warn('⚠️  WARNING: This is not secure for production use.');
 }
 
-/**
- * Protect routes by requiring a valid JWT in "Authorization: Bearer <token>".
- * Attaches `req.user = { id, email }` if valid.
- */
-export function requireAuth(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Unauthorized' });
-  }
-  const token = authHeader.split(' ')[1];
+export const requireAuth = async (req, res, next) => {
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = { id: payload.id, email: payload.email };
-    next();
-  } catch (err) {
-    return res.status(401).json({ success: false, message: 'Invalid token' });
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. No token provided.',
+      });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      
+      // Check if token is about to expire (within 5 minutes)
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = decoded.exp - currentTime;
+      
+      if (timeUntilExpiry < 300) { // Less than 5 minutes
+        console.warn(`⚠️ JWT token expiring soon for user ${decoded.id} (${timeUntilExpiry}s remaining)`);
+      }
+      
+      const user = await User.findById(decoded.id);
+
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token. User not found.',
+        });
+      }
+
+      req.user = user;
+      next();
+    } catch (jwtError) {
+      console.error('JWT verification error:', jwtError.message);
+      
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Token expired. Please log in again.',
+          expired: true,
+        });
+      }
+      
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token.',
+      });
+    }
+  } catch (error) {
+    console.error('Auth middleware error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error in authentication',
+    });
   }
-}
+};
 
-/**
- * Optionally use on callback when we pass state = JWT. We verify stateJwt here.
- */
-export function verifyStateJwt(stateJwt) {
-  return jwt.verify(stateJwt, JWT_SECRET);
-}
+export const generateToken = (userId) => {
+  return jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: '24h' });
+};
 
-/**
- * Given a user ID, generate a new JWT to return to frontend.
- */
-export function generateJwtForUser(user) {
-  // Payload can include any minimal info; include “id” and “email”.
-  const payload = { id: user._id, email: user.email };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '2h' });
-}
+export default { requireAuth, generateToken };

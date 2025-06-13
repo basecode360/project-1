@@ -2,130 +2,285 @@
 
 import mongoose from 'mongoose';
 
-const priceHistorySchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null,
-  },
+const priceHistorySchema = new mongoose.Schema(
+  {
+    // Core Product Identification
+    itemId: {
+      type: String,
+      required: [true, 'Item ID is required'],
+      index: true,
+      trim: true,
+    },
 
-  // eBay ItemID
-  itemId: {
-    type: String,
-    required: true,
-    index: true,
-  },
+    sku: {
+      type: String,
+      index: true,
+      trim: true,
+      default: null,
+    },
 
-  // Variation SKU (or null if no variation)
-  sku: {
-    type: String,
-    required: true,
-    index: true,
-  },
+    title: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Title cannot exceed 500 characters'],
+    },
 
-  // The item’s title at time of change
-  title: {
-    type: String,
-    default: null,
-  },
+    // Price Information
+    oldPrice: {
+      type: Number,
+      min: [0, 'Old price cannot be negative'],
+      default: null,
+    },
 
-  // Price before the change
-  oldPrice: {
-    type: Number,
-    default: null,
-  },
+    newPrice: {
+      type: Number,
+      required: [true, 'New price is required'],
+      min: [0, 'New price cannot be negative'],
+    },
 
-  // Price after the change
-  newPrice: {
-    type: Number,
-    required: true,
-  },
+    currency: {
+      type: String,
+      default: 'USD',
+      enum: ['USD', 'EUR', 'GBP', 'CAD', 'AUD'],
+      uppercase: true,
+    },
 
-  // Currency code (e.g. USD)
-  currency: {
-    type: String,
-    default: 'USD',
-  },
+    // Calculated Change Information
+    changeAmount: {
+      type: Number,
+      default: null,
+    },
 
-  // How many % changed compared to oldPrice
-  changePercentage: {
-    type: Number,
-    default: null,
-  },
+    changePercentage: {
+      type: Number,
+      default: null,
+    },
 
-  // Absolute difference: newPrice − oldPrice
-  changeAmount: {
-    type: Number,
-    default: null,
-  },
+    changeDirection: {
+      type: String,
+      enum: ['increased', 'decreased', 'unchanged'],
+      default: null,
+    },
 
-  // “increased” / “decreased” / “unchanged” / null
-  changeDirection: {
-    type: String,
-    enum: ['increased', 'decreased', 'unchanged', null],
-    default: null,
-  },
+    // Competition & Strategy Information
+    competitorLowestPrice: {
+      type: Number,
+      min: [0, 'Competitor price cannot be negative'],
+      default: null,
+    },
 
-  // **New field:** the lowest competitor price that was used
-  competitorLowestPrice: {
-    type: Number,
-    default: null,
-  },
+    strategyName: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Strategy name cannot exceed 100 characters'],
+      default: null,
+    },
 
-  // **New field:** the string name of the pricing strategy used (e.g. “BeatBy0.50”)
-  strategyName: {
-    type: String,
-    default: null,
-  },
+    // Execution Information
+    status: {
+      type: String,
+      required: [true, 'Status is required'],
+      enum: ['pending', 'completed', 'failed', 'skipped'],
+      default: 'pending',
+      index: true,
+    },
 
-  // **New field:** status of this update (“Done”, “Skipped”, “Error” etc.)
-  status: {
-    type: String,
-    enum: ['Done', 'Skipped', 'Error', 'Manual'],
-    required: true,
-  },
+    source: {
+      type: String,
+      enum: ['api', 'manual', 'strategy', 'bulk', 'system'],
+      default: 'api',
+      index: true,
+    },
 
-  // “api” / “manual” / “system”
-  source: {
-    type: String,
-    enum: ['api', 'manual', 'system'],
-    default: 'api',
-  },
+    success: {
+      type: Boolean,
+      required: [true, 'Success status is required'],
+      default: false,
+      index: true,
+    },
 
-  // Raw API payload or error details (if any)
-  apiResponse: {
-    type: mongoose.Schema.Types.Mixed,
-    default: null,
-  },
+    // User & System Information
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'User ID is required'],
+      index: true,
+    },
 
-  // Boolean: did the price‐change attempt succeed?
-  success: {
-    type: Boolean,
-    required: true,
-  },
+    // Execution Details
+    apiResponse: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
 
-  // If success===false, any error object
-  error: {
-    type: mongoose.Schema.Types.Mixed,
-    default: null,
-  },
+    error: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
 
-  // Free‐form metadata (optional)
-  metadata: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {},
-  },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
 
-  // Timestamp
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true,
+    // Timestamps
+    executedAt: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+
+    // Performance Tracking
+    executionTimeMs: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+
+    retryCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
   },
+  {
+    timestamps: true, // Adds createdAt and updatedAt automatically
+    collection: 'pricehistories', // Explicit collection name
+  }
+);
+
+// Compound indexes for efficient querying of 100+ records per product
+priceHistorySchema.index({ itemId: 1, createdAt: -1 }); // Most recent first for a product
+priceHistorySchema.index({ itemId: 1, sku: 1, createdAt: -1 }); // For variation products
+priceHistorySchema.index({ userId: 1, createdAt: -1 }); // User's history
+priceHistorySchema.index({ success: 1, createdAt: -1 }); // Successful changes only
+priceHistorySchema.index({ strategyName: 1, createdAt: -1 }); // Strategy performance
+priceHistorySchema.index({ source: 1, createdAt: -1 }); // Source-based queries
+
+// TTL index to automatically delete old records (optional - remove if you want to keep all history)
+// priceHistorySchema.index({ createdAt: 1 }, { expireAfterSeconds: 31536000 }); // 1 year
+
+// Virtual for formatted price display
+priceHistorySchema.virtual('formattedNewPrice').get(function () {
+  return `${this.currency} ${this.newPrice.toFixed(2)}`;
 });
 
-// Compound index to optimize lookups by itemId/sku/date
-priceHistorySchema.index({ itemId: 1, sku: 1, createdAt: -1 });
+priceHistorySchema.virtual('formattedOldPrice').get(function () {
+  if (this.oldPrice === null || this.oldPrice === undefined) return 'N/A';
+  return `${this.currency} ${this.oldPrice.toFixed(2)}`;
+});
+
+priceHistorySchema.virtual('formattedChange').get(function () {
+  if (this.changeAmount === null || this.changeAmount === undefined)
+    return 'N/A';
+  const sign = this.changeAmount >= 0 ? '+' : '';
+  return `${sign}${this.currency} ${this.changeAmount.toFixed(2)}`;
+});
+
+// Static method to get paginated history for a product (handles 100+ records efficiently)
+priceHistorySchema.statics.getProductHistory = function (
+  itemId,
+  sku = null,
+  limit = 100,
+  page = 1,
+  sortBy = 'createdAt',
+  sortOrder = -1
+) {
+  const query = { itemId };
+  if (sku) query.sku = sku;
+
+  const skip = (page - 1) * limit;
+  const sort = {};
+  sort[sortBy] = sortOrder;
+
+  return this.find(query).sort(sort).skip(skip).limit(limit).lean(); // Use lean() for better performance when just reading data
+};
+
+// Static method to get statistics for a product
+priceHistorySchema.statics.getProductStats = function (itemId, sku = null) {
+  const query = { itemId, success: true };
+  if (sku) query.sku = sku;
+
+  return this.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: null,
+        totalRecords: { $sum: 1 },
+        avgPrice: { $avg: '$newPrice' },
+        minPrice: { $min: '$newPrice' },
+        maxPrice: { $max: '$newPrice' },
+        totalPriceChange: { $sum: '$changeAmount' },
+        lastUpdate: { $max: '$createdAt' },
+        firstRecord: { $min: '$createdAt' },
+        strategiesUsed: { $addToSet: '$strategyName' },
+      },
+    },
+  ]);
+};
+
+// Static method to get latest price for an item
+priceHistorySchema.statics.getLatestPrice = function (itemId, sku = null) {
+  const query = { itemId, success: true };
+  if (sku) query.sku = sku;
+
+  return this.findOne(query).sort({ createdAt: -1 });
+};
+
+// Static method to clean up old failed records (keep only successful ones for history)
+priceHistorySchema.statics.cleanupFailedRecords = function (daysOld = 30) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+  return this.deleteMany({
+    success: false,
+    createdAt: { $lt: cutoffDate },
+  });
+};
+
+// Instance method to calculate change metrics
+priceHistorySchema.methods.calculateChange = function () {
+  if (this.oldPrice && this.newPrice) {
+    this.changeAmount = Number((this.newPrice - this.oldPrice).toFixed(2));
+
+    if (this.oldPrice > 0) {
+      this.changePercentage = Number(
+        (((this.newPrice - this.oldPrice) / this.oldPrice) * 100).toFixed(2)
+      );
+    }
+
+    this.changeDirection =
+      this.changeAmount > 0
+        ? 'increased'
+        : this.changeAmount < 0
+        ? 'decreased'
+        : 'unchanged';
+  }
+  return this;
+};
+
+// Pre-save middleware to automatically calculate changes
+priceHistorySchema.pre('save', function (next) {
+  // Only calculate if both prices are available and change hasn't been calculated
+  if (this.oldPrice !== null && this.newPrice && !this.changeAmount) {
+    this.calculateChange();
+  }
+
+  // Set executedAt if not provided
+  if (!this.executedAt) {
+    this.executedAt = new Date();
+  }
+
+  next();
+});
+
+// Post-save middleware for logging (optional)
+priceHistorySchema.post('save', function (doc) {
+  console.log(
+    `📝 💾 Price history saved: ${doc.itemId} -> $${doc.newPrice} (${doc._id})`
+  );
+});
 
 const PriceHistory = mongoose.model('PriceHistory', priceHistorySchema);
+
 export default PriceHistory;
