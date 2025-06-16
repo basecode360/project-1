@@ -36,31 +36,41 @@ export default function Home({ handleLogout }) {
 
       if (code && user?.id) {
         try {
+          console.log('🔄 Exchanging code for tokens...');
           const resp = await apiService.auth.exchangeCode({
             code,
             userId: user.id,
           });
 
           if (!resp.success) throw new Error(resp.error || 'Exchange failed');
-          localStorage.setItem('userId', user.id);
+
+          console.log('✅ Token exchange successful:', resp.data);
 
           const expiresIn = resp.data.expires_in || 7200; // fallback to 2h
           const expiresAt = Date.now() + expiresIn * 1000;
 
-          localStorage.setItem(
-            'ebay_user_token',
-            JSON.stringify({
-              value: resp.data.access_token,
-              expiry: expiresAt,
-            })
-          );
+          // Store token with expiry info
+          const tokenData = {
+            value: resp.data.access_token,
+            expiry: expiresAt,
+          };
+
+          localStorage.setItem('ebay_user_token', JSON.stringify(tokenData));
+          localStorage.setItem('userId', user.id);
 
           if (resp.data.refresh_token) {
             localStorage.setItem('ebay_refresh_token', resp.data.refresh_token);
           }
 
+          console.log('✅ Tokens stored in localStorage');
+
           setEbayToken(resp.data.access_token);
           setNeedsConnection(false);
+
+          // Close the popup window if it exists
+          if (popupRef.current && !popupRef.current.closed) {
+            popupRef.current.close();
+          }
         } catch (err) {
           console.error('❌ Error exchanging code:', err);
         }
@@ -78,28 +88,44 @@ export default function Home({ handleLogout }) {
       if (!user || !user.id) return;
 
       // 1. Try localStorage first
-      const localToken = localStorage.getItem('ebay_user_token');
-      if (localToken) {
-        setEbayToken(localToken); // use it
-        setNeedsConnection(false); // hide "connect" button
+      const localTokenStr = localStorage.getItem('ebay_user_token');
+      if (localTokenStr) {
+        try {
+          const localTokenData = JSON.parse(localTokenStr);
+          if (localTokenData.expiry > Date.now()) {
+            console.log('✅ Using valid token from localStorage');
+            setEbayToken(localTokenData.value);
+            setNeedsConnection(false);
+            return;
+          } else {
+            console.log('⚠️ Token in localStorage expired, removing...');
+            localStorage.removeItem('ebay_user_token');
+          }
+        } catch (err) {
+          console.warn('⚠️ Invalid token data in localStorage, removing...');
+          localStorage.removeItem('ebay_user_token');
+        }
       }
 
-      // 2. Still validate via backend in case token is expired
+      // 2. Try to get/refresh token from backend
       try {
         const token = await getValidAuthToken(user.id);
         if (token) {
-          localStorage.setItem('ebay_user_token', token);
+          console.log('✅ Got valid token from backend');
+          const tokenData = {
+            value: token,
+            expiry: Date.now() + 7200 * 1000, // 2 hours default
+          };
+          localStorage.setItem('ebay_user_token', JSON.stringify(tokenData));
           setEbayToken(token);
           setNeedsConnection(false);
-        } else if (!localToken) {
-          // If no local token either
+        } else {
+          console.log('❌ No valid token available, need to connect');
           setNeedsConnection(true);
         }
       } catch (err) {
-        if (!localToken) {
-          setNeedsConnection(true);
-        }
         console.warn('⚠️ Unable to fetch/refresh eBay token:', err);
+        setNeedsConnection(true);
       }
     }
 
@@ -221,11 +247,14 @@ export default function Home({ handleLogout }) {
       const top = window.screenY + (window.innerHeight - height) / 2;
 
       const authUrl = `${backendBase}/auth/ebay-login?userId=${user.id}`;
-      window.open(
+      const popup = window.open(
         authUrl,
         '_blank',
         `width=${width},height=${height},top=${top},left=${left}`
       );
+
+      // Store reference to popup
+      popupRef.current = popup;
     };
 
     return (

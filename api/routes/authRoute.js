@@ -176,6 +176,71 @@ router.get('/ebay-login', (req, res) => {
   res.redirect(authUrl);
 });
 
+// Step 2: Handle eBay OAuth callback
+router.get('/ebay-callback', (req, res) => {
+  const { code, state: userId, error } = req.query;
+
+  if (error) {
+    console.error('eBay OAuth error:', error);
+    return res.send(`
+      <html>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                error: '${error}',
+                userId: '${userId}'
+              }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+              window.close();
+            } else {
+              document.body.innerHTML = '<h2>Error: ${error}</h2><p>Please close this window and try again.</p>';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  }
+
+  if (!code || !userId) {
+    return res.send(`
+      <html>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                error: 'Missing authorization code or user ID',
+                userId: '${userId}'
+              }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+              window.close();
+            } else {
+              document.body.innerHTML = '<h2>Error: Missing authorization code</h2><p>Please close this window and try again.</p>';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  }
+
+  // Send the code back to the parent window
+  res.send(`
+    <html>
+      <body>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({
+              code: '${code}',
+              state: '${userId}'
+            }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+            window.close();
+          } else {
+            document.body.innerHTML = '<h2>Authorization successful!</h2><p>Please close this window.</p>';
+          }
+        </script>
+      </body>
+    </html>
+  `);
+});
+
 // (Optional) Step 2: "Generate a code automatically" for testing
 router.get('/generate-code', generateCodeMiddleware);
 
@@ -216,12 +281,14 @@ router.post('/exchange-code', async (req, res) => {
 
     // Call our helper to exchange code ↠ tokens and save them on user.ebay.*
     const tokens = await exchangeCodeForToken(code, userId);
-    // exchangeCodeForToken() itself updates User.ebay.accessToken, refreshToken, expiresAt.
+
+    console.log('✅ Exchange successful, tokens saved for user:', userId);
 
     return sendResponse(res, 200, true, 'Tokens exchanged successfully', {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_in: tokens.expires_in,
+      user_id: userId,
     });
   } catch (err) {
     console.error('POST /auth/exchange-code error:', err);

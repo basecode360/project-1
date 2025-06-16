@@ -39,9 +39,10 @@ export function getEbayAuthUrl(stateJwt) {
 export async function exchangeCodeForToken(code, userId) {
   try {
     const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
-    const basicAuth = Buffer.from(
-      `ChrisVon-MyApp-PRD-d6c9c827e-1bb2dbb6:PRD-6c9c827eb098-0503-4dbc-9c10-4838`
-    ).toString('base64');
+    // Fix: Use environment variables instead of hardcoded credentials
+    const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
+      'base64'
+    );
 
     const data = {
       grant_type: 'authorization_code',
@@ -68,6 +69,7 @@ export async function exchangeCodeForToken(code, userId) {
       },
     });
 
+    console.log('✅ Tokens saved to MongoDB for user:', userId);
     return tokens;
   } catch (err) {
     console.error(
