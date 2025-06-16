@@ -1,6 +1,10 @@
 // services/ebayAuthService.js
 import axios from 'axios';
 import qs from 'qs';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
@@ -8,13 +12,17 @@ const REDIRECT_URI = process.env.REDIRECT_URI;
 const SCOPES =
   process.env.EBAY_OAUTH_SCOPES || 'https://api.ebay.com/oauth/api_scope';
 
-// if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
-//   throw new Error(
-//     'Missing eBay OAuth environment variables (CLIENT_ID, CLIENT_SECRET, EBAY_REDIRECT_URI)'
-//   );
-// }
+import User from '../models/Users.js';
 
-import User from '../models/Users.js'; // <— import the User model now
+// Log environment variables on module load for debugging
+console.log('🔧 eBay Auth Service - Environment variables loaded:', {
+  CLIENT_ID: CLIENT_ID?.substring(0, 10) + '...',
+  CLIENT_SECRET: CLIENT_SECRET?.substring(0, 10) + '...',
+  REDIRECT_URI: REDIRECT_URI,
+  hasClientId: !!CLIENT_ID,
+  hasClientSecret: !!CLIENT_SECRET,
+  hasRedirectUri: !!REDIRECT_URI,
+});
 
 /**
  * Build the URL you redirect your frontend user to, for them to consent on eBay.
@@ -42,6 +50,14 @@ export async function exchangeCodeForToken(code, userId) {
 
     // Validate environment variables
     if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+      console.error('❌ Environment variables at exchange time:', {
+        CLIENT_ID: !!CLIENT_ID,
+        CLIENT_SECRET: !!CLIENT_SECRET,
+        REDIRECT_URI: !!REDIRECT_URI,
+        processEnvClientId: !!process.env.CLIENT_ID,
+        processEnvClientSecret: !!process.env.CLIENT_SECRET,
+        processEnvRedirectUri: !!process.env.REDIRECT_URI,
+      });
       throw new Error(
         'Missing eBay OAuth environment variables (CLIENT_ID, CLIENT_SECRET, REDIRECT_URI)'
       );

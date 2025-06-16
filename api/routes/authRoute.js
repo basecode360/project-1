@@ -300,9 +300,6 @@ router.get('/automated-login', async (req, res) => {
 });
 
 // ─── POST /auth/exchange-code ─────────────────────────────────────
-// Body: { code: string, userId: string }
-// Exchanges an eBay OAuth "authorization code" for user‐specific access/refresh tokens.
-// Stores the resulting tokens under User.ebay.* fields.
 router.post('/exchange-code', async (req, res) => {
   try {
     const { code, userId } = req.body;
@@ -330,6 +327,11 @@ router.post('/exchange-code', async (req, res) => {
     }
 
     console.log('✅ User found, proceeding with token exchange...');
+    console.log('🔧 Environment check before calling service:', {
+      CLIENT_ID: !!process.env.CLIENT_ID,
+      CLIENT_SECRET: !!process.env.CLIENT_SECRET,
+      REDIRECT_URI: !!process.env.REDIRECT_URI,
+    });
 
     // Call our helper to exchange code ↠ tokens and save them on user.ebay.*
     const tokens = await exchangeCodeForToken(code, userId);
