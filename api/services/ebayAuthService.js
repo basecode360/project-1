@@ -46,7 +46,7 @@ export async function exchangeCodeForToken(code, userId) {
     const data = {
       grant_type: 'authorization_code',
       code,
-      redirect_uri: 'https://17autoparts.com/auth/popup-callback',
+      redirect_uri: REDIRECT_URI,
     };
 
     const response = await axios.post(tokenUrl, qs.stringify(data), {
