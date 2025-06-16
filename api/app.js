@@ -23,16 +23,14 @@ const app = express();
 // ── Connect to MongoDB ─────────────────────────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => {
-  })
-  .catch((err) => {
-  });
+  .then(() => {})
+  .catch((err) => {});
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(
   cors({
-    origin: '*',
+    origin: ['https://17autoparts.com'],
     credentials: true,
   })
 );
@@ -83,6 +81,4 @@ app.get('/', (req, res) => {
 
 // ── Start the server ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-});
-
+app.listen(PORT, () => {});
