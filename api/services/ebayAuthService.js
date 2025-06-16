@@ -39,7 +39,14 @@ export function getEbayAuthUrl(stateJwt) {
 export async function exchangeCodeForToken(code, userId) {
   try {
     const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
-    // Fix: Use environment variables instead of hardcoded credentials
+
+    // Validate environment variables
+    if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+      throw new Error(
+        'Missing eBay OAuth environment variables (CLIENT_ID, CLIENT_SECRET, REDIRECT_URI)'
+      );
+    }
+
     const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString(
       'base64'
     );
@@ -50,6 +57,17 @@ export async function exchangeCodeForToken(code, userId) {
       redirect_uri: REDIRECT_URI,
     };
 
+    console.log('🔄 Making token exchange request:', {
+      tokenUrl,
+      grant_type: data.grant_type,
+      redirect_uri: data.redirect_uri,
+      codeLength: code?.length,
+      userId,
+      clientId: CLIENT_ID?.substring(0, 10) + '...',
+      clientSecretLength: CLIENT_SECRET?.length,
+      basicAuthLength: basicAuth?.length,
+    });
+
     const response = await axios.post(tokenUrl, qs.stringify(data), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -57,11 +75,18 @@ export async function exchangeCodeForToken(code, userId) {
       },
     });
 
+    console.log('✅ eBay token response received:', {
+      status: response.status,
+      hasAccessToken: !!response.data.access_token,
+      hasRefreshToken: !!response.data.refresh_token,
+      expiresIn: response.data.expires_in,
+    });
+
     // 1) Save tokens on the User model:
     const tokens = response.data; // { access_token, refresh_token, expires_in, … }
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-    await User.findByIdAndUpdate(userId, {
+    const updateResult = await User.findByIdAndUpdate(userId, {
       $set: {
         'ebay.accessToken': tokens.access_token,
         'ebay.refreshToken': tokens.refresh_token,
@@ -69,13 +94,24 @@ export async function exchangeCodeForToken(code, userId) {
       },
     });
 
+    if (!updateResult) {
+      throw new Error('Failed to update user with eBay tokens');
+    }
+
     console.log('✅ Tokens saved to MongoDB for user:', userId);
     return tokens;
   } catch (err) {
-    console.error(
-      '[exchangeCodeForToken] ERROR exchanging code:',
-      err?.response?.data || err
-    );
+    console.error('[exchangeCodeForToken] ERROR:', {
+      message: err.message,
+      response: err?.response?.data,
+      status: err?.response?.status,
+      config: {
+        url: err?.config?.url,
+        method: err?.config?.method,
+        headers: err?.config?.headers ? 'present' : 'missing',
+        data: err?.config?.data ? qs.parse(err.config.data) : 'missing',
+      },
+    });
     throw err;
   }
 }

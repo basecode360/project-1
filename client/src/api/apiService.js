@@ -228,7 +228,10 @@ const auth = {
       const resp = await authClient.post('/register', credentials);
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
   login: async (credentials) => {
@@ -236,31 +239,61 @@ const auth = {
       const resp = await authClient.post('/login', credentials);
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
   exchangeCode: async ({ code, userId }) => {
     try {
+      console.log('📡 Calling exchange-code API with:', {
+        code: code.substring(0, 10) + '...',
+        userId,
+      });
       const resp = await authClient.post('/exchange-code', { code, userId });
+      console.log('📡 Exchange-code response:', resp.data);
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      console.error(
+        '📡 Exchange-code error:',
+        err.response?.data || err.message
+      );
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
   getEbayUserToken: async (userId) => {
     try {
+      console.log('📡 Getting eBay user token for:', userId);
       const resp = await authClient.get('/token', { params: { userId } });
+      console.log('📡 Get token response:', resp.data);
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      console.error('📡 Get token error:', err.response?.data || err.message);
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
   refreshEbayUserToken: async (userId) => {
     try {
+      console.log('📡 Refreshing eBay user token for:', userId);
       const resp = await authClient.get('/refresh', { params: { userId } });
+      console.log('📡 Refresh token response:', resp.data);
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      console.error(
+        '📡 Refresh token error:',
+        err.response?.data || err.message
+      );
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
   ebayLogout: async (userId) => {
@@ -268,7 +301,10 @@ const auth = {
       const resp = await authClient.post('/ebay-logout', { userId });
       return resp.data;
     } catch (err) {
-      return { success: false, error: err.message };
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
     }
   },
 };

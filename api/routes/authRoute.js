@@ -21,6 +21,25 @@ import {
 
 const router = express.Router();
 
+// Validate eBay credentials at startup
+if (
+  !process.env.CLIENT_ID ||
+  !process.env.CLIENT_SECRET ||
+  !process.env.REDIRECT_URI
+) {
+  console.error('❌ Missing required eBay OAuth environment variables:');
+  console.error('CLIENT_ID:', !!process.env.CLIENT_ID);
+  console.error('CLIENT_SECRET:', !!process.env.CLIENT_SECRET);
+  console.error('REDIRECT_URI:', !!process.env.REDIRECT_URI);
+  throw new Error('Missing eBay OAuth environment variables');
+}
+
+console.log('✅ eBay OAuth environment variables loaded:', {
+  CLIENT_ID: process.env.CLIENT_ID?.substring(0, 10) + '...',
+  CLIENT_SECRET: process.env.CLIENT_SECRET?.substring(0, 10) + '...',
+  REDIRECT_URI: process.env.REDIRECT_URI,
+});
+
 // ── Token Management ────────────────────────────────────────────────────────────
 
 const tokenManager = {
@@ -176,9 +195,16 @@ router.get('/ebay-login', (req, res) => {
   res.redirect(authUrl);
 });
 
-// Step 2: Handle eBay OAuth callback
-router.get('/ebay-callback', (req, res) => {
+// Step 2: Handle eBay OAuth callback (updated to match frontend route)
+router.get('/popup-callback', (req, res) => {
   const { code, state: userId, error } = req.query;
+
+  console.log('🔄 eBay popup callback received:', {
+    hasCode: !!code,
+    userId,
+    error,
+    fullUrl: req.url,
+  });
 
   if (error) {
     console.error('eBay OAuth error:', error);
@@ -190,7 +216,7 @@ router.get('/ebay-callback', (req, res) => {
               window.opener.postMessage({
                 error: '${error}',
                 userId: '${userId}'
-              }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+              }, 'https://17autoparts.com');
               window.close();
             } else {
               document.body.innerHTML = '<h2>Error: ${error}</h2><p>Please close this window and try again.</p>';
@@ -202,6 +228,7 @@ router.get('/ebay-callback', (req, res) => {
   }
 
   if (!code || !userId) {
+    console.error('Missing code or userId:', { code: !!code, userId });
     return res.send(`
       <html>
         <body>
@@ -210,7 +237,7 @@ router.get('/ebay-callback', (req, res) => {
               window.opener.postMessage({
                 error: 'Missing authorization code or user ID',
                 userId: '${userId}'
-              }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+              }, 'https://17autoparts.com');
               window.close();
             } else {
               document.body.innerHTML = '<h2>Error: Missing authorization code</h2><p>Please close this window and try again.</p>';
@@ -221,16 +248,20 @@ router.get('/ebay-callback', (req, res) => {
     `);
   }
 
+  console.log('✅ Sending code to parent window for user:', userId);
+
   // Send the code back to the parent window
   res.send(`
     <html>
       <body>
         <script>
+          console.log('📨 Sending message to parent with code');
           if (window.opener) {
             window.opener.postMessage({
               code: '${code}',
               state: '${userId}'
-            }, '${process.env.FRONTEND_URL || 'http://localhost:5173'}');
+            }, 'https://17autoparts.com');
+            console.log('✅ Message sent, closing popup');
             window.close();
           } else {
             document.body.innerHTML = '<h2>Authorization successful!</h2><p>Please close this window.</p>';
@@ -239,6 +270,13 @@ router.get('/ebay-callback', (req, res) => {
       </body>
     </html>
   `);
+});
+
+// Keep the old route for backwards compatibility
+router.get('/ebay-callback', (req, res) => {
+  // Redirect to the new route
+  const queryString = new URLSearchParams(req.query).toString();
+  res.redirect(`/auth/popup-callback?${queryString}`);
 });
 
 // (Optional) Step 2: "Generate a code automatically" for testing
@@ -269,15 +307,29 @@ router.post('/exchange-code', async (req, res) => {
   try {
     const { code, userId } = req.body;
 
+    console.log('🔄 Exchange code request received:', {
+      hasCode: !!code,
+      codeLength: code?.length,
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+
     if (!code || !userId) {
+      console.error('❌ Missing required parameters:', {
+        hasCode: !!code,
+        hasUserId: !!userId,
+      });
       return sendResponse(res, 400, false, 'Both code and userId are required');
     }
 
     // Verify user exists
     const user = await User.findById(userId);
     if (!user) {
+      console.error('❌ User not found:', userId);
       return sendResponse(res, 404, false, 'User not found');
     }
+
+    console.log('✅ User found, proceeding with token exchange...');
 
     // Call our helper to exchange code ↠ tokens and save them on user.ebay.*
     const tokens = await exchangeCodeForToken(code, userId);
@@ -291,12 +343,20 @@ router.post('/exchange-code', async (req, res) => {
       user_id: userId,
     });
   } catch (err) {
-    console.error('POST /auth/exchange-code error:', err);
+    console.error('❌ POST /auth/exchange-code error:', {
+      message: err.message,
+      response: err.response?.data,
+      status: err.response?.status,
+      stack: err.stack,
+    });
+
     return sendResponse(
       res,
       err.response?.status || 500,
       false,
-      err.message || 'Failed to exchange code'
+      err.response?.data?.error_description ||
+        err.message ||
+        'Failed to exchange code'
     );
   }
 });

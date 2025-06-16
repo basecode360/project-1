@@ -30,19 +30,48 @@ export default function Home({ handleLogout }) {
   // Handle OAuth popup messages
   useEffect(() => {
     const handleMessage = async (event) => {
-      if (event.origin !== window.location.origin) return;
+      console.log('📨 Received message from popup:', event.data);
+      console.log('📨 Event origin:', event.origin);
+      console.log('📨 Expected origin:', window.location.origin);
 
-      const { code, state, expires_in } = event.data;
+      // For production, allow messages from the same origin
+      if (
+        event.origin !== window.location.origin &&
+        event.origin !== 'https://17autoparts.com'
+      ) {
+        console.warn('⚠️ Message from unexpected origin, ignoring');
+        return;
+      }
+
+      const { code, state, error } = event.data;
+
+      if (error) {
+        console.error('❌ OAuth error from popup:', error);
+        alert('eBay authorization failed: ' + error);
+        return;
+      }
 
       if (code && user?.id) {
         try {
           console.log('🔄 Exchanging code for tokens...');
+          console.log(
+            '🔄 Code received (first 20 chars):',
+            code.substring(0, 20) + '...'
+          );
+          console.log('🔄 User ID:', user.id);
+
           const resp = await apiService.auth.exchangeCode({
             code,
             userId: user.id,
           });
 
-          if (!resp.success) throw new Error(resp.error || 'Exchange failed');
+          console.log('📡 Exchange response:', resp);
+
+          if (!resp.success) {
+            console.error('❌ Exchange failed:', resp.error);
+            alert('Failed to exchange authorization code: ' + resp.error);
+            throw new Error(resp.error || 'Exchange failed');
+          }
 
           console.log('✅ Token exchange successful:', resp.data);
 
@@ -71,9 +100,17 @@ export default function Home({ handleLogout }) {
           if (popupRef.current && !popupRef.current.closed) {
             popupRef.current.close();
           }
+
+          alert('✅ Successfully connected to eBay!');
         } catch (err) {
           console.error('❌ Error exchanging code:', err);
+          alert('Error connecting to eBay: ' + err.message);
         }
+      } else {
+        console.warn('⚠️ No code or user ID in message:', {
+          hasCode: !!code,
+          userId: user?.id,
+        });
       }
     };
 
@@ -237,8 +274,15 @@ export default function Home({ handleLogout }) {
     const openEbayOAuthPopup = () => {
       if (!user || !user.id) {
         console.error('No user ID available – cannot start eBay OAuth.');
+        alert('No user ID available. Please log in again.');
         return;
       }
+
+      console.log('🚀 Opening eBay OAuth popup for user:', user.id);
+
+      // Get the backend URL from environment or use current domain
+      const backendBase =
+        import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
       // 3a) Open a small popup centered on the screen:
       const width = 600;
@@ -247,14 +291,34 @@ export default function Home({ handleLogout }) {
       const top = window.screenY + (window.innerHeight - height) / 2;
 
       const authUrl = `${backendBase}/auth/ebay-login?userId=${user.id}`;
+      console.log('🚀 Auth URL:', authUrl);
+
       const popup = window.open(
         authUrl,
-        '_blank',
-        `width=${width},height=${height},top=${top},left=${left}`
+        'ebayAuth',
+        `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
       );
+
+      if (!popup) {
+        console.error('❌ Failed to open popup - might be blocked');
+        alert(
+          'Popup was blocked. Please allow popups for this site and try again.'
+        );
+        return;
+      }
 
       // Store reference to popup
       popupRef.current = popup;
+
+      console.log('✅ Popup opened successfully');
+
+      // Optional: Monitor popup closure
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          console.log('🔍 Popup was closed');
+        }
+      }, 1000);
     };
 
     return (
