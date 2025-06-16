@@ -30,9 +30,7 @@ export default function Home({ handleLogout }) {
   // Handle OAuth popup messages
   useEffect(() => {
     const handleMessage = async (event) => {
-      console.log('📨 Received message from popup:', event.data);
-      console.log('📨 Event origin:', event.origin);
-      console.log('📨 Expected origin:', window.location.origin);
+  
 
       // For production, allow messages from the same origin
       if (
@@ -53,19 +51,13 @@ export default function Home({ handleLogout }) {
 
       if (code && user?.id) {
         try {
-          console.log('🔄 Exchanging code for tokens...');
-          console.log(
-            '🔄 Code received (first 20 chars):',
-            code.substring(0, 20) + '...'
-          );
-          console.log('🔄 User ID:', user.id);
+         
 
           const resp = await apiService.auth.exchangeCode({
             code,
             userId: user.id,
           });
 
-          console.log('📡 Exchange response:', resp);
 
           if (!resp.success) {
             console.error('❌ Exchange failed:', resp.error);
@@ -73,7 +65,6 @@ export default function Home({ handleLogout }) {
             throw new Error(resp.error || 'Exchange failed');
           }
 
-          console.log('✅ Token exchange successful:', resp.data);
 
           const expiresIn = resp.data.expires_in || 7200; // fallback to 2h
           const expiresAt = Date.now() + expiresIn * 1000;
@@ -91,7 +82,6 @@ export default function Home({ handleLogout }) {
             localStorage.setItem('ebay_refresh_token', resp.data.refresh_token);
           }
 
-          console.log('✅ Tokens stored in localStorage');
 
           setEbayToken(resp.data.access_token);
           setNeedsConnection(false);
@@ -130,12 +120,10 @@ export default function Home({ handleLogout }) {
         try {
           const localTokenData = JSON.parse(localTokenStr);
           if (localTokenData.expiry > Date.now()) {
-            console.log('✅ Using valid token from localStorage');
             setEbayToken(localTokenData.value);
             setNeedsConnection(false);
             return;
           } else {
-            console.log('⚠️ Token in localStorage expired, removing...');
             localStorage.removeItem('ebay_user_token');
           }
         } catch (err) {
@@ -148,7 +136,6 @@ export default function Home({ handleLogout }) {
       try {
         const token = await getValidAuthToken(user.id);
         if (token) {
-          console.log('✅ Got valid token from backend');
           const tokenData = {
             value: token,
             expiry: Date.now() + 7200 * 1000, // 2 hours default
@@ -157,7 +144,6 @@ export default function Home({ handleLogout }) {
           setEbayToken(token);
           setNeedsConnection(false);
         } else {
-          console.log('❌ No valid token available, need to connect');
           setNeedsConnection(true);
         }
       } catch (err) {
@@ -278,7 +264,6 @@ export default function Home({ handleLogout }) {
         return;
       }
 
-      console.log('🚀 Opening eBay OAuth popup for user:', user.id);
 
       // Get the backend URL from environment or use current domain
       const backendBase =
@@ -291,7 +276,6 @@ export default function Home({ handleLogout }) {
       const top = window.screenY + (window.innerHeight - height) / 2;
 
       const authUrl = `${backendBase}/auth/ebay-login?userId=${user.id}`;
-      console.log('🚀 Auth URL:', authUrl);
 
       const popup = window.open(
         authUrl,
@@ -310,13 +294,11 @@ export default function Home({ handleLogout }) {
       // Store reference to popup
       popupRef.current = popup;
 
-      console.log('✅ Popup opened successfully');
 
       // Optional: Monitor popup closure
       const checkClosed = setInterval(() => {
         if (popup.closed) {
           clearInterval(checkClosed);
-          console.log('🔍 Popup was closed');
         }
       }, 1000);
     };
@@ -369,7 +351,6 @@ export default function Home({ handleLogout }) {
         setNeedsConnection(true);
         setListingsError(null);
 
-        console.log('✅ eBay account disconnected successfully');
       } else {
         console.error('Failed to logout from eBay:', response.error);
         setListingsError('Failed to disconnect eBay account');

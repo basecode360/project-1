@@ -247,12 +247,8 @@ const auth = {
   },
   exchangeCode: async ({ code, userId }) => {
     try {
-      console.log('📡 Calling exchange-code API with:', {
-        code: code.substring(0, 10) + '...',
-        userId,
-      });
+      
       const resp = await authClient.post('/exchange-code', { code, userId });
-      console.log('📡 Exchange-code response:', resp.data);
       return resp.data;
     } catch (err) {
       console.error(
@@ -267,9 +263,7 @@ const auth = {
   },
   getEbayUserToken: async (userId) => {
     try {
-      console.log('📡 Getting eBay user token for:', userId);
       const resp = await authClient.get('/token', { params: { userId } });
-      console.log('📡 Get token response:', resp.data);
       return resp.data;
     } catch (err) {
       console.error('📡 Get token error:', err.response?.data || err.message);
@@ -281,9 +275,7 @@ const auth = {
   },
   refreshEbayUserToken: async (userId) => {
     try {
-      console.log('📡 Refreshing eBay user token for:', userId);
       const resp = await authClient.get('/refresh', { params: { userId } });
-      console.log('📡 Refresh token response:', resp.data);
       return resp.data;
     } catch (err) {
       console.error(
