@@ -259,6 +259,34 @@ export default function Home({ handleLogout }) {
     );
   }
 
+  // Handle eBay account logout
+  const handleEbayLogout = async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await apiService.auth.ebayLogout(user.id);
+
+      if (response.success) {
+        // Clear eBay tokens from localStorage
+        localStorage.removeItem('ebay_user_token');
+        localStorage.removeItem('ebay_refresh_token');
+
+        // Update component state
+        setEbayToken(null);
+        setNeedsConnection(true);
+        setListingsError(null);
+
+        console.log('✅ eBay account disconnected successfully');
+      } else {
+        console.error('Failed to logout from eBay:', response.error);
+        setListingsError('Failed to disconnect eBay account');
+      }
+    } catch (error) {
+      console.error('Error during eBay logout:', error);
+      setListingsError('Error disconnecting eBay account');
+    }
+  };
+
   // 4) Normal dashboard rendering once we have “ebayToken”
   const isDashboard = location.pathname === '/home';
 
@@ -273,7 +301,7 @@ export default function Home({ handleLogout }) {
 
   return (
     <>
-      <Header handleLogout={handleLogout} />
+      <Header handleLogout={handleLogout} handleEbayLogout={handleEbayLogout} />
       {/* <NavTabs /> */}
 
       {/* If you have nested routes under /home, render them here: */}

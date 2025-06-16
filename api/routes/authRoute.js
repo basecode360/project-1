@@ -32,15 +32,12 @@ const tokenManager = {
     this.tokens.expiryTime = user?.ebay?.expiresAt
       ? new Date(user.ebay.expiresAt)
       : null;
-
-
   },
 
   updateTokens(accessToken, refreshToken, expiresIn) {
     this.tokens.accessToken = accessToken;
     if (refreshToken) this.tokens.refreshToken = refreshToken;
     this.tokens.expiryTime = new Date(Date.now() + expiresIn * 1000);
-
   },
 
   isTokenValid() {
@@ -398,6 +395,45 @@ router.get('/refresh', async (req, res) => {
         auth_url: '/auth/ebay-login',
       });
     }
+  }
+});
+
+// ─── POST /auth/ebay-logout ─────────────────────────────────────────
+// Clear eBay tokens from user's account in MongoDB
+router.post('/ebay-logout', async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return sendResponse(res, 400, false, 'userId is required');
+    }
+
+    // Verify user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return sendResponse(res, 404, false, 'User not found');
+    }
+
+    // Clear eBay tokens from the user document
+    await User.findByIdAndUpdate(userId, {
+      $unset: {
+        'ebay.accessToken': 1,
+        'ebay.refreshToken': 1,
+        'ebay.expiresAt': 1,
+      },
+    });
+
+    return sendResponse(
+      res,
+      200,
+      true,
+      'eBay account disconnected successfully'
+    );
+  } catch (err) {
+    console.error('POST /auth/ebay-logout error:', err);
+    return sendResponse(res, 500, false, 'Failed to disconnect eBay account', {
+      error: err.message,
+    });
   }
 });
 

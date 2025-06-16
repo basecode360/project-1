@@ -37,8 +37,6 @@ export function getEbayAuthUrl(stateJwt) {
  * Returns { access_token, refresh_token, expires_in }.
  */
 export async function exchangeCodeForToken(code, userId) {
-  
-
   try {
     const tokenUrl = 'https://api.ebay.com/identity/v1/oauth2/token';
     const basicAuth = Buffer.from(
@@ -48,7 +46,7 @@ export async function exchangeCodeForToken(code, userId) {
     const data = {
       grant_type: 'authorization_code',
       code,
-      redirect_uri: 'https://partstunt.netlify.app/auth/popup-callback',
+      redirect_uri: 'https://17autoparts.com/auth/popup-callback',
     };
 
     const response = await axios.post(tokenUrl, qs.stringify(data), {
@@ -58,13 +56,9 @@ export async function exchangeCodeForToken(code, userId) {
       },
     });
 
- 
-
     // 1) Save tokens on the User model:
     const tokens = response.data; // { access_token, refresh_token, expires_in, … }
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
-
-
 
     await User.findByIdAndUpdate(userId, {
       $set: {

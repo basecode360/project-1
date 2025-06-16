@@ -263,6 +263,14 @@ const auth = {
       return { success: false, error: err.message };
     }
   },
+  ebayLogout: async (userId) => {
+    try {
+      const resp = await authClient.post('/ebay-logout', { userId });
+      return resp.data;
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
 };
 
 /** ————————————— PRICING STRATEGIES ————————————— **/
