@@ -3,6 +3,7 @@ import xml2js from 'xml2js';
 import axios from 'axios';
 import User from '../models/Users.js';
 import Product from '../models/Product.js'; // Import Product model
+import ManualCompetitor from '../models/ManualCompetitor.js'; // Import ManualCompetitor model
 import {
   createCompetitorRule,
   applyRuleToItems,
@@ -458,8 +459,6 @@ router.post('/assign-to-all-active', async (req, res) => {
       ? activeList.ItemArray.Item
       : [activeList.ItemArray.Item];
 
-   
-
     // Step 2: Create competitor rule specifics
     const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
     ruleSpecifics.push({ name: 'AssignedToAllActiveListings', value: 'true' });
@@ -471,7 +470,6 @@ router.post('/assign-to-all-active', async (req, res) => {
     for (const item of items) {
       try {
         const itemId = item.ItemID;
-
 
         const xmlRequest = `
           <?xml version="1.0" encoding="utf-8"?>
@@ -1061,7 +1059,6 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
     : [itemSpecifics];
   const ruleData = {};
 
-
   // STRICT filtering: Only accept fields that are EXCLUSIVELY competitor rule fields
   const COMPETITOR_RULE_FIELDS = [
     // Exact field names for competitor rules (not shared with pricing strategy)
@@ -1098,11 +1095,9 @@ function parseCompetitorRuleFromSpecifics(itemSpecifics, itemId) {
         ruleData[name] = value;
       } else {
         // Log what we're rejecting for debugging
-  
       }
     }
   });
-
 
   // If no actual competitor rule data found, return null
   if (Object.keys(ruleData).length === 0) {
@@ -1397,5 +1392,561 @@ router.get('/fetch-rule/:itemId', getCompetitorRuleForProduct);
 
 // Route to fetch all competitor rules
 router.get('/', getAllCompetitorRules);
+
+/**
+ * ===============================
+ * MANUALLY ADD COMPETITORS TO LISTING (MongoDB Version) - FIXED PRICE EXTRACTION
+ * ===============================
+ */
+router.post('/add-competitors-manually/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId, competitorItemIds } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    if (
+      !competitorItemIds ||
+      !Array.isArray(competitorItemIds) ||
+      competitorItemIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'competitorItemIds array is required',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    const authToken = user.ebay.accessToken;
+
+    // Validate each competitor item ID by fetching basic info
+    const validCompetitors = [];
+    const invalidCompetitors = [];
+
+    for (const compItemId of competitorItemIds) {
+      try {
+        const getItemXml = `
+          <?xml version="1.0" encoding="utf-8"?>
+          <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+            <RequesterCredentials>
+              <eBayAuthToken>${authToken}</eBayAuthToken>
+            </RequesterCredentials>
+            <ItemID>${compItemId.trim()}</ItemID>
+            <DetailLevel>ReturnAll</DetailLevel>
+            <IncludeItemSpecifics>true</IncludeItemSpecifics>
+          </GetItemRequest>
+        `;
+
+        const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
+        const getItemResult = await parseXMLResponse(getItemResponse);
+        const item = isEBayResponseSuccessful(getItemResult, 'GetItem');
+
+        const itemData = item.Item;
+
+        // Enhanced price extraction with multiple fallbacks
+        let price = 0;
+        let currency = 'USD';
+
+        // Function to extract price and currency from price object
+        const extractPrice = (priceObj) => {
+          if (!priceObj) return { price: 0, currency: 'USD' };
+
+          if (typeof priceObj === 'object') {
+            const priceValue = parseFloat(
+              priceObj.Value || priceObj.__value__ || priceObj._ || 0
+            );
+            const currencyValue =
+              priceObj.__attributes__?.currencyID ||
+              priceObj.currencyID ||
+              priceObj['@currencyID'] ||
+              'USD';
+            return { price: priceValue, currency: currencyValue };
+          } else {
+            return { price: parseFloat(priceObj) || 0, currency: 'USD' };
+          }
+        };
+
+        // Try different price fields based on listing type
+        if (itemData.StartPrice) {
+          const extracted = extractPrice(itemData.StartPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.CurrentPrice) {
+          const extracted = extractPrice(itemData.CurrentPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.BuyItNowPrice) {
+          const extracted = extractPrice(itemData.BuyItNowPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.ConvertedCurrentPrice) {
+          const extracted = extractPrice(itemData.ConvertedCurrentPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        }
+
+        // Enhanced image extraction
+        let imageUrl = null;
+        if (itemData.PictureDetails) {
+          if (itemData.PictureDetails.PictureURL) {
+            imageUrl = Array.isArray(itemData.PictureDetails.PictureURL)
+              ? itemData.PictureDetails.PictureURL[0]
+              : itemData.PictureDetails.PictureURL;
+          } else if (itemData.PictureDetails.GalleryURL) {
+            imageUrl = itemData.PictureDetails.GalleryURL;
+          }
+        }
+
+        // Fallback to GalleryURL if available
+        if (!imageUrl && itemData.GalleryURL) {
+          imageUrl = itemData.GalleryURL;
+        }
+
+        const competitorInfo = {
+          itemId: compItemId.trim(),
+          title: itemData.Title || 'Unknown Title',
+          price: price,
+          currency: currency,
+          condition:
+            itemData.ConditionDisplayName ||
+            itemData.ConditionDescription ||
+            'Unknown',
+          imageUrl: imageUrl,
+          productUrl:
+            itemData.ViewItemURL || `https://www.ebay.com/itm/${compItemId}`,
+          locale: itemData.Country || itemData.Site || 'US',
+          addedAt: new Date().toISOString(),
+        };
+
+        console.log(
+          `✅ Competitor ${compItemId}: ${currency} ${price} - ${itemData.Title}`
+        );
+
+        validCompetitors.push(competitorInfo);
+
+        // Add small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error(
+          `❌ Failed to fetch competitor ${compItemId}:`,
+          error.message
+        );
+        invalidCompetitors.push({
+          itemId: compItemId.trim(),
+          error: error.message,
+        });
+      }
+    }
+
+    if (validCompetitors.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid competitor items found',
+        invalidCompetitors,
+      });
+    }
+
+    // Store competitors in MongoDB
+    try {
+      // Find existing manual competitors for this item
+      let manualCompetitorDoc = await ManualCompetitor.findOne({
+        userId,
+        itemId,
+      });
+
+      if (!manualCompetitorDoc) {
+        // Create new document
+        manualCompetitorDoc = new ManualCompetitor({
+          userId,
+          itemId,
+          competitors: [],
+        });
+      }
+
+      // Add new competitors (avoid duplicates)
+      const existingCompetitorIds = new Set(
+        manualCompetitorDoc.competitors.map((c) => c.competitorItemId)
+      );
+
+      const newCompetitors = validCompetitors.filter(
+        (comp) => !existingCompetitorIds.has(comp.itemId)
+      );
+
+      if (newCompetitors.length === 0) {
+        return res.json({
+          success: true,
+          message: 'All competitors already exist',
+          itemId,
+          addedCompetitors: [],
+          invalidCompetitors,
+          summary: {
+            totalRequested: competitorItemIds.length,
+            successfullyAdded: 0,
+            failed: invalidCompetitors.length,
+            alreadyExists: validCompetitors.length,
+          },
+        });
+      }
+
+      // Add new competitors to the document
+      newCompetitors.forEach((comp) => {
+        manualCompetitorDoc.competitors.push({
+          competitorItemId: comp.itemId,
+          title: comp.title,
+          price: comp.price,
+          currency: comp.currency,
+          imageUrl: comp.imageUrl,
+          productUrl: comp.productUrl,
+          locale: comp.locale,
+          condition: comp.condition,
+        });
+      });
+
+      await manualCompetitorDoc.save();
+
+      res.json({
+        success: true,
+        message: `Successfully added ${newCompetitors.length} new competitors manually`,
+        itemId,
+        addedCompetitors: newCompetitors,
+        invalidCompetitors,
+        summary: {
+          totalRequested: competitorItemIds.length,
+          successfullyAdded: newCompetitors.length,
+          failed: invalidCompetitors.length,
+          alreadyExists: validCompetitors.length - newCompetitors.length,
+          totalCompetitors: manualCompetitorDoc.competitors.length,
+        },
+      });
+    } catch (dbError) {
+      console.error('MongoDB error:', dbError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to save competitors to database',
+        error: dbError.message,
+      });
+    }
+  } catch (error) {
+    console.error('Manual Add Competitors Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * ===============================
+ * GET MANUALLY ADDED COMPETITORS FROM MONGODB
+ * ===============================
+ */
+router.get('/get-manual-competitors/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required as query parameter',
+      });
+    }
+
+    // Get manually added competitors from MongoDB
+    const manualCompetitorDoc = await ManualCompetitor.findOne({
+      userId,
+      itemId,
+    });
+
+    if (!manualCompetitorDoc || !manualCompetitorDoc.competitors.length) {
+      return res.json({
+        success: true,
+        itemId,
+        competitors: [],
+        count: 0,
+      });
+    }
+
+    // Transform the data to match the expected format
+    const competitors = manualCompetitorDoc.competitors.map((comp) => ({
+      itemId: comp.competitorItemId,
+      title: comp.title,
+      price: comp.price,
+      currency: comp.currency,
+      imageUrl: comp.imageUrl,
+      productUrl: comp.productUrl,
+      locale: comp.locale,
+      condition: comp.condition,
+      addedAt: comp.addedAt,
+      source: 'Manual',
+    }));
+
+    res.json({
+      success: true,
+      itemId,
+      competitors,
+      count: competitors.length,
+    });
+  } catch (error) {
+    console.error('Get Manual Competitors Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      competitors: [],
+    });
+  }
+});
+
+/**
+ * ===============================
+ * DELETE MANUALLY ADDED COMPETITOR
+ * ===============================
+ */
+router.delete(
+  '/remove-manual-competitor/:itemId/:competitorItemId',
+  async (req, res) => {
+    try {
+      const { itemId, competitorItemId } = req.params;
+      const { userId } = req.query;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'userId is required as query parameter',
+        });
+      }
+
+      // Find and update the document
+      const result = await ManualCompetitor.updateOne(
+        { userId, itemId },
+        {
+          $pull: {
+            competitors: { competitorItemId },
+          },
+        }
+      );
+
+      if (result.modifiedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Competitor not found or already removed',
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Competitor removed successfully',
+        itemId,
+        competitorItemId,
+      });
+    } catch (error) {
+      console.error('Remove Manual Competitor Error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * ===============================
+ * SEARCH COMPETITORS MANUALLY (WITHOUT ADDING)
+ * ===============================
+ */
+router.post('/search-competitors-manually/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId, competitorItemIds } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    if (
+      !competitorItemIds ||
+      !Array.isArray(competitorItemIds) ||
+      competitorItemIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'competitorItemIds array is required',
+      });
+    }
+
+    // Limit to max 20 items
+    const limitedItemIds = competitorItemIds.slice(0, 20);
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+    const authToken = user.ebay.accessToken;
+
+    // Get existing manual competitors to check for duplicates
+    const existingCompetitors = await ManualCompetitor.findOne({
+      userId,
+      itemId,
+    });
+
+    const existingCompetitorIds = new Set(
+      existingCompetitors?.competitors?.map((c) => c.competitorItemId) || []
+    );
+
+    // Search for each competitor item ID
+    const foundCompetitors = [];
+    const notFoundCompetitors = [];
+
+    for (const compItemId of limitedItemIds) {
+      try {
+        const getItemXml = `
+          <?xml version="1.0" encoding="utf-8"?>
+          <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+            <RequesterCredentials>
+              <eBayAuthToken>${authToken}</eBayAuthToken>
+            </RequesterCredentials>
+            <ItemID>${compItemId.trim()}</ItemID>
+            <DetailLevel>ReturnAll</DetailLevel>
+            <IncludeItemSpecifics>true</IncludeItemSpecifics>
+          </GetItemRequest>
+        `;
+
+        const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
+        const getItemResult = await parseXMLResponse(getItemResponse);
+        const item = isEBayResponseSuccessful(getItemResult, 'GetItem');
+
+        const itemData = item.Item;
+
+        // Enhanced price extraction with multiple fallbacks
+        let price = 0;
+        let currency = 'USD';
+
+        // Function to extract price and currency from price object
+        const extractPrice = (priceObj) => {
+          if (!priceObj) return { price: 0, currency: 'USD' };
+
+          if (typeof priceObj === 'object') {
+            const priceValue = parseFloat(
+              priceObj.Value || priceObj.__value__ || priceObj._ || 0
+            );
+            const currencyValue =
+              priceObj.__attributes__?.currencyID ||
+              priceObj.currencyID ||
+              priceObj['@currencyID'] ||
+              'USD';
+            return { price: priceValue, currency: currencyValue };
+          } else {
+            return { price: parseFloat(priceObj) || 0, currency: 'USD' };
+          }
+        };
+
+        // Try different price fields based on listing type
+        if (itemData.StartPrice) {
+          const extracted = extractPrice(itemData.StartPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.CurrentPrice) {
+          const extracted = extractPrice(itemData.CurrentPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.BuyItNowPrice) {
+          const extracted = extractPrice(itemData.BuyItNowPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        } else if (itemData.ConvertedCurrentPrice) {
+          const extracted = extractPrice(itemData.ConvertedCurrentPrice);
+          price = extracted.price;
+          currency = extracted.currency;
+        }
+
+        // Enhanced image extraction
+        let imageUrl = null;
+        if (itemData.PictureDetails) {
+          if (itemData.PictureDetails.PictureURL) {
+            imageUrl = Array.isArray(itemData.PictureDetails.PictureURL)
+              ? itemData.PictureDetails.PictureURL[0]
+              : itemData.PictureDetails.PictureURL;
+          } else if (itemData.PictureDetails.GalleryURL) {
+            imageUrl = itemData.PictureDetails.GalleryURL;
+          }
+        }
+
+        // Fallback to GalleryURL if available
+        if (!imageUrl && itemData.GalleryURL) {
+          imageUrl = itemData.GalleryURL;
+        }
+
+        const competitorInfo = {
+          itemId: compItemId.trim(),
+          title: itemData.Title || 'Unknown Title',
+          price: price,
+          currency: currency,
+          condition:
+            itemData.ConditionDisplayName ||
+            itemData.ConditionDescription ||
+            'Unknown',
+          imageUrl: imageUrl,
+          productUrl:
+            itemData.ViewItemURL || `https://www.ebay.com/itm/${compItemId}`,
+          locale: itemData.Country || itemData.Site || 'US',
+          isAlreadyAdded: existingCompetitorIds.has(compItemId.trim()),
+        };
+
+        foundCompetitors.push(competitorInfo);
+
+        // Add small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error(
+          `❌ Failed to fetch competitor ${compItemId}:`,
+          error.message
+        );
+        notFoundCompetitors.push({
+          itemId: compItemId.trim(),
+          error: error.message,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Found ${foundCompetitors.length} competitors`,
+      itemId,
+      foundCompetitors,
+      notFoundCompetitors,
+      summary: {
+        totalRequested: limitedItemIds.length,
+        found: foundCompetitors.length,
+        notFound: notFoundCompetitors.length,
+      },
+    });
+  } catch (error) {
+    console.error('Search Competitors Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
 
 export default router;
