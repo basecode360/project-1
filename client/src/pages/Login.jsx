@@ -16,12 +16,14 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import apiService from '../api/apiService';
 import getValidAuthToken from '../utils/getValidAuthToken';
 import { userStore } from '../store/authStore';
+import clientDiagnostics from '../utils/clientDiagnostics';
 
 export default function Login({ handleLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const navigate = useNavigate();
 
   const saveUser = userStore((store) => store.saveUser);
@@ -37,11 +39,9 @@ export default function Login({ handleLogin }) {
   const handleLoginClick = async () => {
     try {
       setError('');
-      
 
       // 1) Call backend: POST /auth/login
       const response = await apiService.auth.login({ email, password });
-      
 
       if (response.success) {
         const { user: loggedUser, token: appJwt } = response.data;
@@ -59,7 +59,6 @@ export default function Login({ handleLogin }) {
         // 3) Fetch a valid eBay user token immediately
         try {
           const ebayToken = await getValidAuthToken(loggedUser.id);
-          
         } catch (ebayErr) {
           console.warn('Could not fetch eBay token immediately:', ebayErr);
           // You may still proceed or force eBay link depending on UX
@@ -78,7 +77,7 @@ export default function Login({ handleLogin }) {
       }
     } catch (err) {
       console.error('Login error:', err);
-      
+
       // Check if it's a network/HTTP error
       if (err.response) {
         // Server responded with error status
@@ -98,9 +97,28 @@ export default function Login({ handleLogin }) {
       }
     }
   };
-
   const togglePasswordVisibility = () => {
     setShowPassword((prev) => !prev);
+  };
+
+  const runDiagnostics = async () => {
+    setShowDebugInfo(true);
+    console.log('🔍 Running client diagnostics...');
+
+    try {
+      const environment = clientDiagnostics.getClientEnvironment();
+      console.log('🔍 Client Environment:', environment);
+
+      const connectivity = await clientDiagnostics.testApiEndpoints();
+      console.log('🔍 API Connectivity Test:', connectivity);
+
+      alert(
+        'Diagnostics complete! Check the browser console for detailed results.'
+      );
+    } catch (error) {
+      console.error('Diagnostics failed:', error);
+      alert('Diagnostics failed. Check console for details.');
+    }
   };
 
   return (
@@ -129,7 +147,6 @@ export default function Login({ handleLogin }) {
             Please login to your account
           </Typography>
         </Box>
-
         <TextField
           fullWidth
           label="Email Address"
@@ -139,7 +156,6 @@ export default function Login({ handleLogin }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-
         <Box sx={{ position: 'relative' }}>
           <TextField
             fullWidth
@@ -167,13 +183,11 @@ export default function Login({ handleLogin }) {
             }}
           />
         </Box>
-
         {error && (
           <Typography color="error" fontSize={14} mt={1}>
             {error}
           </Typography>
-        )}
-
+        )}{' '}
         <Button
           fullWidth
           variant="contained"
@@ -189,6 +203,32 @@ export default function Login({ handleLogin }) {
         >
           Login
         </Button>
+        {/* Debug button for testing - only show in development or when needed */}
+        {(!import.meta.env.PROD || showDebugInfo) && (
+          <Button
+            fullWidth
+            variant="outlined"
+            onClick={runDiagnostics}
+            sx={{
+              mt: 1,
+              textTransform: 'none',
+              fontSize: '0.8rem',
+            }}
+          >
+            Run Network Diagnostics
+          </Button>
+        )}
+        {/* Show environment info for debugging */}
+        {showDebugInfo && (
+          <Typography
+            variant="caption"
+            sx={{ mt: 2, display: 'block', color: 'text.secondary' }}
+          >
+            Environment: {import.meta.env.MODE} | API:{' '}
+            {import.meta.env.VITE_BACKEND_URL || 'default'} | Browser:{' '}
+            {navigator.userAgent.split(' ')[0]}
+          </Typography>
+        )}
       </Paper>
     </Box>
   );

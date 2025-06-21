@@ -79,6 +79,34 @@ app.get('/', (req, res) => {
   });
 });
 
+// Error reporting endpoint for client-side issues
+app.post('/api/error-reports', express.json(), (req, res) => {
+  const report = req.body;
+
+  console.log('🚨 Client Error Report Received:', {
+    timestamp: report.timestamp,
+    userAgent: report.environment?.browser?.name,
+    error: report.error?.message,
+    connectivity: report.connectivity?.map((c) => ({
+      url: c.url,
+      success: c.success,
+      error: c.error?.message,
+    })),
+  });
+
+  // Log full report for debugging
+  console.log('📋 Full Error Report:', JSON.stringify(report, null, 2));
+
+  // In production, you might want to save this to a database or send to a monitoring service
+  // For now, we'll just log it
+
+  res.status(200).json({
+    success: true,
+    message: 'Error report received',
+    reportId: Date.now().toString(),
+  });
+});
+
 // ── Start the server ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {});
