@@ -679,7 +679,7 @@ export default function ListingsTable({
                       navigate(`/home/competitors/${row.productId}`);
                     }}
                   >
-                    <CompetitorCount itemSku={row.sku} />
+                    <CompetitorCount itemId={row.productId} />
                   </Typography>
                 </TableCell>
               </TableRow>
