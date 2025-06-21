@@ -1949,4 +1949,230 @@ router.post('/search-competitors-manually/:itemId', async (req, res) => {
   }
 });
 
+/**
+ * ===============================
+ * EXECUTE COMPETITOR RULE - NEW FUNCTIONALITY
+ * ===============================
+ */
+import CompetitorRuleEngine from '../services/competitorRuleEngine.js';
+
+// Execute competitor rule for a specific item
+router.post('/execute-rule/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    // Get competitor rule for this item from eBay ItemSpecifics
+    const xmlRequest = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${user.ebay.accessToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ItemID>${itemId}</ItemID>
+        <DetailLevel>ReturnAll</DetailLevel>
+        <IncludeItemSpecifics>true</IncludeItemSpecifics>
+      </GetItemRequest>
+    `;
+
+    const xmlResponse = await makeEBayAPICall(xmlRequest, 'GetItem');
+    const result = await parseXMLResponse(xmlResponse);
+    const response = isEBayResponseSuccessful(result, 'GetItem');
+
+    const item = response.Item;
+    const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+    const competitorRule = parseCompetitorRuleFromSpecifics(
+      itemSpecifics,
+      itemId
+    );
+
+    if (!competitorRule) {
+      return res.status(404).json({
+        success: false,
+        message: 'No competitor rule found for this item',
+        itemId,
+      });
+    }
+
+    // Execute the rule
+    const engine = new CompetitorRuleEngine();
+    const executionResult = await engine.executeRule(
+      itemId,
+      competitorRule,
+      user.ebay.accessToken
+    );
+
+    res.json({
+      success: true,
+      message: 'Competitor rule executed successfully',
+      itemId,
+      rule: competitorRule,
+      execution: executionResult,
+    });
+  } catch (error) {
+    console.error('Execute Competitor Rule Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// Execute competitor rules for all items with rules
+router.post('/execute-all-rules', async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in request body',
+      });
+    }
+
+    // Get user's eBay token
+    const user = await User.findById(userId);
+    if (!user || !user.ebay.accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eBay credentials found for this user',
+      });
+    }
+
+    // Get all active listings
+    const getActiveListingsXML = `
+      <?xml version="1.0" encoding="utf-8"?>
+      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+        <RequesterCredentials>
+          <eBayAuthToken>${user.ebay.accessToken}</eBayAuthToken>
+        </RequesterCredentials>
+        <ActiveList>
+          <Include>true</Include>
+          <Pagination>
+            <EntriesPerPage>200</EntriesPerPage>
+            <PageNumber>1</PageNumber>
+          </Pagination>
+        </ActiveList>
+        <DetailLevel>ReturnAll</DetailLevel>
+      </GetMyeBaySellingRequest>
+    `;
+
+    const activeListingsResponse = await makeEBayAPICall(
+      getActiveListingsXML,
+      'GetMyeBaySelling'
+    );
+    const activeListingsResult = await parseXMLResponse(activeListingsResponse);
+    const activeListingsData = isEBayResponseSuccessful(
+      activeListingsResult,
+      'GetMyeBaySelling'
+    );
+
+    const activeList = activeListingsData.ActiveList;
+    if (!activeList || !activeList.ItemArray) {
+      return res.json({
+        success: true,
+        message: 'No active listings found',
+        executedCount: 0,
+        results: [],
+      });
+    }
+
+    const items = Array.isArray(activeList.ItemArray.Item)
+      ? activeList.ItemArray.Item
+      : [activeList.ItemArray.Item];
+
+    // Filter items that have competitor rules
+    const itemsWithRules = items.filter((item) => {
+      const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+      const competitorRule = parseCompetitorRuleFromSpecifics(
+        itemSpecifics,
+        item.ItemID
+      );
+      return competitorRule !== null;
+    });
+
+    if (itemsWithRules.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No items with competitor rules found',
+        executedCount: 0,
+        results: [],
+      });
+    }
+
+    // Execute rules for each item
+    const engine = new CompetitorRuleEngine();
+    const results = [];
+
+    for (const item of itemsWithRules) {
+      try {
+        const itemSpecifics = item.ItemSpecifics?.NameValueList || [];
+        const competitorRule = parseCompetitorRuleFromSpecifics(
+          itemSpecifics,
+          item.ItemID
+        );
+
+        const executionResult = await engine.executeRule(
+          item.ItemID,
+          competitorRule,
+          user.ebay.accessToken
+        );
+
+        results.push({
+          itemId: item.ItemID,
+          title: item.Title,
+          success: true,
+          execution: executionResult,
+        });
+
+        // Add delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } catch (error) {
+        results.push({
+          itemId: item.ItemID,
+          title: item.Title,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.filter((r) => !r.success).length;
+
+    res.json({
+      success: true,
+      message: `Executed competitor rules for ${successCount} items`,
+      summary: {
+        totalItemsWithRules: itemsWithRules.length,
+        successfulExecutions: successCount,
+        failedExecutions: failCount,
+      },
+      results,
+    });
+  } catch (error) {
+    console.error('Execute All Rules Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 export default router;

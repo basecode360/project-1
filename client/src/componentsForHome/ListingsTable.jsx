@@ -36,6 +36,7 @@ import { useProductStore } from '../store/productStore';
 
 // Import your API service
 import apiService from '../api/apiService';
+import CompetitorCount from './CompetitorCount';
 
 export default function ListingsTable({
   currentPage = 1,
@@ -348,6 +349,36 @@ export default function ListingsTable({
     return () => clearInterval(interval);
   }, [location.pathname]);
 
+  // Update competitor count display in listings table
+  const getCompetitorCount = async (itemSku) => {
+    try {
+      const userId = localStorage.getItem('user_id');
+
+      // Get both API and manual competitors
+      const [apiResponse, manualResponse] = await Promise.all([
+        apiService.competitor.getCompetitors(itemSku).catch(() => ({
+          success: false,
+          data: { competitors: [] },
+        })),
+        apiService.inventory
+          .getManuallyAddedCompetitors(itemSku, userId)
+          .catch(() => ({ success: false, competitors: [] })),
+      ]);
+
+      const apiCount = apiResponse.success
+        ? apiResponse.data?.competitors?.length || 0
+        : 0;
+      const manualCount = manualResponse.success
+        ? manualResponse.competitors?.length || 0
+        : 0;
+
+      return apiCount + manualCount;
+    } catch (error) {
+      console.warn(`Failed to get competitor count for ${itemSku}:`, error);
+      return 0;
+    }
+  };
+
   if (loading) {
     return (
       <Container
@@ -648,7 +679,7 @@ export default function ListingsTable({
                       navigate(`/home/competitors/${row.productId}`);
                     }}
                   >
-                    {row.competitors}
+                    <CompetitorCount itemSku={row.sku} />
                   </Typography>
                 </TableCell>
               </TableRow>

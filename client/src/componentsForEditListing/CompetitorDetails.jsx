@@ -111,7 +111,6 @@ export default function CompetitorPricesPage() {
           }));
           allCompetitors = detailed;
         }
-
         if (allCompetitors.length === 0) {
           setError('No competitor listings found.');
         } else {
@@ -127,6 +126,9 @@ export default function CompetitorPricesPage() {
 
     fetchData();
   }, [itemId]);
+
+  // Calculate total competitors count
+  const totalCompetitors = competitorData.length;
 
   const handleAccept = async (comp) => {
     try {
@@ -186,9 +188,14 @@ export default function CompetitorPricesPage() {
 
   return (
     <Container sx={{ mt: 4, mb: 10 }}>
-      <Typography variant="h5" gutterBottom>
-        Competitor Listing For: {myItemTitle || itemId}
-      </Typography>{' '}
+      <Typography variant="h4" gutterBottom>
+        Competitor Listing For: {itemId}
+      </Typography>
+
+      <Typography variant="body2" sx={{ mb: 3, color: 'primary.main' }}>
+        Total Competitors: {totalCompetitors}
+      </Typography>
+
       <Box sx={{ mb: 3 }}>
         <Button
           variant="contained"
