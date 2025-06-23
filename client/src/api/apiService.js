@@ -669,9 +669,13 @@ const competitorRules = {
       const resp = await competitorClient.get(`/`, {
         params: { active: true, userId },
       });
+
+      // Handle both possible response structures
+      const rules = resp.data?.data || resp.data?.rules || resp.data || [];
+
       return {
         success: true,
-        rules: resp.data?.data || [],
+        rules: Array.isArray(rules) ? rules : [],
       };
     } catch (err) {
       if (err.response?.status === 404) {
@@ -771,7 +775,7 @@ const combined = {
   },
 };
 
-const BASE_URL = import.meta.env.VITE_API_URL
+const BASE_URL = import.meta.env.VITE_API_URL;
 
 // Helper function to create authenticated requests
 const createAuthenticatedRequest = async () => {

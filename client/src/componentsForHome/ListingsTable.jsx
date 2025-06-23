@@ -49,6 +49,8 @@ export default function ListingsTable({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [paginatedRows, setPaginatedRows] = useState([]);
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDirection, setSortDirection] = useState('asc');
   const {
     modifyProductsArray,
     modifyProductsId,
@@ -96,6 +98,71 @@ export default function ListingsTable({
     }
   }, [rows, currentPage, itemsPerPage, onTotalPagesChange]);
 
+  // Sorting logic
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(column);
+      setSortDirection('asc');
+    }
+  };
+
+  // Sort rows before pagination
+  useEffect(() => {
+    let sortedRows = [...rows];
+    if (sortBy) {
+      sortedRows.sort((a, b) => {
+        let aValue = a[sortBy];
+        let bValue = b[sortBy];
+
+        // Handle numbers and strings
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          aValue = aValue.toLowerCase();
+          bValue = bValue.toLowerCase();
+        }
+        if (sortBy === 'qty') {
+          aValue = Number(aValue);
+          bValue = Number(bValue);
+        }
+        if (
+          sortBy === 'myPrice' ||
+          sortBy === 'price' ||
+          sortBy === 'competition' ||
+          sortBy === 'minPrice' ||
+          sortBy === 'maxPrice'
+        ) {
+          // Extract number from string like "USD 12.34"
+          aValue = parseFloat((aValue || '').replace(/[^\d.]/g, '')) || 0;
+          bValue = parseFloat((bValue || '').replace(/[^\d.]/g, '')) || 0;
+        }
+        if (sortBy === 'competitors') {
+          aValue = Number(aValue) || 0;
+          bValue = Number(bValue) || 0;
+        }
+        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    setPaginatedRows(sortedRows.slice(startIndex, endIndex));
+
+    // Calculate total pages and notify parent
+    const totalPages = Math.ceil(sortedRows.length / itemsPerPage);
+    if (onTotalPagesChange) {
+      onTotalPagesChange(totalPages);
+    }
+  }, [
+    rows,
+    currentPage,
+    itemsPerPage,
+    onTotalPagesChange,
+    sortBy,
+    sortDirection,
+  ]);
+
   const fetchEbayListings = async () => {
     try {
       setLoading(true);
@@ -142,7 +209,6 @@ export default function ListingsTable({
                 status: [
                   item.SellingStatus?.ListingStatus || 'Active',
                   item.ConditionDisplayName || 'New',
-                  item.SellingStatus?.ListingStatus || 'Active',
                 ],
                 price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 qty: parseInt(item.Quantity || '0', 10),
@@ -403,6 +469,19 @@ export default function ListingsTable({
     );
   }
 
+  // Table headers with sort
+  const headers = [
+    { label: 'Product', key: 'productTitle' },
+    { label: 'Qty', key: 'qty' },
+    { label: 'My Price', key: 'myPrice' },
+    { label: 'Competitors Rule', key: null },
+    { label: 'Competition', key: 'competition' },
+    { label: 'Strategy', key: 'strategy' },
+    { label: 'Min Price', key: 'minPrice' },
+    { label: 'Max Price', key: 'maxPrice' },
+    { label: 'Competitors', key: 'competitors' },
+  ];
+
   return (
     <Container sx={{ mt: 4, mb: 2, pb: 10 }}>
       {' '}
@@ -436,19 +515,9 @@ export default function ListingsTable({
                 transition: 'background-color 0.3s ease',
               }}
             >
-              {[
-                'Product',
-                'Qty',
-                'My Price',
-                'Competitors Rule',
-                'Competition',
-                'Strategy',
-                'Min Price',
-                'Max Price',
-                'Competitors',
-              ].map((header) => (
+              {headers.map((header) => (
                 <TableCell
-                  key={header}
+                  key={header.label}
                   sx={{
                     fontWeight: '600',
                     fontSize: '15px',
@@ -465,9 +534,19 @@ export default function ListingsTable({
                       color: '#1976d2',
                     },
                     transition: 'all 0.3s ease',
+                    cursor: header.key ? 'pointer' : 'default',
+                    userSelect: 'none',
                   }}
+                  onClick={
+                    header.key ? () => handleSort(header.key) : undefined
+                  }
                 >
-                  {header}
+                  {header.label}
+                  {header.key && sortBy === header.key && (
+                    <span style={{ marginLeft: 4 }}>
+                      {sortDirection === 'asc' ? '▲' : '▼'}
+                    </span>
+                  )}
                 </TableCell>
               ))}
             </TableRow>

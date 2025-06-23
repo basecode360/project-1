@@ -13,6 +13,7 @@ import ListingsTable from '../componentsForHome/ListingsTable';
 import PaginationBar from '../componentsForHome/PaginationBar';
 import Footer from '../componentsForHome/Footer';
 import ScrollToTopButton from '../componentsForHome/ScrollToTopButton';
+import AssignCompetitorRule from '../componentsForHome/AssignCompetitorRule';
 
 export default function Home({ handleLogout }) {
   const [page, setPage] = useState(1);
@@ -390,6 +391,7 @@ export default function Home({ handleLogout }) {
             </p>
           ) : (
             <>
+              <AssignCompetitorRule />
               <EntriesAndSearchBar />
               <ListingsTable
                 currentPage={page}
