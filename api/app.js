@@ -64,7 +64,9 @@ app.get('/', (req, res) => {
   res.json({
     message: 'eBay Auth & API Service is running',
     endpoints: {
-      ebay_auth_flow: [
+      user_auth_flow: [
+        '/auth/login',
+        '/auth/register',
         '/auth/ebay-login',
         '/auth/generate-code',
         '/auth/automated-login',
