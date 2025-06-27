@@ -4,6 +4,7 @@ import axios from 'axios';
 import User from '../models/Users.js';
 import Product from '../models/Product.js'; // Import Product model
 import ManualCompetitor from '../models/ManualCompetitor.js'; // Import ManualCompetitor model
+import { requireAuth } from '../controllers/middleware/authMiddleware.js'; // Add this import
 import {
   createCompetitorRule,
   applyRuleToItems,
@@ -584,7 +585,18 @@ router.get('/active-listings', async (req, res) => {
     return res.json({
       success: true,
       rules,
-      listings, // Include listings for UI if needed
+      // Include listings for UI if needed
+      listings: listings.map((listing) => ({
+        itemId: listing.itemId,
+        title: listing.title,
+        price: listing.price,
+        currency: listing.currency,
+        condition: listing.condition,
+        imageUrl: listing.imageUrl,
+        productUrl: listing.productUrl,
+        locale: listing.locale,
+        competitorRule: listing.competitorRule,
+      })),
       summary: {
         totalActiveListings: listings.length,
         listingsWithCompetitorRule: listings.filter((l) => l.competitorRule)
@@ -1516,7 +1528,7 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
         }
 
         const competitorInfo = {
-          itemId: compItemId.trim(),
+          itemId: compItemId.trim(), // This will be used as competitorItemId in schema
           title: itemData.Title || 'Unknown Title',
           price: price,
           currency: currency,
@@ -1601,25 +1613,91 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
         });
       }
 
-      // Add new competitors to the document
-      newCompetitors.forEach((comp) => {
-        manualCompetitorDoc.competitors.push({
-          competitorItemId: comp.itemId,
-          title: comp.title,
-          price: comp.price,
-          currency: comp.currency,
-          imageUrl: comp.imageUrl,
-          productUrl: comp.productUrl,
-          locale: comp.locale,
-          condition: comp.condition,
+      // FIX: Add new competitors to the document with correct field mapping
+      newCompetitors.forEach((comp, index) => {
+        if (!comp.itemId) {
+          console.error(`❌ Competitor ${index} is missing itemId:`, comp);
+          throw new Error(`Competitor at index ${index} is missing itemId`);
+        }
+
+        const competitorData = {
+          itemId: String(comp.itemId), // Ensure it's a string and required
+          competitorItemId: String(comp.itemId), // Backward compatibility
+          title: String(comp.title || 'Unknown Title'),
+          price: parseFloat(comp.price) || 0,
+          currency: String(comp.currency || 'USD'),
+          imageUrl: comp.imageUrl ? String(comp.imageUrl) : null,
+          productUrl: comp.productUrl ? String(comp.productUrl) : null,
+          locale: String(comp.locale || 'US'),
+          condition: String(comp.condition || 'Unknown'),
+          addedAt: new Date(),
+        };
+
+        console.log(`📊 Adding competitor ${index + 1}:`, {
+          itemId: competitorData.itemId,
+          title: competitorData.title?.substring(0, 50),
+          price: competitorData.price,
+          hasRequiredFields: !!competitorData.itemId,
         });
+
+        manualCompetitorDoc.competitors.push(competitorData);
       });
 
       await manualCompetitorDoc.save();
 
+      // ENHANCED: Auto-execute strategy after adding competitors using actual strategy from DB
+      let strategyExecuted = false;
+      let strategyResult = null;
+
+      try {
+        console.log(
+          `🚀 Auto-executing strategies for ${itemId} after adding competitors`
+        );
+
+        // Import and execute strategy for this item
+        const { executeStrategiesForItem } = await import(
+          '../services/strategyService.js'
+        );
+
+        strategyResult = await executeStrategiesForItem(itemId, userId);
+
+        if (strategyResult.success) {
+          console.log(`✅ Successfully executed strategies for ${itemId}:`, {
+            totalStrategies: strategyResult.totalStrategies,
+            successfulExecutions: strategyResult.successfulExecutions,
+            priceChanges: strategyResult.priceChanges,
+            strategiesUsed:
+              strategyResult.results?.map((r) => r.strategyName) || [],
+          });
+
+          if (strategyResult.priceChanges > 0) {
+            strategyExecuted = true;
+            console.log(
+              `💰 Price updated for ${itemId} based on strategy configuration from MongoDB`
+            );
+          }
+        } else {
+          console.warn(
+            `⚠️ Strategy execution failed for ${itemId}:`,
+            strategyResult.message
+          );
+        }
+      } catch (strategyError) {
+        console.error(
+          `❌ Error executing strategy for ${itemId}:`,
+          strategyError
+        );
+      }
+
       res.json({
         success: true,
-        message: `Successfully added ${newCompetitors.length} new competitors manually`,
+        message: `Successfully added ${
+          newCompetitors.length
+        } new competitors manually${
+          strategyExecuted
+            ? ' and updated price automatically using configured strategy'
+            : ''
+        }`,
         itemId,
         addedCompetitors: newCompetitors,
         invalidCompetitors,
@@ -1629,6 +1707,10 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
           failed: invalidCompetitors.length,
           alreadyExists: validCompetitors.length - newCompetitors.length,
           totalCompetitors: manualCompetitorDoc.competitors.length,
+        },
+        strategyExecution: {
+          executed: strategyExecuted,
+          result: strategyResult,
         },
       });
     } catch (dbError) {
@@ -1650,69 +1732,7 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
 
 /**
  * ===============================
- * GET MANUALLY ADDED COMPETITORS FROM MONGODB
- * ===============================
- */
-router.get('/get-manual-competitors/:itemId', async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId is required as query parameter',
-      });
-    }
-
-    // Get manually added competitors from MongoDB
-    const manualCompetitorDoc = await ManualCompetitor.findOne({
-      userId,
-      itemId,
-    });
-
-    if (!manualCompetitorDoc || !manualCompetitorDoc.competitors.length) {
-      return res.json({
-        success: true,
-        itemId,
-        competitors: [],
-        count: 0,
-      });
-    }
-
-    // Transform the data to match the expected format
-    const competitors = manualCompetitorDoc.competitors.map((comp) => ({
-      itemId: comp.competitorItemId,
-      title: comp.title,
-      price: comp.price,
-      currency: comp.currency,
-      imageUrl: comp.imageUrl,
-      productUrl: comp.productUrl,
-      locale: comp.locale,
-      condition: comp.condition,
-      addedAt: comp.addedAt,
-      source: 'Manual',
-    }));
-
-    res.json({
-      success: true,
-      itemId,
-      competitors,
-      count: competitors.length,
-    });
-  } catch (error) {
-    console.error('Get Manual Competitors Error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-      competitors: [],
-    });
-  }
-});
-
-/**
- * ===============================
- * DELETE MANUALLY ADDED COMPETITOR
+ * DELETE MANUALLY ADDED COMPETITOR - FIXED TO HANDLE BOTH FIELD NAMES
  * ===============================
  */
 router.delete(
@@ -1729,12 +1749,26 @@ router.delete(
         });
       }
 
-      // Find and update the document
+      // Get current competitor data before removal to calculate price impact
+      const beforeDoc = await ManualCompetitor.findOne({ userId, itemId });
+
+      let currentLowest = null;
+      if (beforeDoc && beforeDoc.competitors.length > 0) {
+        const currentPrices = beforeDoc.competitors
+          .map((comp) => parseFloat(comp.price))
+          .filter((price) => !isNaN(price) && price > 0);
+        currentLowest =
+          currentPrices.length > 0 ? Math.min(...currentPrices) : null;
+      }
+
+      // Find and update the document - handle both itemId and competitorItemId fields
       const result = await ManualCompetitor.updateOne(
         { userId, itemId },
         {
           $pull: {
-            competitors: { competitorItemId },
+            competitors: {
+              $or: [{ competitorItemId }, { itemId: competitorItemId }],
+            },
           },
         }
       );
@@ -1746,11 +1780,67 @@ router.delete(
         });
       }
 
+      // Get new competitor data after removal
+      const afterDoc = await ManualCompetitor.findOne({ userId, itemId });
+
+      let newLowest = null;
+      if (afterDoc && afterDoc.competitors.length > 0) {
+        const newPrices = afterDoc.competitors
+          .map((comp) => parseFloat(comp.price))
+          .filter((price) => !isNaN(price) && price > 0);
+        newLowest = newPrices.length > 0 ? Math.min(...newPrices) : null;
+      }
+
+      console.log(
+        `💰 Price comparison after competitor removal for ${itemId}:`,
+        {
+          currentLowest,
+          newLowest,
+          priceIncreased: newLowest > currentLowest,
+          competitorsRemaining: afterDoc?.competitors?.length || 0,
+        }
+      );
+
+      // Check if competitor price landscape changed and execute strategy
+      let strategyExecuted = false;
+      let strategyResult = null;
+
+      try {
+        // Always execute strategy when competitors are removed to recalculate pricing
+        const { executeStrategiesForItem } = await import(
+          '../services/strategyService.js'
+        );
+
+        console.log(
+          `🚀 Auto-executing strategies for ${itemId} after competitor removal`
+        );
+        strategyResult = await executeStrategiesForItem(itemId, userId);
+
+        if (strategyResult.success) {
+          console.log(
+            `✅ Successfully recalculated price for ${itemId} after competitor removal`
+          );
+          strategyExecuted = true;
+        }
+      } catch (strategyError) {
+        console.error(
+          `❌ Error executing strategy for ${itemId}:`,
+          strategyError
+        );
+      }
+
       res.json({
         success: true,
         message: 'Competitor removed successfully',
         itemId,
         competitorItemId,
+        priceChange: {
+          currentLowest,
+          newLowest,
+          strategyExecuted,
+          strategyResult,
+          competitorsRemaining: afterDoc?.competitors?.length || 0,
+        },
       });
     } catch (error) {
       console.error('Remove Manual Competitor Error:', error.message);
@@ -2171,6 +2261,633 @@ router.post('/execute-all-rules', async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+});
+
+// Get competitor rule for specific product
+router.get('/products/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required as query parameter',
+      });
+    }
+
+    // Import the controller
+    const { getAllCompetitorRules } = await import(
+      '../controllers/competitorRule.js'
+    );
+
+    // Get all competitor rules for the user
+    try {
+      const mockReq = { query: { userId } };
+      const rules = await new Promise((resolve, reject) => {
+        const mockRes = {
+          headersSent: false,
+          status: () => mockRes,
+          json: (data) => {
+            if (data.success) {
+              resolve(data.data || data.rules || []);
+            } else {
+              resolve([]);
+            }
+          },
+        };
+
+        getAllCompetitorRules(mockReq, mockRes).catch(reject);
+      });
+
+      // Filter for the specific product
+      const productRule = rules.find(
+        (rule) =>
+          rule.appliesTo &&
+          rule.appliesTo.some((item) => item.itemId === itemId)
+      );
+
+      if (productRule) {
+        return res.status(200).json({
+          success: true,
+          hasCompetitorRule: true,
+          competitorRule: productRule,
+        });
+      } else {
+        return res.status(200).json({
+          success: true,
+          hasCompetitorRule: false,
+          competitorRule: null,
+        });
+      }
+    } catch (controllerError) {
+      console.error('Error calling getAllCompetitorRules:', controllerError);
+      return res.status(200).json({
+        success: true,
+        hasCompetitorRule: false,
+        competitorRule: null,
+      });
+    }
+  } catch (err) {
+    console.error('eBay Competitor Rule Fetch Error:', err.message);
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching rule for product',
+        error: err.message,
+      });
+    }
+  }
+});
+
+/**
+ * ===============================
+ * DEBUG: CHECK ACTUAL COMPETITOR DATA FOR ITEM
+ * ===============================
+ */
+router.get('/debug/actual-competitors/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required as query parameter',
+      });
+    }
+
+    // Get manually added competitors from MongoDB
+    const manualCompetitorDoc = await ManualCompetitor.findOne({
+      userId,
+      itemId,
+    });
+
+    // Get competitor rules
+    const { default: CompetitorRule } = await import(
+      '../models/competitorSchema.js'
+    );
+    const competitorRules = await CompetitorRule.find({
+      'appliesTo.itemId': itemId,
+      createdBy: userId,
+    });
+
+    // Simulate the same logic as getCompetitorPrice
+    let calculatedPrice = null;
+    let priceSource = 'none';
+
+    if (manualCompetitorDoc && manualCompetitorDoc.competitors.length > 0) {
+      const prices = manualCompetitorDoc.competitors
+
+        .map((comp) => parseFloat(comp.price))
+        .filter((price) => !isNaN(price) && price > 0);
+
+      if (prices.length > 0) {
+        calculatedPrice = Math.min(...prices);
+        priceSource = 'manual_competitors';
+      }
+    }
+
+    return res.json({
+      success: true,
+      itemId,
+      userId,
+      manualCompetitors: {
+        found: !!manualCompetitorDoc,
+        count: manualCompetitorDoc?.competitors?.length || 0,
+        competitors: manualCompetitorDoc?.competitors || [],
+        prices:
+          manualCompetitorDoc?.competitors?.map((c) => ({
+            itemId: c.competitorItemId,
+            price: c.price,
+            title: c.title,
+          })) || [],
+      },
+      competitorRules: {
+        found: competitorRules.length > 0,
+        count: competitorRules.length,
+        rules: competitorRules.map((rule) => ({
+          id: rule._id,
+          name: rule.ruleName,
+          isActive: rule.isActive,
+        })),
+      },
+      calculatedLowestPrice: calculatedPrice,
+      priceSource,
+      expectedNewPrice: calculatedPrice
+        ? {
+            stayAbove_amount_0_5: calculatedPrice + 0.5,
+            beatLowest_amount_0_02: calculatedPrice - 0.02,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error('Debug Actual Competitors Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+/**
+ * Enable/disable monitoring for a specific item
+ * PUT /api/competitor-rules/monitoring/:itemId
+ */
+router.put('/monitoring/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { enabled, frequency } = req.body;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required',
+      });
+    }
+
+    const { default: ManualCompetitor } = await import(
+      '../models/ManualCompetitor.js'
+    );
+
+    const doc = await ManualCompetitor.findOne({ userId, itemId });
+
+    if (!doc) {
+      return res.status(404).json({
+        success: false,
+        message: 'No competitors found for this item',
+      });
+    }
+
+    doc.monitoringEnabled =
+      enabled !== undefined ? enabled : doc.monitoringEnabled;
+    doc.monitoringFrequency = frequency || doc.monitoringFrequency;
+
+    await doc.save();
+
+    return res.json({
+      success: true,
+      message: `Monitoring ${
+        enabled ? 'enabled' : 'disabled'
+      } for item ${itemId}`,
+      monitoring: {
+        enabled: doc.monitoringEnabled,
+        frequency: doc.monitoringFrequency,
+        lastCheck: doc.lastMonitoringCheck,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating monitoring settings:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating monitoring settings',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Get monitoring status for an item
+ * GET /api/competitor-rules/monitoring/:itemId
+ */
+router.get('/monitoring/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    const { default: ManualCompetitor } = await import(
+      '../models/ManualCompetitor.js'
+    );
+
+    const doc = await ManualCompetitor.findOne({ userId, itemId });
+
+    if (!doc) {
+      return res.json({
+        success: true,
+        monitoring: {
+          enabled: false,
+          frequency: 20,
+          lastCheck: null,
+          competitorCount: 0,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      monitoring: {
+        enabled: doc.monitoringEnabled,
+        frequency: doc.monitoringFrequency,
+        lastCheck: doc.lastMonitoringCheck,
+        competitorCount: doc.competitors.length,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting monitoring status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error getting monitoring status',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Add competitors manually with automatic strategy execution
+ * POST /api/competitor-rules/add-competitors-manually/:itemId
+ */
+router.post(
+  '/add-competitors-manually/:itemId',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const { userId, competitorItemIds } = req.body;
+
+      if (!userId || !competitorItemIds || !Array.isArray(competitorItemIds)) {
+        return res.status(400).json({
+          success: false,
+          message: 'userId and competitorItemIds array are required',
+        });
+      }
+
+      // Import ManualCompetitor model
+      const { default: ManualCompetitor } = await import(
+        '../models/ManualCompetitor.js'
+      );
+
+      let manualCompetitorDoc = await ManualCompetitor.findOne({
+        userId,
+        itemId,
+      });
+
+      if (!manualCompetitorDoc) {
+        manualCompetitorDoc = new ManualCompetitor({
+          userId,
+          itemId,
+          competitors: [],
+        });
+      }
+
+      // Get current lowest competitor price before adding new ones
+      const currentCompetitors = manualCompetitorDoc.competitors || [];
+      const currentPrices = currentCompetitors
+        .map((comp) => parseFloat(comp.price))
+        .filter((price) => !isNaN(price) && price > 0);
+      const currentLowest =
+        currentPrices.length > 0 ? Math.min(...currentPrices) : null;
+
+      // Add new competitors (mock data for now - in real system you'd fetch actual prices)
+      const newCompetitors = competitorItemIds.map((compId) => ({
+        itemId: compId,
+        title: `Competitor Product ${compId}`,
+        price: (Math.random() * 50 + 10).toFixed(2), // Random price for demo
+        currency: 'USD',
+        productUrl: `https://www.ebay.com/itm/${compId}`,
+        imageUrl: null,
+        locale: 'US',
+        addedAt: new Date(),
+      }));
+
+      manualCompetitorDoc.competitors.push(...newCompetitors);
+      await manualCompetitorDoc.save();
+
+      // Calculate new lowest price after adding competitors
+      const allCompetitors = manualCompetitorDoc.competitors;
+      const allPrices = allCompetitors
+        .map((comp) => parseFloat(comp.price))
+        .filter((price) => !isNaN(price) && price > 0);
+      const newLowest = allPrices.length > 0 ? Math.min(...allPrices) : null;
+
+      console.log(`💰 Price comparison for ${itemId}:`, {
+        currentLowest,
+        newLowest,
+        priceDropped: newLowest < currentLowest,
+      });
+
+      // Check if we have a new lower price and automatically execute strategy
+      let strategyExecuted = false;
+      let strategyResult = null;
+
+      if (newLowest && (!currentLowest || newLowest < currentLowest)) {
+        console.log(
+          `🔔 New lower competitor price detected for ${itemId}: ${newLowest}`
+        );
+
+        try {
+          // Import and execute strategy for this item
+          const { executeStrategiesForItem } = await import(
+            '../services/strategyService.js'
+          );
+
+          console.log(
+            `🚀 Auto-executing strategies for ${itemId} due to lower competitor price`
+          );
+          strategyResult = await executeStrategiesForItem(itemId, userId);
+
+          if (strategyResult.success && strategyResult.priceChanges > 0) {
+            console.log(
+              `✅ Successfully updated price for ${itemId} based on new competitor`
+            );
+            strategyExecuted = true;
+          }
+        } catch (strategyError) {
+          console.error(
+            `❌ Error executing strategy for ${itemId}:`,
+            strategyError
+          );
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: `Added ${newCompetitors.length} competitors${
+          strategyExecuted ? ' and updated price automatically' : ''
+        }`,
+        competitors: manualCompetitorDoc.competitors,
+        priceChange: {
+          currentLowest,
+          newLowest,
+          strategyExecuted,
+          strategyResult,
+        },
+      });
+    } catch (error) {
+      console.error('Error adding manual competitors:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error adding manual competitors',
+        error: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * ===============================
+ * GET MANUALLY ADDED COMPETITORS FROM MONGODB
+ * ===============================
+ */
+router.get('/get-manual-competitors/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    console.log(
+      `📊 Getting manual competitors for itemId: ${itemId}, userId: ${userId}`
+    );
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required as query parameter',
+      });
+    }
+
+    // Get manually added competitors from MongoDB
+    const manualCompetitorDoc = await ManualCompetitor.findOne({
+      userId,
+      itemId,
+    });
+
+    console.log(
+      `📊 Found competitor doc:`,
+
+      manualCompetitorDoc
+        ? {
+            id: manualCompetitorDoc._id,
+            competitorCount: manualCompetitorDoc.competitors?.length || 0,
+            competitors: manualCompetitorDoc.competitors?.map((c) => ({
+              competitorItemId: c.competitorItemId,
+              itemId: c.itemId,
+              title: c.title?.substring(0, 30),
+              price: c.price,
+            })),
+          }
+        : 'No document found'
+    );
+
+    if (!manualCompetitorDoc || !manualCompetitorDoc.competitors.length) {
+      return res.json({
+        success: true,
+        itemId,
+        competitors: [],
+        count: 0,
+      });
+    }
+
+    // Fix the transformation to handle the actual data structure properly
+    const competitors = manualCompetitorDoc.competitors.map((comp) => ({
+      // Use competitorItemId as the primary identifier since that's what's in the DB
+      itemId: comp.competitorItemId || comp.itemId,
+      competitorItemId: comp.competitorItemId || comp.itemId, // Ensure this field exists
+      title: comp.title,
+      price: comp.price,
+      currency: comp.currency,
+      imageUrl: comp.imageUrl,
+      productUrl: comp.productUrl,
+      locale: comp.locale,
+      condition: comp.condition,
+      addedAt: comp.addedAt,
+      source: 'Manual',
+    }));
+
+    console.log(
+      `📊 Returning ${competitors.length} competitors for ${itemId}:`,
+      competitors.map((c) => ({
+        itemId: c.itemId,
+        competitorItemId: c.competitorItemId,
+        title: c.title?.substring(0, 50),
+        price: c.price,
+      }))
+    );
+
+    res.json({
+      success: true,
+      itemId,
+      competitors,
+      count: competitors.length,
+    });
+  } catch (error) {
+    console.error('Get Manual Competitors Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      competitors: [],
+      count: 0,
+    });
+  }
+});
+
+/**
+ * ===============================
+ * TRIGGER COMPETITOR MONITORING AND STRATEGY EXECUTION
+ * ===============================
+ */
+
+// Trigger immediate competitor monitoring
+router.post('/trigger-monitoring', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required',
+      });
+    }
+
+    console.log(`🔄 Triggering competitor monitoring for user ${userId}...`);
+
+    // Import and execute competitor monitoring
+    const { updateCompetitorPrices, executeStrategiesForAllItems } =
+      await import('../services/competitorMonitoringService.js');
+
+    // First update competitor prices
+    const monitoringResult = await updateCompetitorPrices();
+
+    // Then execute strategies for all items
+    const strategyResult = await executeStrategiesForAllItems();
+
+    return res.json({
+      success: true,
+      message: 'Competitor monitoring and strategy execution completed',
+      monitoring: monitoringResult,
+      strategies: strategyResult,
+    });
+  } catch (error) {
+    console.error('❌ Error triggering monitoring:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error triggering competitor monitoring',
+      error: error.message,
+    });
+  }
+});
+
+// Execute strategies for items with existing competitors
+router.post('/execute-strategies', requireAuth, async (req, res) => {
+  try {
+    const { userId, itemId } = req.body;
+
+    console.log(
+      `🎯 Executing strategies for ${
+        itemId ? `item ${itemId}` : 'all items'
+      }...`
+    );
+
+    const { triggerStrategyForItem, executeStrategiesForAllItems } =
+      await import('../services/competitorMonitoringService.js');
+
+    let result;
+    if (itemId) {
+      // Execute for specific item
+      result = await triggerStrategyForItem(itemId, userId);
+    } else {
+      // Execute for all items
+      result = await executeStrategiesForAllItems();
+    }
+
+    return res.json({
+      success: true,
+      message: 'Strategy execution completed',
+      result,
+    });
+  } catch (error) {
+    console.error('❌ Error executing strategies:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error executing strategies',
+      error: error.message,
+    });
+  }
+});
+
+// Get monitoring status
+router.get('/monitoring-status', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    const { default: ManualCompetitor } = await import(
+      '../models/ManualCompetitor.js'
+    );
+
+    const stats = await ManualCompetitor.aggregate([
+      { $match: { userId: userId } },
+      {
+        $group: {
+          _id: null,
+          totalItems: { $sum: 1 },
+          monitoringEnabled: {
+            $sum: { $cond: ['$monitoringEnabled', 1, 0] },
+          },
+          totalCompetitors: {
+            $sum: { $size: '$competitors' },
+          },
+          lastCheck: { $max: '$lastMonitoringCheck' },
+        },
+      },
+    ]);
+
+    const status = stats[0] || {
+      totalItems: 0,
+      monitoringEnabled: 0,
+      totalCompetitors: 0,
+      lastCheck: null,
+    };
+
+    return res.json({
+      success: true,
+      status,
+    });
+  } catch (error) {
+    console.error('❌ Error getting monitoring status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error getting monitoring status',
+      error: error.message,
     });
   }
 });

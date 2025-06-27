@@ -1,10 +1,52 @@
 // Create a schema for manually added competitors
 import mongoose from 'mongoose';
 
+const competitorSchema = new mongoose.Schema({
+  competitorItemId: {
+    type: String,
+    required: true,
+  },
+  itemId: {
+    type: String,
+    required: false, // Keep for backward compatibility
+  },
+  title: {
+    type: String,
+    required: false,
+  },
+  price: {
+    type: Number,
+    required: false,
+  },
+  currency: {
+    type: String,
+    default: 'USD',
+  },
+  imageUrl: {
+    type: String,
+    required: false,
+  },
+  productUrl: {
+    type: String,
+    required: false,
+  },
+  locale: {
+    type: String,
+    default: 'US',
+  },
+  condition: {
+    type: String,
+    required: false,
+  },
+  addedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
 const manualCompetitorSchema = new mongoose.Schema({
   userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
     required: true,
     index: true,
   },
@@ -13,62 +55,31 @@ const manualCompetitorSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
-  competitors: [
-    {
-      competitorItemId: {
-        type: String,
-        required: true,
-      },
-      title: {
-        type: String,
-        required: true,
-      },
-      price: {
-        type: Number,
-        required: true,
-      },
-      currency: {
-        type: String,
-        default: 'USD',
-      },
-      imageUrl: {
-        type: String,
-      },
-      productUrl: {
-        type: String,
-        required: true,
-      },
-      locale: {
-        type: String,
-        default: 'US',
-      },
-      condition: {
-        type: String,
-      },
-      addedAt: {
-        type: Date,
-        default: Date.now,
-      },
-    },
-  ],
-  createdAt: {
-    type: Date,
-    default: Date.now,
+  competitors: [competitorSchema],
+  monitoringEnabled: {
+    type: Boolean,
+    default: true,
   },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
+  monitoringFrequency: {
+    type: Number,
+    default: 20, // minutes
   },
+  lastMonitoringCheck: {
+    type: Date,
+    default: null,
+  },
+}, {
+  timestamps: true,
 });
-
-// Create compound index for efficient queries
-manualCompetitorSchema.index({ userId: 1, itemId: 1 }, { unique: true });
 
 // Update the updatedAt field on save
 manualCompetitorSchema.pre('save', function (next) {
   this.updatedAt = new Date();
   next();
 });
+
+// Create compound index for efficient queries
+manualCompetitorSchema.index({ userId: 1, itemId: 1 }, { unique: true });
 
 const ManualCompetitor = mongoose.model(
   'ManualCompetitor',

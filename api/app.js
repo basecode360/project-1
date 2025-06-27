@@ -11,7 +11,7 @@ import syncRoutes from './routes/syncRoute.js';
 import ebayRoutes from './routes/ebayRoutes.js';
 import authRoutes from './routes/authRoute.js';
 import pricingStrategiesRouter from './routes/pricingStrategies.js';
-import priceHistoryRoutes from './routes/priceHistoryRoutes.js';
+import priceHistoryRoutes from './routes/priceHistory.js'; // Change from priceHistoryRoutes.js to priceHistory.js
 import competitorRulesRouter from './routes/competitorRule.js';
 
 // Models (if you need to attach models to `app.locals` or `app.set('models', {...})`)
@@ -23,8 +23,12 @@ const app = express();
 // ── Connect to MongoDB ─────────────────────────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => {})
-  .catch((err) => {});
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err);
+  });
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(express.json());
@@ -54,7 +58,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/pricing-strategies', pricingStrategiesRouter);
 
 // 5) Price-history endpoints (history/:itemId, analytics/:itemId, export/:itemId)
-app.use('/api/price-history', priceHistoryRoutes); // Add price history routes
+app.use('/api/price-history', priceHistoryRoutes); // This should now work correctly
 
 // 6) Competitor‐rules endpoints (create/edit/delete competitor rules, debug, etc.)
 app.use('/api/competitor-rules', competitorRulesRouter);
@@ -106,6 +110,40 @@ app.post('/api/error-reports', express.json(), (req, res) => {
     reportId: Date.now().toString(),
   });
 });
+
+// Add manual trigger endpoint for testing
+app.post('/api/competitor-monitoring/trigger-manual', async (req, res) => {
+  try {
+    const { itemId } = req.body;
+    const { manualCompetitorUpdate } = await import(
+      './services/competitorMonitoringService.js'
+    );
+    const result = await manualCompetitorUpdate(itemId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Start the competitor monitoring service
+async function startServices() {
+  try {
+    // Import and start competitor monitoring
+    const { startCompetitorMonitoring } = await import(
+      './services/competitorMonitoringService.js'
+    );
+    startCompetitorMonitoring();
+
+    console.log('✅ All background services started successfully');
+  } catch (error) {
+    console.error('❌ Error starting background services:', error);
+  }
+}
+
+// Start services after a delay to ensure database is connected
+setTimeout(() => {
+  startServices();
+}, 5000);
 
 // ── Start the server ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;

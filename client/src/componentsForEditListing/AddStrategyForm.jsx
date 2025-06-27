@@ -36,8 +36,6 @@ export default function AddStrategyPage() {
     stayAboveType: '', // "AMOUNT" or "PERCENTAGE"
     stayAboveValue: '',
     noCompetitionAction: 'USE_MAX_PRICE',
-    maxPrice: '',
-    minPrice: '',
     assignToActiveListings: false,
   });
 
@@ -63,19 +61,7 @@ export default function AddStrategyPage() {
         setProduct(productObj);
         modifyProductsObj(productObj);
 
-        // Set default prices from product data
-        if (productObj[0]?.myPrice) {
-          const priceString = productObj[0].myPrice;
-          const priceValue = priceString.includes(' ')
-            ? priceString.split(' ')[1]
-            : priceString.replace(/[^0-9.]/g, '');
-
-          setFormData((prev) => ({
-            ...prev,
-            minPrice: (parseFloat(priceValue) * 0.9).toFixed(2),
-            maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2),
-          }));
-        }
+        // Remove price setting logic since min/max should be per listing
       } catch (err) {
         setError('Error loading product data: ' + err.message);
         console.error('Error loading product:', err);
@@ -133,12 +119,8 @@ export default function AddStrategyPage() {
       noCompetitionAction: formData.noCompetitionAction,
     };
 
-    if (formData.minPrice) {
-      payload.minPrice = parseFloat(formData.minPrice);
-    }
-    if (formData.maxPrice) {
-      payload.maxPrice = parseFloat(formData.maxPrice);
-    }
+    // Remove min/max price from strategy creation
+    // These will be set per listing when strategy is applied
 
     // Add strategy-specific parameters
     if (formData.repricingRule === 'BEAT_LOWEST') {
@@ -176,8 +158,6 @@ export default function AddStrategyPage() {
       } catch {
         token = localStorage.getItem('app_jwt');
       }
-
-      
 
       if (!token) {
         showAlert(
@@ -217,7 +197,6 @@ export default function AddStrategyPage() {
       }
 
       const strategyPayload = getPricingStrategyPayload();
-      
 
       let response;
       if (formData.assignToActiveListings) {
@@ -243,8 +222,6 @@ export default function AddStrategyPage() {
           'success'
         );
       }
-
-      
 
       // Navigate back after success
       setTimeout(() => {
@@ -505,32 +482,7 @@ export default function AddStrategyPage() {
             </Grid>
           </Grid>
 
-          {/* Price Constraints */}
-          <TextField
-            label="Min Price"
-            name="minPrice"
-            value={formData.minPrice}
-            onChange={handleInputChange}
-            type="number"
-            inputProps={{ step: '0.01', min: '0' }}
-            sx={{
-              '& .MuiInputLabel-root': { fontSize: '16px' },
-              '& .MuiInputBase-root': { fontSize: '16px' },
-            }}
-          />
-
-          <TextField
-            label="Max Price"
-            name="maxPrice"
-            value={formData.maxPrice}
-            onChange={handleInputChange}
-            type="number"
-            inputProps={{ step: '0.01', min: '0' }}
-            sx={{
-              '& .MuiInputLabel-root': { fontSize: '16px' },
-              '& .MuiInputBase-root': { fontSize: '16px' },
-            }}
-          />
+          {/* Remove Min/Max Price fields - these should be set per listing */}
 
           {/* Assign to Active Listings Checkbox */}
           <Box mt={2}>

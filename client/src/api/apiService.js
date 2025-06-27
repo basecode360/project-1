@@ -114,12 +114,34 @@ competitorClient.interceptors.response.use(
 
 /** ————————————— GLOBAL RESPONSE INTERCEPTOR ————————————— **/
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Check for eBay API errors even in successful HTTP responses
+    if (
+      response.data?.success &&
+      response.data?.data?.GetMyeBaySellingResponse?.Ack === 'Failure'
+    ) {
+      const ebayError = response.data.data.GetMyeBaySellingResponse.Errors;
+
+      if (ebayError?.ErrorCode === '932') {
+        console.warn('eBay token hard expired detected in response');
+        localStorage.removeItem('ebay_user_token');
+        localStorage.removeItem('ebay_refresh_token');
+
+        // Dispatch event to notify components
+        window.dispatchEvent(new CustomEvent('ebayTokenExpired'));
+      }
+    }
+
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       // Check if it's an eBay token expiry
       const errorData = error.response.data;
-      if (errorData?.errors?.[0]?.errorId === 932) {
+      if (
+        errorData?.errors?.[0]?.errorId === 932 ||
+        errorData?.data?.GetMyeBaySellingResponse?.Errors?.ErrorCode === '932'
+      ) {
         localStorage.removeItem('ebay_user_token');
         localStorage.removeItem('ebay_refresh_token');
 
@@ -175,48 +197,6 @@ const inventory = {
       return resp.data;
     } catch (err) {
       return { success: false, error: err.message };
-    }
-  },
-  getCompetitorPrice: async (itemId) => {
-    try {
-      const userId = localStorage.getItem('user_id');
-
-      if (!userId) {
-        return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
-      }
-
-      const resp = await apiClient.get(`/competitor-prices/${itemId}`, {
-        params: { userId },
-      });
-
-      // Check if the response has the expected structure
-      if (!resp.data || !resp.data.success) {
-        return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
-      }
-
-      // Updated to match the actual API response structure
-      const competitorPrices = resp.data?.competitorPrices || {};
-
-      const allPrices = Array.isArray(competitorPrices.allPrices)
-        ? competitorPrices.allPrices
-        : [];
-      const allData = Array.isArray(competitorPrices.allData)
-        ? competitorPrices.allData
-        : [];
-
-      const result = {
-        price:
-          allPrices.length > 0
-            ? `USD${parseFloat(Math.min(...allPrices)).toFixed(2)}`
-            : 'USD0.00',
-        count: allPrices.length,
-        allPrices,
-        productInfo: allData,
-      };
-
-      return result;
-    } catch (err) {
-      return { price: 'USD0.00', count: 0, allPrices: [], productInfo: [] };
     }
   },
   getManuallyAddedCompetitors: async (itemId) => {
@@ -525,12 +505,34 @@ const pricingStrategies = {
       // Add cache-busting timestamp to prevent stale data
       const cacheBuster = `${params ? '&' : '?'}t=${Date.now()}`;
 
+      console.log(`📊 Fetching strategy display for ${itemId}...`);
+
       const response = await pricingClient.get(
         `/products/${itemId}/display${params}${cacheBuster}`
       );
 
-      return response.data;
+      console.log(`📊 Strategy display response for ${itemId}:`, response.data);
+
+      if (response.data.success) {
+        return response.data;
+      } else {
+        console.warn(
+          `⚠️ Strategy display failed for ${itemId}:`,
+          response.data
+        );
+        return {
+          success: false,
+          error: response.data.message || 'Failed to get strategy display',
+          data: {
+            strategy: 'Assign Strategy',
+            minPrice: 'Set',
+            maxPrice: 'Set',
+            hasStrategy: false,
+          },
+        };
+      }
     } catch (error) {
+      console.error(`❌ Error fetching strategy display for ${itemId}:`, error);
       return {
         success: false,
         error: error.response?.data?.message || error.message,
@@ -566,6 +568,26 @@ const pricingStrategies = {
       return {
         success: false,
         error: error.response?.data?.message || error.message,
+      };
+    }
+  },
+
+  // Add new method to get strategy directly from MongoDB price history
+  getAppliedStrategyFromMongo: async (itemId) => {
+    try {
+      const userId = localStorage.getItem('user_id');
+      const response = await pricingClient.get(
+        `/products/${itemId}/mongo-strategy`,
+        {
+          params: { userId },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message,
+        data: null,
       };
     }
   },
@@ -800,7 +822,7 @@ const priceHistory = {
       const { headers } = await createAuthenticatedRequest();
 
       const response = await fetch(
-        `${BASE_URL}/price-history/product/${itemId}?limit=${limit}`,
+        `${BACKEND_URL}/api/price-history/product/${itemId}?limit=${limit}`,
         {
           method: 'GET',
           headers,
@@ -824,7 +846,7 @@ const priceHistory = {
       const { headers } = await createAuthenticatedRequest();
 
       const response = await fetch(
-        `${BASE_URL}/price-history/summary/${itemId}`,
+        `${BACKEND_URL}/api/price-history/summary/${itemId}`,
         {
           method: 'GET',
           headers,

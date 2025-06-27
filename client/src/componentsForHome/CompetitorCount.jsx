@@ -1,61 +1,62 @@
 import React, { useState, useEffect } from 'react';
 import apiService from '../api/apiService';
 
-// Accept itemId instead of itemSku
 const CompetitorCount = ({ itemId }) => {
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchCompetitorCount = async () => {
+      if (!itemId) {
+        setLoading(false);
+        setCount(0);
+        return;
+      }
+
       try {
-        // Use the same logic as CompetitorDetails
-        // Get API competitors
-        let apiCount = 0;
+        console.log(`🔍 Fetching competitor count for itemId: ${itemId}`);
+
+        const manualResponse =
+          await apiService.inventory.getManuallyAddedCompetitors(itemId);
+
+        console.log(
+          `📊 Manual competitors response for ${itemId}:`,
+          manualResponse
+        );
+
         let manualCount = 0;
-        try {
-          const apiResponse = await apiService.inventory.getCompetitorPrice(
-            itemId
+
+        if (manualResponse.success) {
+          // Handle both possible response structures
+          const competitors =
+            manualResponse.competitors ||
+            manualResponse.data?.competitors ||
+            [];
+          manualCount = Array.isArray(competitors) ? competitors.length : 0;
+
+          console.log(
+            `📊 Found ${manualCount} manual competitors for ${itemId}`
           );
-          if (
-            apiResponse &&
-            apiResponse.productInfo &&
-            Array.isArray(apiResponse.productInfo)
-          ) {
-            apiCount = apiResponse.productInfo.length;
-          }
-        } catch (error) {
-          // Silently handle - no API competitors
+        } else {
+          console.warn(
+            `⚠️ Failed to get manual competitors for ${itemId}:`,
+            manualResponse.error
+          );
         }
 
-        // Get manual competitors
-        try {
-          const manualResponse =
-            await apiService.inventory.getManuallyAddedCompetitors(itemId);
-          if (
-            manualResponse.success &&
-            Array.isArray(manualResponse.competitors)
-          ) {
-            manualCount = manualResponse.competitors.length;
-          }
-        } catch (error) {
-          // Silently handle - no manual competitors
-        }
-
-        setCount(apiCount + manualCount);
+        setCount(manualCount);
       } catch (error) {
+        console.error(
+          `❌ Error fetching competitor count for ${itemId}:`,
+          error
+        );
         setCount(0);
       } finally {
         setLoading(false);
       }
     };
 
-    if (itemId) {
-      fetchCompetitorCount();
-    } else {
-      setLoading(false);
-      setCount(0);
-    }
+    fetchCompetitorCount();
   }, [itemId]);
 
   if (loading) {

@@ -2,6 +2,7 @@
 
 import CompetitorRule from '../models/competitorSchema.js';
 import Product from '../models/Product.js';
+import mongoose from 'mongoose'; // Add missing mongoose import
 
 /**
  * Extract core logic for creating a competitor rule
@@ -83,25 +84,37 @@ const createCompetitorRule = async (req, res) => {
  */
 const getAllCompetitorRules = async (req, res) => {
   try {
-    const { active } = req.query;
-    let query = {};
+    const { active, userId } = req.query;
 
+    let isActive = null;
     if (active === 'true') {
-      query.isActive = true;
+      isActive = true;
     } else if (active === 'false') {
-      query.isActive = false;
+      isActive = false;
+    }
+
+    const query = {};
+    if (isActive !== null) {
+      query.isActive = isActive;
+    }
+    if (userId) {
+      query.createdBy = userId;
     }
 
     const rules = await CompetitorRule.find(query).sort({ ruleName: 1 });
-    return res.status(200).json({
+
+    res.status(200).json({
       success: true,
       count: rules.length,
-      data: rules,
+      rules: rules,
+      data: rules, // Include both for compatibility
     });
   } catch (error) {
     console.error('Error fetching competitor rules:', error);
+    
+    // Only send error response if headers haven't been sent yet
     if (!res.headersSent) {
-      return res.status(500).json({
+      res.status(500).json({
         success: false,
         message: 'Error fetching competitor rules',
         error: error.message,
@@ -532,17 +545,17 @@ const updateRuleExecutionStats = async (req, res) => {
  * GET /api/competitor-rules/product/:itemId
  */
 const getCompetitorRuleForProduct = async (req, res) => {
-  const { itemId } = req.params;
-  const { userId } = req.query;
-
-  if (!userId) {
-    return res.status(400).json({
-      success: false,
-      message: 'userId is required in request body',
-    });
-  }
-
   try {
+    const { itemId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required in query parameters',
+      });
+    }
+
     const rule = await CompetitorRule.findOne({
       'appliesTo.itemId': itemId,
       createdBy: userId, // Optional: filter by owner
@@ -566,6 +579,7 @@ const getCompetitorRuleForProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error fetching rule for product',
+      error: err.message,
     });
   }
 };

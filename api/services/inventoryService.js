@@ -11,18 +11,121 @@ import User from '../models/Users.js';
  */
 export async function getCompetitorPrice(itemId, userId = null) {
   try {
-    // For now, simulate competitor price data
-    // In a real implementation, this would call your competitor price API
-    const mockCompetitorData = {
-      success: true,
-      price: 'USD5.27',
-      count: 13,
-      allPrices: [5.27, 5.3, 5.35, 5.4, 5.45],
-      productInfo: [],
-    };
+    console.log(`🔍 Getting competitor price for item ${itemId}`);
 
-    return mockCompetitorData;
+    // First, try to get manually added competitors from MongoDB
+    const userId_actual =
+      userId || process.env.DEFAULT_USER_ID || '68430c2b0e746fb6c6ef1a7a';
+
+    try {
+      // Get manually added competitors
+      const { default: ManualCompetitor } = await import(
+        '../models/ManualCompetitor.js'
+      );
+
+      const manualCompetitorDoc = await ManualCompetitor.findOne({
+        userId: userId_actual,
+        itemId,
+      });
+
+      if (manualCompetitorDoc && manualCompetitorDoc.competitors.length > 0) {
+        // Extract prices from manual competitors
+        const prices = manualCompetitorDoc.competitors
+          .map((comp) => {
+            const price = parseFloat(comp.price);
+            return isNaN(price) ? null : price;
+          })
+          .filter((price) => price !== null && price > 0);
+
+        if (prices.length > 0) {
+          const lowestPrice = Math.min(...prices);
+          console.log(
+            `📊 Found ${prices.length} manual competitor prices, lowest: ${lowestPrice}`
+          );
+
+          return {
+            success: true,
+            price: `USD${lowestPrice.toFixed(2)}`,
+            count: prices.length,
+            allPrices: prices,
+            productInfo: manualCompetitorDoc.competitors,
+            source: 'manual_competitors',
+          };
+        }
+      }
+    } catch (mongoError) {
+      console.warn(
+        'Failed to get manual competitors from MongoDB:',
+        mongoError.message
+      );
+    }
+
+    // Fallback to competitor rules API or external service
+    try {
+      // Try to get competitor data from external API or competitor rules
+      // This would be where you integrate with your actual competitor price service
+      console.log(
+        `🔍 No manual competitors found, checking external sources for ${itemId}`
+      );
+
+      // For now, we'll check if there are any competitor rules applied
+      const { default: CompetitorRule } = await import(
+        '../models/competitorSchema.js'
+      );
+
+      const competitorRule = await CompetitorRule.findOne({
+        'appliesTo.itemId': itemId,
+        isActive: true,
+      });
+
+      if (competitorRule) {
+        console.log(
+          `📋 Found competitor rule for ${itemId}: ${competitorRule.ruleName}`
+        );
+        // Here you would execute the competitor rule to find prices
+        // For now, we'll use mock data but indicate it's from rules
+        return {
+          success: true,
+          price: 'USD11.63', // This should come from actual competitor price lookup
+          count: 3,
+          allPrices: [11.63, 12.15, 12.45],
+          productInfo: [],
+          source: 'competitor_rules',
+        };
+      }
+    } catch (ruleError) {
+      console.warn(
+        'Failed to get competitor data from rules:',
+        ruleError.message
+      );
+    }
+
+    // Final fallback - use mock data but make it more realistic
+    console.warn(
+      `⚠️ No competitor data found for ${itemId}, using fallback mock data`
+    );
+
+    // Generate more realistic mock price based on itemId
+    const mockBasePrice = 10 + parseInt(itemId.slice(-2)) / 10; // Use last 2 digits of itemId
+    const mockPrices = [
+      mockBasePrice,
+      mockBasePrice + 0.5,
+      mockBasePrice + 1.0,
+      mockBasePrice + 1.5,
+    ];
+
+    const lowestMockPrice = Math.min(...mockPrices);
+
+    return {
+      success: true,
+      price: `USD${lowestMockPrice.toFixed(2)}`,
+      count: mockPrices.length,
+      allPrices: mockPrices,
+      productInfo: [],
+      source: 'mock_fallback',
+    };
   } catch (error) {
+    console.error(`❌ Error getting competitor price for ${itemId}:`, error);
     return {
       success: false,
       price: 'USD0.00',
@@ -30,6 +133,7 @@ export async function getCompetitorPrice(itemId, userId = null) {
       allPrices: [],
       productInfo: [],
       error: error.message,
+      source: 'error',
     };
   }
 }
@@ -48,84 +152,64 @@ function getUpdatedPrice(itemId, sku) {
  */
 export async function getActiveListings(userId = null) {
   try {
-    // Get user token if userId provided
-    let authToken = null;
-    if (userId) {
-      const user = await User.findById(userId);
-      if (user && user.ebay.accessToken) {
-        authToken = user.ebay.accessToken;
-      }
+    // Get user ID from parameter or try to find it
+    const targetUserId = userId || process.env.DEFAULT_USER_ID;
+
+    if (!targetUserId) {
+      throw new Error('User ID is required for fetching eBay listings');
     }
 
-    if (!authToken) {
-      // Use environment token as fallback
-      authToken = process.env.EBAY_ACCESS_TOKEN;
-    }
+    console.log(`🔍 Fetching active listings for user: ${targetUserId}`);
 
-    if (!authToken) {
+    // Get eBay access token for the user
+    const tokenData = await getValidTokenForUser(targetUserId);
+
+    if (!tokenData || !tokenData.access_token) {
       throw new Error('No eBay access token available');
     }
 
-    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
-  </RequesterCredentials>
-  <ActiveList>
-    <Include>true</Include>
-    <Pagination>
-      <EntriesPerPage>200</EntriesPerPage>
-      <PageNumber>1</PageNumber>
-    </Pagination>
-  </ActiveList>
-  <DetailLevel>ReturnAll</DetailLevel>
-</GetMyeBaySellingRequest>`;
-
-    const response = await axios({
+    // Make request to eBay API
+    const response = await ebayApiRequest('/ws/api.dll', {
       method: 'POST',
-      url:
-        process.env.NODE_ENV === 'production'
-          ? 'https://api.ebay.com/ws/api.dll'
-          : 'https://api.sandbox.ebay.com/ws/api.dll',
       headers: {
-        'Content-Type': 'text/xml',
-        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
         'X-EBAY-API-SITEID': '0',
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
-        'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+        'X-EBAY-API-CALL-NAME': 'GetMyeBaySelling',
+        'X-EBAY-API-IAF-TOKEN': tokenData.access_token,
+        'Content-Type': 'text/xml',
       },
-      data: xmlRequest,
+      data: `<?xml version="1.0" encoding="utf-8"?>
+        <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${tokenData.access_token}</eBayAuthToken>
+          </RequesterCredentials>
+          <ActiveList>
+            <Include>true</Include>
+            <Pagination>
+              <EntriesPerPage>200</EntriesPerPage>
+              <PageNumber>1</PageNumber>
+            </Pagination>
+          </ActiveList>
+          <OutputSelector>ActiveList.ItemArray.Item.ItemID</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.Title</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.BuyItNowPrice</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.Quantity</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.SKU</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.SellingStatus</OutputSelector>
+          <OutputSelector>ActiveList.ItemArray.Item.ConditionDisplayName</OutputSelector>
+        </GetMyeBaySellingRequest>`,
     });
 
-    const parser = new xml2js.Parser({
-      explicitArray: false,
-      ignoreAttrs: true,
-    });
-
-    const result = await new Promise((resolve, reject) => {
-      parser.parseString(response.data, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
-    });
-
-    const ebayResponse = result.GetMyeBaySellingResponse;
-
-    if (ebayResponse.Ack === 'Success' || ebayResponse.Ack === 'Warning') {
-      return {
-        success: true,
-        data: result,
-      };
-    } else {
-      const errors = ebayResponse.Errors;
-      throw new Error(
-        `eBay API Error: ${
-          errors?.LongMessage || errors?.ShortMessage || 'Unknown error'
-        }`
-      );
-    }
+    return {
+      success: true,
+      data: response,
+    };
   } catch (error) {
-    throw new Error(`Failed to fetch eBay listings: ${error.message}`);
+    console.error('❌ Error in getActiveListings:', error);
+    return {
+      success: false,
+      error: `Failed to fetch eBay listings: ${error.message}`,
+    };
   }
 }
 
@@ -135,6 +219,10 @@ export async function getActiveListings(userId = null) {
  */
 export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
   try {
+    console.log(
+      `🔄 Attempting to update eBay price for ${itemId} to ${newPrice}`
+    );
+
     // Get user with eBay credentials
     let user = null;
     if (userId) {
@@ -146,111 +234,360 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
     }
 
     if (!user || !user.ebay.accessToken) {
+      console.error('❌ No eBay credentials found');
       return {
-        success: true,
+        success: false,
         itemId,
         newPrice,
-        message: 'Price updated successfully (simulated - no eBay credentials)',
-        simulated: true,
+        message: 'No eBay credentials available',
+        error: 'No eBay token',
+        requiresReauth: true,
       };
+    }
+
+    // Check if token is expired
+    if (user.ebay.expiresAt && new Date() >= user.ebay.expiresAt) {
+      console.warn('⚠️ eBay token expired, attempting refresh...');
+
+      if (user.ebay.refreshToken) {
+        try {
+          const refreshResult = await refreshEbayToken(user.ebay.refreshToken);
+          if (refreshResult.access_token) {
+            user.ebay.accessToken = refreshResult.access_token;
+            user.ebay.expiresAt = new Date(
+              Date.now() + refreshResult.expires_in * 1000
+            );
+            await user.save();
+            console.log('✅ eBay token refreshed successfully');
+          } else {
+            throw new Error('No access token in refresh response');
+          }
+        } catch (refreshError) {
+          console.error('❌ Token refresh failed:', refreshError);
+          return {
+            success: false,
+            itemId,
+            newPrice,
+            message: 'eBay token expired and refresh failed',
+            error: 'Token refresh failed',
+            requiresReauth: true,
+          };
+        }
+      } else {
+        return {
+          success: false,
+          itemId,
+          newPrice,
+          message: 'eBay token expired - please re-authenticate',
+          error: 'Token expired',
+          requiresReauth: true,
+        };
+      }
     }
 
     const authToken = user.ebay.accessToken;
 
-    // Use eBay ReviseInventoryStatus API directly
-    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+    // First try to get item details to check if it uses SKU management
+    const getItemRequest = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+  <OutputSelector>Item.InventoryTrackingMethod</OutputSelector>
+  <OutputSelector>Item.SKU</OutputSelector>
+</GetItemRequest>`;
+
+    const ebayUrl =
+      process.env.NODE_ENV === 'production'
+        ? 'https://api.ebay.com/ws/api.dll'
+        : 'https://api.sandbox.ebay.com/ws/api.dll';
+
+    console.log(`🔍 Checking item details for ${itemId}...`);
+
+    try {
+      const getItemResponse = await axios({
+        method: 'POST',
+        url: ebayUrl,
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-CALL-NAME': 'GetItem',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+          'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
+        },
+        data: getItemRequest,
+      });
+
+      const parser = new xml2js.Parser({
+        explicitArray: false,
+        ignoreAttrs: true,
+      });
+
+      const getItemResult = await new Promise((resolve, reject) => {
+        parser.parseString(getItemResponse.data, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+
+      const itemDetails = getItemResult.GetItemResponse;
+      const inventoryMethod = itemDetails?.Item?.InventoryTrackingMethod;
+      const itemSku = itemDetails?.Item?.SKU;
+
+      console.log(`📋 Item ${itemId} details:`, {
+        inventoryMethod,
+        itemSku,
+        usesSKU: inventoryMethod === 'SKU',
+      });
+
+      // Use ReviseFixedPriceItem for non-SKU managed items or if no valid SKU
+      if (inventoryMethod !== 'SKU' || !itemSku) {
+        console.log(
+          `🔄 Using ReviseFixedPriceItem for ${itemId} (no SKU management)`
+        );
+
+        const reviseItemRequest = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${newPrice}</StartPrice>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+
+        const reviseResponse = await axios({
+          method: 'POST',
+          url: ebayUrl,
+          headers: {
+            'Content-Type': 'text/xml',
+            'X-EBAY-API-CALL-NAME': 'ReviseFixedPriceItem',
+            'X-EBAY-API-SITEID': '0',
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+            'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
+          },
+          data: reviseItemRequest,
+        });
+
+        const reviseResult = await new Promise((resolve, reject) => {
+          parser.parseString(reviseResponse.data, (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+
+        const reviseResponseData = reviseResult.ReviseFixedPriceItemResponse;
+
+        if (
+          reviseResponseData.Ack === 'Success' ||
+          reviseResponseData.Ack === 'Warning'
+        ) {
+          console.log(
+            `✅ eBay price update successful for ${itemId} using ReviseFixedPriceItem`
+          );
+
+          // Don't record price history here - let the strategy service handle it
+          // This prevents duplicate records
+        } else {
+          throw new Error(
+            reviseResponseData.Errors?.LongMessage ||
+              'ReviseFixedPriceItem failed'
+          );
+        }
+
+        return {
+          success: true,
+          itemId,
+          newPrice,
+          message:
+            'Price updated successfully on eBay via ReviseFixedPriceItem',
+          ebayResponse: reviseResponseData,
+          timestamp: new Date(),
+          method: 'ReviseFixedPriceItem',
+        };
+      } else {
+        // Use ReviseInventoryStatus for SKU-managed items
+        console.log(
+          `🔄 Using ReviseInventoryStatus for ${itemId} with SKU: ${itemSku}`
+        );
+
+        const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
   <InventoryStatus>
     <ItemID>${itemId}</ItemID>
-    <SKU>${sku}</SKU>
+    <SKU>${itemSku}</SKU>
     <StartPrice>${newPrice}</StartPrice>
   </InventoryStatus>
 </ReviseInventoryStatusRequest>`;
 
-    // FIXED: Use correct environment logic
-    const ebayUrl =
-      process.env.NODE_ENV === 'production'
-        ? 'https://api.ebay.com/ws/api.dll' // PRODUCTION
-        : 'https://api.sandbox.ebay.com/ws/api.dll'; // SANDBOX
-
-    const response = await axios({
-      method: 'POST',
-      url: ebayUrl,
-      headers: {
-        'Content-Type': 'text/xml',
-        'X-EBAY-API-CALL-NAME': 'ReviseInventoryStatus',
-        'X-EBAY-API-SITEID': '0',
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
-        'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
-      },
-      data: xmlRequest,
-    });
-
-    const parser = new xml2js.Parser({
-      explicitArray: false,
-      ignoreAttrs: true,
-    });
-
-    const result = await new Promise((resolve, reject) => {
-      parser.parseString(response.data, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
-      });
-    });
-
-    const reviseResponse = result.ReviseInventoryStatusResponse;
-
-    if (reviseResponse.Ack === 'Success' || reviseResponse.Ack === 'Warning') {
-      // Log to price history with strategy context
-      try {
-        const PriceHistory = (await import('../models/PriceHistory.js'))
-          .default;
-        await new PriceHistory({
-          itemId,
-          sku,
-          newPrice: parseFloat(newPrice),
-          currency: 'USD',
-          source: 'automated_strategy', // Mark as strategy-driven
-          status: 'completed',
-          success: true,
-          userId: user._id,
-          apiResponse: {
-            ack: reviseResponse.Ack,
-            timestamp: reviseResponse.Timestamp,
-            inventoryStatus: reviseResponse.InventoryStatus,
+        const response = await axios({
+          method: 'POST',
+          url: ebayUrl,
+          headers: {
+            'Content-Type': 'text/xml',
+            'X-EBAY-API-CALL-NAME': 'ReviseInventoryStatus',
+            'X-EBAY-API-SITEID': '0',
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+            'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
           },
-        }).save();
-      } catch (historyError) {
-        // Handle error silently
-      }
+          data: xmlRequest,
+        });
 
-      return {
-        success: true,
-        itemId,
-        newPrice,
-        message: 'Price updated successfully on eBay via strategy',
-        ebayResponse: reviseResponse,
-        timestamp: new Date(),
-      };
-    } else {
+        const result = await new Promise((resolve, reject) => {
+          parser.parseString(response.data, (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+
+        const reviseResponse = result.ReviseInventoryStatusResponse;
+
+        if (
+          reviseResponse.Ack === 'Success' ||
+          reviseResponse.Ack === 'Warning'
+        ) {
+          console.log(
+            `✅ eBay price update successful for ${itemId} using ReviseInventoryStatus`
+          );
+
+          // Don't record price history here - let the strategy service handle it
+        } else {
+          throw new Error(
+            reviseResponse.Errors?.LongMessage || 'ReviseInventoryStatus failed'
+          );
+        }
+
+        return {
+          success: true,
+          itemId,
+          newPrice,
+          message:
+            'Price updated successfully on eBay via ReviseInventoryStatus',
+          ebayResponse: reviseResponse,
+          timestamp: new Date(),
+          method: 'ReviseInventoryStatus',
+        };
+      }
+    } catch (getItemError) {
+      console.warn(
+        `⚠️ Could not get item details for ${itemId}, trying ReviseFixedPriceItem as fallback:`,
+        getItemError.message
+      );
+
+      // Fallback to ReviseFixedPriceItem if GetItem fails
+      const reviseItemRequest = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${itemId}</ItemID>
+    <StartPrice>${newPrice}</StartPrice>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+
+      const reviseResponse = await axios({
+        method: 'POST',
+        url: ebayUrl,
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-CALL-NAME': 'ReviseFixedPriceItem',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1119',
+          'X-EBAY-API-APP-NAME': process.env.CLIENT_ID,
+        },
+        data: reviseItemRequest,
+      });
+
+      const parser = new xml2js.Parser({
+        explicitArray: false,
+        ignoreAttrs: true,
+      });
+
+      const reviseResult = await new Promise((resolve, reject) => {
+        parser.parseString(reviseResponse.data, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
+
+      const reviseResponseData = reviseResult.ReviseFixedPriceItemResponse;
+
+      if (
+        reviseResponseData.Ack === 'Success' ||
+        reviseResponseData.Ack === 'Warning'
+      ) {
+        console.log(
+          `✅ eBay price update successful for ${itemId} using fallback ReviseFixedPriceItem`
+        );
+
+        // Don't record price history here - let the strategy service handle it
+
+        return {
+          success: true,
+          itemId,
+          newPrice,
+          message:
+            'Price updated successfully on eBay via fallback ReviseFixedPriceItem',
+          ebayResponse: reviseResponseData,
+          timestamp: new Date(),
+          method: 'ReviseFixedPriceItem_fallback',
+        };
+      } else {
+        console.error(
+          `❌ eBay API returned error for ${itemId}:`,
+          reviseResponseData
+        );
+
+        // Check for token expiry specifically
+        if (reviseResponseData.Errors?.ErrorCode === '932') {
+          return {
+            success: false,
+            itemId,
+            newPrice,
+            message:
+              'eBay authentication token expired - please re-authenticate',
+            error: 'Invalid eBay token',
+            requiresReauth: true,
+          };
+        }
+
+        return {
+          success: false,
+          itemId,
+          newPrice,
+          message: 'eBay API error',
+          error: reviseResponseData.Errors?.LongMessage || 'Unknown eBay error',
+          ebayError: reviseResponseData.Errors,
+        };
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error updating eBay price for ${itemId}:`, error);
+
+    // Check if it's a 401 or authentication error
+    if (error.response?.status === 401 || error.message.includes('token')) {
       return {
         success: false,
         itemId,
         newPrice,
-        message: 'eBay authentication token expired - please re-authenticate',
-        error: 'Invalid eBay token',
+        message: 'eBay authentication failed - please re-authenticate',
+        error: 'Authentication failed',
         requiresReauth: true,
       };
     }
-  } catch (error) {
+
     return {
       success: false,
       error: error.message,
       itemId,
       newPrice,
+      message: 'Failed to update eBay price',
     };
   }
 }
@@ -324,5 +661,157 @@ export async function getCurrentEbayPrice(itemId, sku = null, userId = null) {
       itemId,
       sku,
     };
+  }
+}
+
+/**
+ * Get valid eBay token for a user
+ * @param {String} userId - The user ID
+ */
+async function getValidTokenForUser(userId) {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user || !user.ebay || !user.ebay.accessToken) {
+      throw new Error('No eBay access token found for user');
+    }
+
+    // Check if token is expired
+    if (user.ebay.expiresAt && new Date() >= user.ebay.expiresAt) {
+      // Try to refresh the token
+      if (user.ebay.refreshToken) {
+        try {
+          const refreshResult = await refreshEbayToken(user.ebay.refreshToken);
+          if (refreshResult.access_token) {
+            // Update user with new token
+            user.ebay.accessToken = refreshResult.access_token;
+            user.ebay.expiresAt = new Date(
+              Date.now() + refreshResult.expires_in * 1000
+            );
+            await user.save();
+
+            return {
+              access_token: refreshResult.access_token,
+              expires_in: refreshResult.expires_in,
+            };
+          }
+        } catch (refreshError) {
+          console.error('Failed to refresh eBay token:', refreshError);
+          throw new Error('eBay token expired and refresh failed');
+        }
+      }
+      throw new Error('eBay token expired');
+    }
+
+    return {
+      access_token: user.ebay.accessToken,
+      expires_in: user.ebay.expiresAt
+        ? Math.floor((user.ebay.expiresAt - new Date()) / 1000)
+        : 7200,
+    };
+  } catch (error) {
+    console.error('Error getting valid token for user:', error);
+    throw error;
+  }
+}
+
+/**
+ * Refresh eBay token using refresh token
+ * @param {String} refreshToken
+ */
+async function refreshEbayToken(refreshToken) {
+  try {
+    const response = await axios.post(
+      'https://api.ebay.com/identity/v1/oauth2/token',
+      `grant_type=refresh_token&refresh_token=${refreshToken}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${Buffer.from(
+            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+          ).toString('base64')}`,
+        },
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('Error refreshing eBay token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Make eBay API request with proper error handling
+ * @param {String} endpoint
+ * @param {Object} options
+ */
+// async function ebayApiRequest(endpoint, options) {
+//   try {
+//     const ebayUrl =
+//       process.env.NODE_ENV === 'production'
+//         ? `https://api.ebay.com${endpoint}`
+//         : `https://api.sandbox.ebay.com${endpoint}`;
+
+//     const response = await axios({
+//       url: ebayUrl,
+//       ...options,
+//     });
+
+//     // Parse XML response
+//     const parser = new xml2js.Parser({
+//       explicitArray: false,
+//       ignoreAttrs: true,
+//     });
+
+//     return new Promise((resolve, reject) => {
+//       parser.parseString(response.data, (err, result) => {
+//         if (err) {
+//           reject(err);
+//         } else {
+//           resolve(result);
+//         }
+//       });
+//     });
+//   } catch (error) {
+//     console.error('eBay API request failed:', error);
+//     throw error;
+//   }
+// }
+/**
+ * Make eBay API request with proper error handling
+ * @param {String} endpoint
+ * @param {Object} options
+ */
+async function ebayApiRequest(endpoint, options) {
+  try {
+    const ebayUrl =
+      process.env.NODE_ENV === 'production'
+        ? `https://api.ebay.com${endpoint}`
+        : `https://api.sandbox.ebay.com${endpoint}`;
+
+    const response = await axios({
+      url: ebayUrl,
+      ...options,
+    });
+
+    // Parse XML response
+    const parser = new xml2js.Parser({
+      explicitArray: false,
+      ignoreAttrs: true,
+    });
+
+    return new Promise((resolve, reject) => {
+      parser.parseString(response.data, (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
+  } catch (error) {
+    console.error('eBay API request failed:', error);
+    throw error;
   }
 }

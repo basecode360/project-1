@@ -12,7 +12,7 @@ import {
   getStrategiesForItem,
   removeStrategyFromItem,
   getActiveStrategies,
-  applyStrategiesToProduct,
+  applyStrategiesToItem, // Fixed: was applyStrategiesToProduct
 } from '../services/strategyService.js';
 
 const router = express.Router();
@@ -21,8 +21,6 @@ const router = express.Router();
 //    POST /api/pricing-strategies
 router.post('/', requireAuth, async (req, res) => {
   try {
-
-
     const strategy = await createStrategy({
       ...req.body,
       createdBy: req.user.id,
@@ -171,12 +169,11 @@ router.post('/products/:itemId', requireAuth, async (req, res) => {
     }
 
     // Apply strategies using the proven editProduct method
-    const results = await applyStrategiesToProduct(itemId, strategyIds, sku);
+    const results = await applyStrategiesToItem(itemId, strategyIds, sku); // Fixed function name
     const successCount = results.filter((r) => r.success).length;
 
     // After applying strategies, immediately execute them to update prices
     if (successCount > 0) {
-   
       const { executeStrategiesForItem } = await import(
         '../services/strategyService.js'
       );
@@ -213,7 +210,8 @@ router.put('/products/:itemId', requireAuth, async (req, res) => {
     // If the request contains a strategy ID, apply it to the product
     if (strategyData._id || strategyData.strategyId) {
       const strategyId = strategyData._id || strategyData.strategyId;
-      const results = await applyStrategiesToProduct(
+      const results = await applyStrategiesToItem(
+        // Fixed function name
         itemId,
         [strategyId],
         null
@@ -228,7 +226,8 @@ router.put('/products/:itemId', requireAuth, async (req, res) => {
 
     // If strategyIds array is provided, apply multiple strategies
     if (strategyData.strategyIds && Array.isArray(strategyData.strategyIds)) {
-      const results = await applyStrategiesToProduct(
+      const results = await applyStrategiesToItem(
+        // Fixed function name
         itemId,
         strategyData.strategyIds,
         strategyData.sku || null
@@ -259,10 +258,31 @@ router.get('/products/:itemId/display', requireAuth, async (req, res) => {
     const { itemId } = req.params;
     const { sku = null } = req.query;
 
+    console.log(
+      `📊 Strategy display request for ${itemId}${
+        sku ? ` with SKU ${sku}` : ''
+      }`
+    );
+
     const { getStrategyDisplayForProduct } = await import(
       '../services/strategyService.js'
     );
     const displayInfo = await getStrategyDisplayForProduct(itemId, sku);
+
+    console.log(`📊 Strategy display result for ${itemId}:`, {
+      strategy: displayInfo.strategy,
+      strategyName: displayInfo.strategyName,
+      hasStrategy: displayInfo.hasStrategy,
+      appliedStrategiesCount: displayInfo.appliedStrategies?.length || 0,
+      rawStrategyName: displayInfo.rawStrategy?.strategyName,
+    });
+
+    // Add cache control headers to prevent caching
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+    });
 
     return res.json({
       success: true,
@@ -270,11 +290,108 @@ router.get('/products/:itemId/display', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('Error in GET /products/:itemId/display:', err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+      data: {
+        strategy: 'Assign Strategy',
+        minPrice: 'Set',
+        maxPrice: 'Set',
+        hasStrategy: false,
+        appliedStrategies: [],
+        strategyCount: 0,
+      },
+    });
   }
 });
 
-// 6.6) Get strategies applied to a specific product (MOVE THIS AFTER THE DISPLAY ROUTE)
+// 6.12) Get applied strategy from MongoDB price history
+//       GET /api/pricing-strategies/products/:itemId/mongo-strategy
+router.get(
+  '/products/:itemId/mongo-strategy',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const { userId } = req.query;
+
+      // Import PriceHistory model
+      const { default: PriceHistory } = await import(
+        '../models/PriceHistory.js'
+      );
+
+      // Find the most recent price history record with a strategy for this item
+      const latestRecord = await PriceHistory.findOne({
+        itemId: itemId,
+        strategyName: { $exists: true, $ne: null },
+        ...(userId && { userId: userId }),
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (!latestRecord) {
+        return res.json({
+          success: false,
+          message: 'No strategy found in price history for this item',
+          data: null,
+        });
+      }
+
+      // Get the strategy details from the strategy collection
+      const { getStrategyById } = await import(
+        '../services/strategyService.js'
+      );
+
+      // Try to find the strategy by name first
+      const { default: PricingStrategy } = await import(
+        '../models/PricingStrategy.js'
+      );
+      const strategy = await PricingStrategy.findOne({
+        strategyName: latestRecord.strategyName,
+      }).lean();
+
+      if (strategy) {
+        return res.json({
+          success: true,
+          data: {
+            strategyName: strategy.strategyName,
+            minPrice: strategy.minPrice,
+            maxPrice: strategy.maxPrice,
+            repricingRule: strategy.repricingRule,
+            appliedAt: latestRecord.createdAt,
+            lastExecutedPrice: latestRecord.newPrice,
+            competitorPrice: latestRecord.competitorLowestPrice,
+          },
+        });
+      } else {
+        // Return basic info from price history if strategy not found in collection
+        return res.json({
+          success: true,
+          data: {
+            strategyName: latestRecord.strategyName,
+            minPrice: null,
+            maxPrice: null,
+            appliedAt: latestRecord.createdAt,
+            lastExecutedPrice: latestRecord.newPrice,
+            competitorPrice: latestRecord.competitorLowestPrice,
+          },
+        });
+      }
+    } catch (err) {
+      console.error(
+        'Error in GET /products/:itemId/mongo-strategy:',
+        err.message
+      );
+      return res.status(500).json({
+        success: false,
+        message: err.message,
+        data: null,
+      });
+    }
+  }
+);
+
+// 6.6) Get strategies applied to a specific product (MOVE THIS AFTER THE MONGO-STRATEGY ROUTE)
 //      GET /api/pricing-strategies/products/:itemId
 router.get('/products/:itemId', requireAuth, async (req, res) => {
   try {
@@ -362,7 +479,6 @@ router.post('/products/:itemId/update-price', requireAuth, async (req, res) => {
     const { itemId } = req.params;
     const userId = req.user?.id;
 
-   
     // Get strategies for this item
     const strategies = await getStrategiesForItem(itemId);
 
@@ -404,8 +520,6 @@ router.post('/products/:itemId/update-price', requireAuth, async (req, res) => {
         if (strategy.maxPrice && calculatedPrice > strategy.maxPrice) {
           calculatedPrice = strategy.maxPrice;
         }
-
-  
       }
     } catch (competitorError) {
       console.error('Error getting competitor price:', competitorError.message);

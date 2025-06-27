@@ -41,7 +41,38 @@ export default function PriceChangeSubmissions() {
       );
 
       if (historyData.success && historyData.priceHistory) {
-        setPriceHistory(historyData.priceHistory);
+        // Transform the data to ensure all fields are properly formatted
+        const transformedHistory = historyData.priceHistory.map((record) => ({
+          ...record,
+          // Ensure numeric values
+          newPrice: record.newPrice
+            ? parseFloat(record.newPrice).toFixed(2)
+            : 'N/A',
+          oldPrice: record.oldPrice
+            ? parseFloat(record.oldPrice).toFixed(2)
+            : 'N/A',
+          competitorPrice:
+            record.competitorPrice || record.competitorLowestPrice
+              ? parseFloat(
+                  record.competitorPrice || record.competitorLowestPrice
+                ).toFixed(2)
+              : 'N/A',
+          minPrice: record.minPrice
+            ? parseFloat(record.minPrice).toFixed(2)
+            : 'N/A',
+          maxPrice: record.maxPrice
+            ? parseFloat(record.maxPrice).toFixed(2)
+            : 'N/A',
+          // Ensure strategy name
+          strategyName: record.strategyName || 'Manual',
+          // Ensure success status
+          success: record.success !== false, // Default to true unless explicitly false
+          // Ensure date
+          date:
+            record.date || record.timestamp || record.createdAt || new Date(),
+        }));
+
+        setPriceHistory(transformedHistory);
         setError(null);
       } else {
         setPriceHistory([]);
@@ -75,12 +106,12 @@ export default function PriceChangeSubmissions() {
     ];
 
     const csvData = priceHistory.map((record) => [
-      record.newPrice,
-      record.oldPrice || 'N/A',
-      record.competitorPrice || 'N/A',
+      record.newPrice !== 'N/A' ? `$${record.newPrice}` : 'N/A',
+      record.oldPrice !== 'N/A' ? `$${record.oldPrice}` : 'N/A',
+      record.competitorPrice !== 'N/A' ? `$${record.competitorPrice}` : 'N/A',
       record.strategyName || 'Manual',
-      record.minPrice || 'N/A',
-      record.maxPrice || 'N/A',
+      record.minPrice !== 'N/A' ? `$${record.minPrice}` : 'N/A',
+      record.maxPrice !== 'N/A' ? `$${record.maxPrice}` : 'N/A',
       record.success ? 'Done' : 'Error',
       new Date(record.date).toLocaleDateString('en-US', {
         month: 'short',
@@ -250,17 +281,19 @@ export default function PriceChangeSubmissions() {
                       fontWeight: 'bold',
                     }}
                   >
-                    ${record.newPrice}
+                    {record.newPrice !== 'N/A' ? `$${record.newPrice}` : 'N/A'}
                   </TableCell>
                   <TableCell
                     sx={{ textAlign: 'center', border: '1px solid #ddd' }}
                   >
-                    ${record.oldPrice || 'N/A'}
+                    {record.oldPrice !== 'N/A' ? `$${record.oldPrice}` : 'N/A'}
                   </TableCell>
                   <TableCell
                     sx={{ textAlign: 'center', border: '1px solid #ddd' }}
                   >
-                    ${record.competitorPrice || 'N/A'}
+                    {record.competitorPrice !== 'N/A'
+                      ? `$${record.competitorPrice}`
+                      : 'N/A'}
                   </TableCell>
                   <TableCell
                     sx={{
@@ -274,12 +307,12 @@ export default function PriceChangeSubmissions() {
                   <TableCell
                     sx={{ textAlign: 'center', border: '1px solid #ddd' }}
                   >
-                    {record.minPrice ? `$${record.minPrice}` : 'N/A'}
+                    {record.minPrice !== 'N/A' ? `$${record.minPrice}` : 'N/A'}
                   </TableCell>
                   <TableCell
                     sx={{ textAlign: 'center', border: '1px solid #ddd' }}
                   >
-                    {record.maxPrice ? `$${record.maxPrice}` : 'N/A'}
+                    {record.maxPrice !== 'N/A' ? `$${record.maxPrice}` : 'N/A'}
                   </TableCell>
                   <TableCell
                     sx={{ textAlign: 'center', border: '1px solid #ddd' }}

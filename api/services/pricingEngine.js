@@ -35,77 +35,95 @@ const RULE_TYPES = {
 
 /**
  * Main function: apply a single pricing rule to one item.
- *
- * @param {String} userId      – ID of the logged‐in user
- * @param {String} itemId      – eBay item ID to reprice
- * @param {Object} strategy    – a strategy object with fields:
- *                                { type: "matchLowest"|"beatByAmount"|"stayAbovePercent",
- *                                  params: { … } }
- *
- * @returns {Object} {
- *   itemId,
- *   currentPrice: Number,
- *   lowestCompetitorPrice: Number,
- *   newPrice: Number,
- *   shouldUpdate: Boolean
- * }
  */
 export async function applyPricingRule(userId, itemId, strategy) {
-  // 1) Fetch full item details (including current price, title, category)
-  const item = await getItemDetails(userId, itemId);
-  const currentPrice = Number(item.price.value || 0);
-  const title = item.title;
-  const categoryId = item.category.id;
+  console.log(`🔄 Applying pricing rule for item ${itemId}:`, strategy);
 
-  // 2) Fetch competitor prices via Browse API
-  const { lowestPrice: lowestCompetitorPrice } = await fetchCompetitorPrices(
-    userId,
-    itemId,
-    title,
-    categoryId
-  );
+  try {
+    // 1) Fetch full item details (including current price, title, category)
+    const item = await getItemDetails(userId, itemId);
+    const currentPrice = Number(item.price.value || 0);
+    const title = item.title;
+    const categoryId = item.category.id;
 
-  // 3) Calculate new price based on the rule type and params
-  const ruleFn = RULE_TYPES[strategy.type];
-  if (!ruleFn) {
-    throw new Error(`Unknown pricing rule type: ${strategy.type}`);
+    console.log(`📊 Current item details:`, {
+      itemId,
+      title,
+      currentPrice,
+      categoryId,
+    });
+
+    // 2) Fetch competitor prices via Browse API
+    const { lowestPrice: lowestCompetitorPrice } = await fetchCompetitorPrices(
+      userId,
+      itemId,
+      title,
+      categoryId
+    );
+
+    console.log(`💰 Competitor analysis:`, {
+      lowestCompetitorPrice,
+    });
+
+    // 3) Calculate new price based on the rule type and params
+    const ruleFn = RULE_TYPES[strategy.type];
+    if (!ruleFn) {
+      throw new Error(`Unknown pricing rule type: ${strategy.type}`);
+    }
+
+    const newPriceRaw = await ruleFn({
+      lowestPrice: lowestCompetitorPrice,
+      params: strategy.params || {},
+    });
+
+    // 4) Apply min/max constraints if provided
+    let constrainedPrice = newPriceRaw;
+    let constraintApplied = false;
+
+    if (strategy.minPrice && constrainedPrice < strategy.minPrice) {
+      constrainedPrice = strategy.minPrice;
+      constraintApplied = true;
+      console.log(`⬆️ Price constrained by minimum: ${strategy.minPrice}`);
+    }
+
+    if (strategy.maxPrice && constrainedPrice > strategy.maxPrice) {
+      constrainedPrice = strategy.maxPrice;
+      constraintApplied = true;
+      console.log(`⬇️ Price constrained by maximum: ${strategy.maxPrice}`);
+    }
+
+    // 5) Round to two decimals (eBay requires valid currency formats)
+    const newPrice = Number(constrainedPrice.toFixed(2));
+
+    // 6) Decide whether to update: only if newPrice differs from currentPrice
+    const shouldUpdate = Math.abs(newPrice - currentPrice) >= 0.01;
+
+    console.log(`🎯 Pricing decision:`, {
+      currentPrice,
+      calculatedPrice: newPriceRaw,
+      finalPrice: newPrice,
+      shouldUpdate,
+      constraintApplied,
+    });
+
+    return {
+      itemId,
+      currentPrice,
+      lowestCompetitorPrice,
+      newPrice,
+      shouldUpdate,
+      constraintApplied,
+      strategy: strategy.type,
+      params: strategy.params,
+    };
+  } catch (error) {
+    console.error(`❌ Error applying pricing rule for ${itemId}:`, error);
+    throw error;
   }
-
-  const newPriceRaw = await ruleFn({
-    lowestPrice: lowestCompetitorPrice,
-    params: strategy.params || {},
-  });
-
-  // 4) Round to two decimals (eBay requires valid currency formats)
-  const newPrice = Number(newPriceRaw.toFixed(2));
-
-  // 5) Decide whether to update: only if newPrice differs from currentPrice
-  const shouldUpdate = newPrice !== currentPrice;
-
-  return {
-    itemId,
-    currentPrice,
-    lowestCompetitorPrice,
-    newPrice,
-    shouldUpdate,
-  };
 }
 
 /**
  * Batch‐apply pricing rules to all active listings for a user.
- *
- * @param {String} userId                – ID of the logged‐in user
- * @param {Function} fetchActiveListings – function(userId) ⇒ [ { itemId }, … ]
- * @param {Function} updatePriceFn       – function(userId, itemId, newPrice) ⇒ Promise
- * @param {Array<Object>} strategies     – array of strategy objects:
- *                                          [ { itemId, strategy }, … ]
- *                                        (each strategy = { type, params })
- *
- * This function will:
- *   1) For each listing, look up its corresponding strategy (by itemId).
- *   2) Call applyPricingRule(...) to compute newPrice.
- *   3) If shouldUpdate, call updatePriceFn(userId, itemId, newPrice).
- *   4) Return a summary of changes.
  */
 export async function runAutoSync(
   userId,
@@ -113,57 +131,101 @@ export async function runAutoSync(
   updatePriceFn,
   strategies
 ) {
-  // 1) Retrieve all active listings for the user
-  const listings = await fetchActiveListings(userId);
-  const results = [];
+  console.log(
+    `🚀 Starting auto-sync for user ${userId} with ${strategies.length} strategies`
+  );
 
-  // 2) Loop through each listing
-  for (const listing of listings) {
-    const itemId = listing.ItemID || listing.itemId;
-    // Find strategy for this item
-    const stratEntry = strategies.find((s) => s.itemId === itemId);
-    if (!stratEntry) {
-      // No rule defined for this item
-      results.push({
-        itemId,
-        skipped: true,
-        reason: 'No strategy defined',
-      });
-      continue;
-    }
+  try {
+    // 1) Retrieve all active listings for the user
+    const listings = await fetchActiveListings(userId);
+    console.log(`📋 Found ${listings.length} active listings`);
 
-    try {
-      // 3) Compute pricing decision
-      const { currentPrice, lowestCompetitorPrice, newPrice, shouldUpdate } =
-        await applyPricingRule(userId, itemId, stratEntry.strategy);
+    const results = [];
 
-      if (shouldUpdate) {
-        // 4) Push update through provided update function
-        await updatePriceFn(userId, itemId, newPrice);
+    // 2) Loop through each listing
+    for (const listing of listings) {
+      const itemId = listing.ItemID || listing.itemId;
+      console.log(`🔄 Processing listing ${itemId}`);
+
+      // Find strategy for this item
+      const stratEntry = strategies.find((s) => s.itemId === itemId);
+      if (!stratEntry) {
+        console.log(`⚠️ No strategy defined for ${itemId}`);
         results.push({
           itemId,
-          currentPrice,
-          lowestCompetitorPrice,
-          newPrice,
-          updated: true,
+          skipped: true,
+          reason: 'No strategy defined',
         });
-      } else {
-        results.push({
-          itemId,
+        continue;
+      }
+
+      try {
+        // 3) Compute pricing decision
+        const {
           currentPrice,
           lowestCompetitorPrice,
           newPrice,
-          updated: false,
-          reason: 'Price already optimal',
+          shouldUpdate,
+          constraintApplied,
+        } = await applyPricingRule(userId, itemId, stratEntry.strategy);
+
+        if (shouldUpdate) {
+          // 4) Push update through provided update function
+          console.log(
+            `💰 Updating price for ${itemId}: ${currentPrice} → ${newPrice}`
+          );
+          await updatePriceFn(userId, itemId, newPrice);
+
+          results.push({
+            itemId,
+            currentPrice,
+            lowestCompetitorPrice,
+            newPrice,
+            updated: true,
+            constraintApplied,
+            strategy: stratEntry.strategy.type,
+          });
+        } else {
+          console.log(
+            `✅ Price already optimal for ${itemId}: ${currentPrice}`
+          );
+          results.push({
+            itemId,
+            currentPrice,
+            lowestCompetitorPrice,
+            newPrice,
+            updated: false,
+            reason: 'Price already optimal',
+            strategy: stratEntry.strategy.type,
+          });
+        }
+      } catch (err) {
+        console.error(`❌ Error processing ${itemId}:`, err);
+        results.push({
+          itemId,
+          error: err.message,
+          strategy: stratEntry.strategy?.type,
         });
       }
-    } catch (err) {
-      results.push({
-        itemId,
-        error: err.message,
-      });
     }
-  }
 
-  return results;
+    const successCount = results.filter((r) => r.updated).length;
+    const errorCount = results.filter((r) => r.error).length;
+
+    console.log(
+      `✅ Auto-sync completed: ${successCount} updates, ${errorCount} errors, ${
+        results.length - successCount - errorCount
+      } skipped`
+    );
+
+    return {
+      totalProcessed: results.length,
+      successfulUpdates: successCount,
+      errors: errorCount,
+      results,
+    };
+  } catch (error) {
+    console.error(`❌ Error in runAutoSync:`, error);
+    throw error;
+  }
 }

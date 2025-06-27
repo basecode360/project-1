@@ -42,6 +42,7 @@ export default function ListingsTable({
   currentPage = 1,
   itemsPerPage = 10,
   onTotalPagesChange,
+  mode = 'listings',
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,6 +52,7 @@ export default function ListingsTable({
   const [paginatedRows, setPaginatedRows] = useState([]);
   const [sortBy, setSortBy] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
+  const [autoSyncInProgress, setAutoSyncInProgress] = useState(false);
   const {
     modifyProductsArray,
     modifyProductsId,
@@ -167,10 +169,40 @@ export default function ListingsTable({
     try {
       setLoading(true);
       const response = await apiService.inventory.getActiveListings();
+
       if (response.success) {
+        // Check for eBay API errors in the response data
+        if (response.data?.GetMyeBaySellingResponse?.Ack === 'Failure') {
+          const ebayError = response.data.GetMyeBaySellingResponse.Errors;
+
+          // Check for hard expired token (error code 932)
+          if (ebayError?.ErrorCode === '932') {
+            console.warn('eBay token is hard expired');
+            // Clear expired tokens
+            localStorage.removeItem('ebay_user_token');
+            localStorage.removeItem('ebay_refresh_token');
+
+            // Dispatch event to notify Home component to show connect page
+            window.dispatchEvent(new CustomEvent('ebayTokenExpired'));
+
+            setError('eBay token expired. Please reconnect your eBay account.');
+            return;
+          }
+
+          // Handle other eBay API errors
+          setError(
+            `eBay API Error: ${ebayError?.ShortMessage || 'Unknown error'}`
+          );
+          return;
+        }
+
         let ebayListings = [];
+
+        // Add better null checking for the response structure
         if (
+          response.data &&
           response.data.GetMyeBaySellingResponse &&
+          response.data.GetMyeBaySellingResponse.ActiveList &&
           response.data.GetMyeBaySellingResponse.ActiveList.ItemArray
         ) {
           const itemArray =
@@ -180,29 +212,145 @@ export default function ListingsTable({
           } else if (itemArray.Item) {
             ebayListings = [itemArray.Item];
           }
+        } else {
+          // Handle case where there's no ActiveList or no items
+          console.warn('No active listings found in eBay response');
+          setError('No active listings found');
+          return;
         }
+
+        console.log(`📦 Processing ${ebayListings.length} eBay listings...`);
 
         const formattedListings = await Promise.all(
           ebayListings.map(async (item, index) => {
             const itemID = item.ItemID;
             if (!itemID) return null;
-            try {
-              const [competitorRes, strategyDisplayRes] = await Promise.all([
-                apiService.inventory.getCompetitorPrice(itemID),
-                apiService.pricingStrategies.getStrategyDisplayForProduct(
-                  itemID
-                ),
-              ]);
 
-              const { price, count } = competitorRes;
-              const strategyDisplay = strategyDisplayRes?.data || {
+            try {
+              console.log(
+                `📊 [${index + 1}/${
+                  ebayListings.length
+                }] Processing ${itemID}...`
+              );
+
+              const [manualCompetitorsRes, strategyDisplayRes] =
+                await Promise.all([
+                  apiService.inventory
+                    .getManuallyAddedCompetitors(itemID)
+                    .catch((err) => {
+                      console.warn(
+                        `⚠️ Failed to get competitors for ${itemID}:`,
+                        err.message
+                      );
+                      return { success: false, competitors: [], count: 0 };
+                    }),
+                  // Use apiService instead of direct fetch
+                  apiService.pricingStrategies
+                    .getStrategyDisplayForProduct(itemID)
+                    .catch((err) => {
+                      console.warn(
+                        `⚠️ Failed to get strategy for ${itemID}:`,
+                        err.message
+                      );
+                      return {
+                        success: false,
+                        data: {
+                          strategy: 'Assign Strategy',
+                          minPrice: 'Set',
+                          maxPrice: 'Set',
+                          hasStrategy: false,
+                        },
+                      };
+                    }),
+                ]);
+
+              // NEW: Auto-execute strategy if both competitors and strategy exist
+              if (
+                manualCompetitorsRes.success &&
+                manualCompetitorsRes.competitors?.length > 0 &&
+                strategyDisplayRes.success &&
+                strategyDisplayRes.data?.hasStrategy
+              ) {
+                console.log(
+                  `🚀 Auto-executing strategy for ${itemID} on page load...`
+                );
+
+                try {
+                  // Execute strategy to ensure price is current
+                  const strategyExecution =
+                    await apiService.pricingStrategies.updatePrice(itemID);
+
+                  if (strategyExecution.success) {
+                    console.log(
+                      `✅ Strategy executed for ${itemID} on page load`
+                    );
+                  }
+                } catch (strategyError) {
+                  console.warn(
+                    `⚠️ Strategy execution failed for ${itemID}:`,
+                    strategyError
+                  );
+                }
+              }
+
+              // Fix manual competitor count calculation
+              const manualCount = manualCompetitorsRes.success
+                ? manualCompetitorsRes.competitors?.length ||
+                  manualCompetitorsRes.count ||
+                  0
+                : 0;
+
+              console.log(`📊 Manual competitors for ${itemID}:`, {
+                success: manualCompetitorsRes.success,
+                count: manualCount,
+                competitors: manualCompetitorsRes.competitors?.length || 0,
+              });
+
+              // Get lowest price from manual competitors
+              let lowestCompetitorPrice = 'None';
+              if (
+                manualCompetitorsRes.success &&
+                manualCompetitorsRes.competitors &&
+                manualCompetitorsRes.competitors.length > 0
+              ) {
+                const prices = manualCompetitorsRes.competitors
+                  .map((comp) => parseFloat(comp.price))
+                  .filter((price) => !isNaN(price));
+
+                if (prices.length > 0) {
+                  const minPrice = Math.min(...prices);
+                  lowestCompetitorPrice = `USD ${minPrice.toFixed(2)}`;
+                }
+              }
+
+              // Process strategy display with better error handling and debugging
+              let strategyDisplay = {
                 strategy: 'Assign Strategy',
                 minPrice: 'Set',
                 maxPrice: 'Set',
                 hasStrategy: false,
               };
 
-              return {
+              if (strategyDisplayRes.success && strategyDisplayRes.data) {
+                strategyDisplay = strategyDisplayRes.data;
+
+                // Debug logging for strategy display
+                console.log(`✅ Strategy loaded for ${itemID}:`, {
+                  strategy: strategyDisplay.strategy,
+                  strategyName: strategyDisplay.strategyName,
+                  hasStrategy: strategyDisplay.hasStrategy,
+                  minPrice: strategyDisplay.minPrice,
+                  maxPrice: strategyDisplay.maxPrice,
+                  rawStrategy: strategyDisplay.rawStrategy?.strategyName,
+                });
+              } else {
+                console.warn(
+                  `⚠️ No strategy data for ${itemID}:`,
+                  strategyDisplayRes
+                );
+              }
+
+              const formattedItem = {
                 productTitle: item.Title,
                 productId: item.ItemID,
                 sku: item.SKU || ' ',
@@ -215,18 +363,31 @@ export default function ListingsTable({
                 myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
                   2
                 )}`,
-                competition: price,
+                competition: lowestCompetitorPrice,
                 strategy: strategyDisplay.strategy,
                 minPrice: strategyDisplay.minPrice,
                 maxPrice: strategyDisplay.maxPrice,
                 hasStrategy: strategyDisplay.hasStrategy,
-                competitors: count,
+                competitors: manualCount, // Use the fixed count
               };
+
+              console.log(
+                `✅ [${index + 1}/${ebayListings.length}] Processed ${itemID}:`,
+                {
+                  strategy: formattedItem.strategy,
+                  minPrice: formattedItem.minPrice,
+                  maxPrice: formattedItem.maxPrice,
+                  hasStrategy: formattedItem.hasStrategy,
+                  competitors: formattedItem.competitors,
+                }
+              );
+
+              return formattedItem;
             } catch (error) {
               console.error(
                 `❌ [${index + 1}/${
                   ebayListings.length
-                }] Error fetching data for ${itemID}:`,
+                }] Error processing ${itemID}:`,
                 error
               );
               return {
@@ -236,7 +397,6 @@ export default function ListingsTable({
                 status: [
                   item.SellingStatus?.ListingStatus || 'Active',
                   item.ConditionDisplayName || 'New',
-                  item.SellingStatus?.ListingStatus || 'Active',
                 ],
                 price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
                 qty: parseInt(item.Quantity || '0', 10),
@@ -256,8 +416,16 @@ export default function ListingsTable({
 
         const validListings = formattedListings.filter(Boolean);
         if (validListings.length > 0) {
+          console.log(
+            `✅ Successfully processed ${validListings.length} listings`
+          );
           setRows(validListings);
           modifyProductsArray(validListings);
+
+          // Start auto-sync monitoring in background
+          setTimeout(() => {
+            startBackgroundMonitoring();
+          }, 2000);
         } else {
           setError('There are no products');
         }
@@ -270,6 +438,89 @@ export default function ListingsTable({
       console.error('Error fetching eBay data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW: Background monitoring function
+  const startBackgroundMonitoring = async () => {
+    if (autoSyncInProgress) return;
+
+    try {
+      setAutoSyncInProgress(true);
+      console.log('🔄 Starting background competitor monitoring...');
+
+      // First, execute strategies for all items immediately
+      const executeResponse = await fetch(
+        `${
+          import.meta.env.VITE_BACKEND_URL
+        }/api/competitor-rules/execute-strategies`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('app_jwt')}`,
+          },
+          body: JSON.stringify({
+            userId: localStorage.getItem('user_id'),
+          }),
+        }
+      );
+
+      if (executeResponse.ok) {
+        const executeResult = await executeResponse.json();
+        console.log(
+          '✅ Immediate strategy execution completed:',
+          executeResult
+        );
+
+        if (executeResult.result?.priceChanges > 0) {
+          console.log(
+            `💰 ${executeResult.result.priceChanges} prices were updated!`
+          );
+
+          // Refresh the table to show updated prices
+          setTimeout(() => {
+            fetchEbayListings();
+          }, 2000);
+        }
+      }
+
+      // Then trigger the background monitoring service
+      const response = await fetch(
+        `${
+          import.meta.env.VITE_BACKEND_URL
+        }/api/competitor-rules/trigger-monitoring`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('app_jwt')}`,
+          },
+          body: JSON.stringify({
+            userId: localStorage.getItem('user_id'),
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Background monitoring triggered:', result);
+
+        if (result.strategies?.priceChanges > 0) {
+          console.log(
+            `💰 Additional ${result.strategies.priceChanges} prices were updated by monitoring!`
+          );
+
+          // Refresh the table again to show any additional updates
+          setTimeout(() => {
+            fetchEbayListings();
+          }, 3000);
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to start background monitoring:', error);
+    } finally {
+      setAutoSyncInProgress(false);
     }
   };
 
@@ -401,8 +652,16 @@ export default function ListingsTable({
           localStorage.removeItem('forceRefresh');
 
           // Force a complete refresh by clearing cache and refetching
+          console.log('🔄 Detected strategy update, refreshing data...');
           setLoading(true);
-          fetchEbayListings();
+
+          // Clear the current products array to force a complete reload
+          modifyProductsArray([]);
+
+          // Fetch fresh data
+          setTimeout(() => {
+            fetchEbayListings();
+          }, 500);
         }
       }
     };
@@ -416,31 +675,21 @@ export default function ListingsTable({
   }, [location.pathname]);
 
   // Update competitor count display in listings table
-  const getCompetitorCount = async (itemSku) => {
+  const getCompetitorCount = async (itemId) => {
     try {
       const userId = localStorage.getItem('user_id');
 
-      // Get both API and manual competitors
-      const [apiResponse, manualResponse] = await Promise.all([
-        apiService.competitor.getCompetitors(itemSku).catch(() => ({
-          success: false,
-          data: { competitors: [] },
-        })),
-        apiService.inventory
-          .getManuallyAddedCompetitors(itemSku, userId)
-          .catch(() => ({ success: false, competitors: [] })),
-      ]);
+      const manualResponse = await apiService.inventory
+        .getManuallyAddedCompetitors(itemId)
+        .catch(() => ({ success: false, competitors: [] }));
 
-      const apiCount = apiResponse.success
-        ? apiResponse.data?.competitors?.length || 0
-        : 0;
       const manualCount = manualResponse.success
         ? manualResponse.competitors?.length || 0
         : 0;
 
-      return apiCount + manualCount;
+      return manualCount;
     } catch (error) {
-      console.warn(`Failed to get competitor count for ${itemSku}:`, error);
+      console.warn(`Failed to get competitor count for ${itemId}:`, error);
       return 0;
     }
   };
@@ -469,23 +718,403 @@ export default function ListingsTable({
     );
   }
 
-  // Table headers with sort
-  const headers = [
-    { label: 'Product', key: 'productTitle' },
-    { label: 'Qty', key: 'qty' },
-    { label: 'My Price', key: 'myPrice' },
-    { label: 'Competitors Rule', key: null },
-    { label: 'Competition', key: 'competition' },
-    { label: 'Strategy', key: 'strategy' },
-    { label: 'Min Price', key: 'minPrice' },
-    { label: 'Max Price', key: 'maxPrice' },
-    { label: 'Competitors', key: 'competitors' },
-  ];
+  // Define headers based on mode
+  const getHeaders = () => {
+    const baseHeaders = [
+      { label: 'Product', key: 'productTitle' },
+      { label: 'Qty', key: 'qty' },
+      { label: 'My Price', key: 'myPrice' },
+    ];
+
+    switch (mode) {
+      case 'competitors':
+        return [
+          ...baseHeaders,
+          { label: 'Competitors Rule', key: null },
+          { label: 'Competition', key: 'competition' },
+          { label: 'Competitors', key: 'competitors' },
+        ];
+      case 'strategies':
+        return [
+          ...baseHeaders,
+          { label: 'Strategy', key: 'strategy' },
+          { label: 'Min Price', key: 'minPrice' },
+          { label: 'Max Price', key: 'maxPrice' },
+        ];
+      default: // 'listings'
+        return [
+          ...baseHeaders,
+          { label: 'Competitors Rule', key: null },
+          { label: 'Competition', key: 'competition' },
+          { label: 'Strategy', key: 'strategy' },
+          { label: 'Min Price', key: 'minPrice' },
+          { label: 'Max Price', key: 'maxPrice' },
+          { label: 'Competitors', key: 'competitors' },
+        ];
+    }
+  };
+
+  const headers = getHeaders();
+
+  // Function to render table cells based on mode
+  const renderTableCells = (row) => {
+    const baseCells = [
+      // Product Cell
+      <TableCell
+        key="product"
+        sx={{
+          border: '1px solid #ddd',
+          padding: '10px',
+          backgroundColor: '#fff',
+        }}
+      >
+        <Box>
+          <Link
+            href={`https://www.ebay.com/itm/${row.productId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            underline="hover"
+            color="primary"
+            fontSize={16}
+            sx={{ fontWeight: 600 }}
+          >
+            {row.productTitle}
+          </Link>
+          <Typography
+            variant="caption"
+            color="textSecondary"
+            display="block"
+            sx={{ fontSize: '14px' }}
+          >
+            {row.productId} |{' '}
+            {row.status.map((s, i) => (
+              <Typography
+                key={i}
+                component="span"
+                sx={{
+                  fontSize: '14px',
+                  color: s === 'Active' ? '#1e852b' : 'gray',
+                  mx: 0.5,
+                }}
+              >
+                {s}
+              </Typography>
+            ))}
+          </Typography>
+        </Box>
+      </TableCell>,
+
+      // Qty Cell
+      <TableCell
+        key="qty"
+        sx={{
+          border: '1px solid #ddd',
+          padding: '16px',
+          backgroundColor: '#fff',
+        }}
+      >
+        {row.qty}
+      </TableCell>,
+
+      // My Price Cell
+      <TableCell
+        key="price"
+        sx={{
+          border: '1px solid #ddd',
+          padding: '16px',
+          backgroundColor: '#fff',
+        }}
+      >
+        {row.myPrice}
+      </TableCell>,
+    ];
+
+    switch (mode) {
+      case 'competitors':
+        return [
+          ...baseCells,
+          // Competitors Rule Cell
+          <TableCell
+            key="compRule"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                fontSize: '16px',
+              }}
+              onClick={() => {
+                modifyProductsId(row.productId);
+                modifySku(row.sku ? row.sku : '');
+                navigate(`/home/update-strategy/${row.productId}`);
+              }}
+            >
+              Assign Rule
+            </Typography>
+          </TableCell>,
+          // Competition Cell
+          <TableCell
+            key="competition"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            {row.competition}
+          </TableCell>,
+          // Competitors Cell
+          <TableCell
+            key="competitors"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                fontSize: '16px',
+              }}
+              onClick={() => {
+                modifyProductsObj(row);
+                navigate(`/home/competitors/${row.productId}`);
+              }}
+            >
+              <CompetitorCount itemId={row.productId} />
+            </Typography>
+          </TableCell>,
+        ];
+
+      case 'strategies':
+        return [
+          ...baseCells,
+          // Strategy Cell
+          <TableCell
+            key="strategy"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => {
+                modifyProductsId(row.productId);
+                modifySku(row.sku ? row.sku : '');
+                navigate(`/home/update-strategy/${row.productId}`);
+              }}
+            >
+              {row.strategy}
+            </Typography>
+          </TableCell>,
+          // Min Price Cell
+          <TableCell
+            key="minPrice"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+            >
+              {row.minPrice}
+            </Typography>
+          </TableCell>,
+          // Max Price Cell
+          <TableCell
+            key="maxPrice"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+            >
+              {row.maxPrice}
+            </Typography>
+          </TableCell>,
+        ];
+
+      default: // 'listings' - show all columns
+        return [
+          ...baseCells,
+          // Competitors Rule Cell
+          <TableCell
+            key="compRule"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                fontSize: '16px',
+              }}
+              onClick={() => {
+                modifyProductsId(row.productId);
+                modifySku(row.sku ? row.sku : '');
+                navigate(`/home/update-strategy/${row.productId}`);
+              }}
+            >
+              Assign Rule
+            </Typography>
+          </TableCell>,
+          // Competition Cell
+          <TableCell
+            key="competition"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            {row.competition}
+          </TableCell>,
+          // Strategy Cell
+          <TableCell
+            key="strategy"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => {
+                modifyProductsId(row.productId);
+                modifySku(row.sku ? row.sku : '');
+                navigate(`/home/update-strategy/${row.productId}`);
+              }}
+            >
+              {row.strategy}
+            </Typography>
+          </TableCell>,
+          // Min Price Cell
+          <TableCell
+            key="minPrice"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+            >
+              {row.minPrice}
+            </Typography>
+          </TableCell>,
+          // Max Price Cell
+          <TableCell
+            key="maxPrice"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                fontSize: '16px',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+            >
+              {row.maxPrice}
+            </Typography>
+          </TableCell>,
+          // Competitors Cell
+          <TableCell
+            key="competitors"
+            sx={{
+              border: '1px solid #ddd',
+              padding: '16px',
+              backgroundColor: '#fff',
+            }}
+          >
+            <Typography
+              color="primary"
+              sx={{
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                fontSize: '16px',
+              }}
+              onClick={() => {
+                modifyProductsObj(row);
+                navigate(`/home/competitors/${row.productId}`);
+              }}
+            >
+              <CompetitorCount itemId={row.productId} />
+            </Typography>
+          </TableCell>,
+        ];
+    }
+  };
 
   return (
     <Container sx={{ mt: 4, mb: 2, pb: 10 }}>
-      {' '}
-      {/* Add bottom padding for footer */}
       <Box
         sx={{
           display: 'flex',
@@ -495,7 +1124,11 @@ export default function ListingsTable({
         }}
       >
         <Typography variant="h5" component="h1">
-          Active Listings - Strategy Managed
+          {mode === 'competitors'
+            ? 'Competitor Management'
+            : mode === 'strategies'
+            ? 'Pricing Strategy Management'
+            : 'Active Listings - Strategy Managed'}
         </Typography>
       </Box>
       <TableContainer
@@ -564,203 +1197,7 @@ export default function ListingsTable({
                   transition: 'all 0.3s ease',
                 }}
               >
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '10px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Box>
-                    <Link
-                      href={`https://www.ebay.com/itm/${row.productId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      underline="hover"
-                      color="primary"
-                      fontSize={16}
-                      sx={{ fontWeight: 600 }}
-                    >
-                      {row.productTitle}
-                    </Link>
-                    <Typography
-                      variant="caption"
-                      color="textSecondary"
-                      display="block"
-                      sx={{ fontSize: '14px' }}
-                    >
-                      {row.productId} |{' '}
-                      {row.status.map((s, i) => (
-                        <Typography
-                          key={i}
-                          component="span"
-                          sx={{
-                            fontSize: '14px',
-                            color: s === 'Active' ? '#1e852b' : 'gray',
-                            mx: 0.5,
-                          }}
-                        >
-                          {s}
-                        </Typography>
-                      ))}
-                    </Typography>
-                  </Box>
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  {row.qty}
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  {row.myPrice}
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      fontSize: '16px',
-                    }}
-                    onClick={() => {
-                      modifyProductsId(row.productId);
-                      modifySku(row.sku ? row.sku : '');
-                      navigate(`/home/update-strategy/${row.productId}`);
-                    }}
-                  >
-                    Assign Rule
-                  </Typography>
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  {row.competition}
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Box
-                    sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}
-                  >
-                    <Typography
-                      color="primary"
-                      sx={{
-                        cursor: 'pointer',
-                        fontSize: '16px',
-                        '&:hover': {
-                          textDecoration: 'underline',
-                        },
-                      }}
-                      onClick={() => {
-                        modifyProductsId(row.productId);
-                        modifySku(row.sku ? row.sku : '');
-                        navigate(`/home/update-strategy/${row.productId}`);
-                      }}
-                    >
-                      {row.strategy}
-                    </Typography>
-                  </Box>
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    }}
-                    onClick={() =>
-                      navigate(`/home/update-strategy/${row.productId}`)
-                    }
-                  >
-                    {row.minPrice}
-                  </Typography>
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    }}
-                    onClick={() =>
-                      navigate(`/home/update-strategy/${row.productId}`)
-                    }
-                  >
-                    {row.maxPrice}
-                  </Typography>
-                </TableCell>
-
-                <TableCell
-                  sx={{
-                    border: '1px solid #ddd',
-                    padding: '16px',
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <Typography
-                    color="primary"
-                    sx={{
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                      fontSize: '16px',
-                    }}
-                    onClick={() => {
-                      modifyProductsObj(row);
-                      navigate(`/home/competitors/${row.productId}`);
-                    }}
-                  >
-                    <CompetitorCount itemId={row.productId} />
-                  </Typography>
-                </TableCell>
+                {renderTableCells(row)}
               </TableRow>
             ))}
           </TableBody>

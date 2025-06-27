@@ -1,5 +1,3 @@
-// models/PriceHistory.js
-
 import mongoose from 'mongoose';
 
 const priceHistorySchema = new mongoose.Schema(
@@ -76,6 +74,25 @@ const priceHistorySchema = new mongoose.Schema(
       default: null,
     },
 
+    repricingRule: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Repricing rule cannot exceed 100 characters'],
+      default: null,
+    },
+
+    minPrice: {
+      type: Number,
+      min: [0, 'Minimum price cannot be negative'],
+      default: null,
+    },
+
+    maxPrice: {
+      type: Number,
+      min: [0, 'Maximum price cannot be negative'],
+      default: null,
+    },
+
     // Execution Information
     status: {
       type: String,
@@ -87,9 +104,14 @@ const priceHistorySchema = new mongoose.Schema(
 
     source: {
       type: String,
-      enum: ['api', 'manual', 'strategy', 'bulk', 'system'],
-      default: 'api',
-      index: true,
+      enum: [
+        'manual',
+        'strategy',
+        'bulk_import',
+        'api_sync',
+        'competitor_update',
+      ],
+      default: 'manual',
     },
 
     success: {
@@ -130,17 +152,21 @@ const priceHistorySchema = new mongoose.Schema(
       index: true,
     },
 
-    // Performance Tracking
-    executionTimeMs: {
-      type: Number,
-      min: 0,
-      default: null,
+    timestamp: {
+      type: Date,
+      default: Date.now,
     },
 
-    retryCount: {
-      type: Number,
-      min: 0,
-      default: 0,
+    date: {
+      type: Date,
+      default: Date.now,
+    },
+
+    reason: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Reason cannot exceed 500 characters'],
+      default: null,
     },
   },
   {
@@ -275,9 +301,7 @@ priceHistorySchema.pre('save', function (next) {
 });
 
 // Post-save middleware for logging (optional)
-priceHistorySchema.post('save', function (doc) {
- 
-});
+priceHistorySchema.post('save', function (doc) {});
 
 const PriceHistory = mongoose.model('PriceHistory', priceHistorySchema);
 

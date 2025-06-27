@@ -120,14 +120,37 @@ export async function updateStrategy(idOrStrategyId, updates) {
   if (updates.repricingRule) strategy.repricingRule = updates.repricingRule;
   if (updates.description !== undefined)
     strategy.description = updates.description;
-  if (updates.beatBy !== undefined) strategy.beatBy = updates.beatBy;
-  if (updates.stayAboveBy !== undefined)
-    strategy.stayAboveBy = updates.stayAboveBy;
+
+  // Handle beatBy and stayAboveBy - only set if not empty string
+  if (updates.beatBy !== undefined) {
+    strategy.beatBy =
+      updates.beatBy && updates.beatBy.trim() !== '' ? updates.beatBy : null;
+  }
+  if (updates.stayAboveBy !== undefined) {
+    strategy.stayAboveBy =
+      updates.stayAboveBy && updates.stayAboveBy.trim() !== ''
+        ? updates.stayAboveBy
+        : null;
+  }
+
   if (updates.value !== undefined) strategy.value = updates.value;
   if (updates.noCompetitionAction)
     strategy.noCompetitionAction = updates.noCompetitionAction;
-  if (updates.maxPrice !== undefined) strategy.maxPrice = updates.maxPrice;
-  if (updates.minPrice !== undefined) strategy.minPrice = updates.minPrice;
+
+  // Handle min/max prices properly
+  if (updates.minPrice !== undefined) {
+    strategy.minPrice =
+      updates.minPrice !== null && updates.minPrice !== ''
+        ? parseFloat(updates.minPrice)
+        : null;
+  }
+  if (updates.maxPrice !== undefined) {
+    strategy.maxPrice =
+      updates.maxPrice !== null && updates.maxPrice !== ''
+        ? parseFloat(updates.maxPrice)
+        : null;
+  }
+
   if (updates.isActive !== undefined) strategy.isActive = updates.isActive;
 
   if (updates.isDefault === true) {
@@ -279,13 +302,27 @@ export async function getActiveStrategies() {
 
 /**
  * Calculate new price based on strategy and competitor price
- * @param {Object} strategy - The pricing strategy
+ * @param {Object} strategy - The pricing strategy from MongoDB
  * @param {Number} competitorPrice - The lowest competitor price
  * @param {Number} currentPrice - Current product price
  */
 function calculateNewPrice(strategy, competitorPrice, currentPrice) {
   let newPrice = currentPrice;
 
+  // Handle case where no competitor price is available
+  if (!competitorPrice || competitorPrice <= 0) {
+    switch (strategy.noCompetitionAction) {
+      case 'USE_MAX_PRICE':
+        return strategy.maxPrice || currentPrice;
+      case 'USE_MIN_PRICE':
+        return strategy.minPrice || currentPrice;
+      case 'KEEP_CURRENT':
+      default:
+        return currentPrice;
+    }
+  }
+
+  // Use the actual strategy configuration from MongoDB
   switch (strategy.repricingRule) {
     case 'MATCH_LOWEST':
       newPrice = competitorPrice;
@@ -293,33 +330,136 @@ function calculateNewPrice(strategy, competitorPrice, currentPrice) {
 
     case 'BEAT_LOWEST':
       if (strategy.beatBy === 'AMOUNT') {
-        newPrice = competitorPrice - strategy.value;
+        newPrice = competitorPrice - (strategy.value || 0);
       } else if (strategy.beatBy === 'PERCENTAGE') {
-        newPrice = competitorPrice * (1 - strategy.value);
+        const discountAmount = competitorPrice * (strategy.value || 0);
+        newPrice = competitorPrice - discountAmount;
       }
       break;
 
     case 'STAY_ABOVE':
       if (strategy.stayAboveBy === 'AMOUNT') {
-        newPrice = competitorPrice + strategy.value;
+        newPrice = competitorPrice + (strategy.value || 0);
       } else if (strategy.stayAboveBy === 'PERCENTAGE') {
-        newPrice = competitorPrice * (1 + strategy.value);
+        const markupAmount = competitorPrice * (strategy.value || 0);
+        newPrice = competitorPrice + markupAmount;
       }
       break;
 
     default:
+      console.warn(`Unknown repricing rule: ${strategy.repricingRule}`);
       newPrice = currentPrice;
   }
 
-  // Apply min/max price constraints
+  // Apply min/max price constraints from the strategy
   if (strategy.minPrice && newPrice < strategy.minPrice) {
+    console.log(
+      `🔼 Price ${newPrice} below minimum ${strategy.minPrice}, adjusting to minimum`
+    );
     newPrice = strategy.minPrice;
   }
   if (strategy.maxPrice && newPrice > strategy.maxPrice) {
+    console.log(
+      `🔽 Price ${newPrice} above maximum ${strategy.maxPrice}, adjusting to maximum`
+    );
     newPrice = strategy.maxPrice;
   }
 
+  // Enhanced logic for STAY_ABOVE strategy with max price optimization
+  if (strategy.repricingRule === 'STAY_ABOVE' && strategy.maxPrice) {
+    const calculatedPrice =
+      strategy.stayAboveBy === 'AMOUNT'
+        ? competitorPrice + (strategy.value || 0)
+        : competitorPrice + competitorPrice * (strategy.value || 0);
+
+    // If calculated price is significantly lower than max price, use max price
+    if (strategy.maxPrice - calculatedPrice >= 2) {
+      console.log(
+        `💡 Using max price ${strategy.maxPrice} instead of calculated ${calculatedPrice} (gap >= $2)`
+      );
+      newPrice = strategy.maxPrice;
+    }
+  }
+
+  // Ensure price is positive
+  if (newPrice <= 0) {
+    console.warn(
+      `Calculated price ${newPrice} is not positive, keeping current price`
+    );
+    newPrice = currentPrice;
+  }
+
   return Math.round(newPrice * 100) / 100; // Round to 2 decimal places
+}
+
+/**
+ * Record strategy execution in history
+ * @param {String} strategyId
+ * @param {String} itemId
+ * @param {Object} executionData
+ */
+async function recordStrategyExecution(strategyId, itemId, executionData) {
+  try {
+    const strategy = await getStrategyById(strategyId);
+    if (strategy) {
+      strategy.executionHistory.push({
+        timestamp: executionData.timestamp,
+        itemId: itemId,
+        details: executionData,
+        success: true,
+      });
+
+      // Keep only last 100 executions to prevent database bloat
+      if (strategy.executionHistory.length > 100) {
+        strategy.executionHistory = strategy.executionHistory.slice(-100);
+      }
+
+      await strategy.save();
+    }
+
+    // Also record in PriceHistory collection for the table
+    try {
+      const { default: PriceHistory } = await import(
+        '../models/PriceHistory.js'
+      );
+
+      // Only record if we have valid price data
+      if (
+        executionData.newPrice !== null &&
+        executionData.newPrice !== undefined
+      ) {
+        const historyRecord = {
+          itemId: itemId,
+          sku: executionData.sku || null,
+          oldPrice: executionData.oldPrice || 0,
+          newPrice: executionData.newPrice,
+          competitorPrice: executionData.competitorPrice,
+          competitorLowestPrice: executionData.competitorPrice, // Add this field for compatibility
+          strategyName: strategy.strategyName,
+          repricingRule: strategy.repricingRule,
+          minPrice: strategy.minPrice,
+          maxPrice: strategy.maxPrice,
+          userId: strategy.createdBy,
+          source: 'strategy', // Use valid enum value
+          status: 'completed',
+          success: executionData.success !== false, // Default to true unless explicitly false
+          timestamp: executionData.timestamp || new Date(),
+          date: executionData.timestamp || new Date(), // Add date field for compatibility
+          reason: 'Strategy execution',
+          apiResponse: executionData.apiResponse || null,
+        };
+
+        console.log('💾 Recording price history:', historyRecord);
+        await new PriceHistory(historyRecord).save();
+      } else {
+        console.log('⚠️ Skipping price history record - no valid price data');
+      }
+    } catch (historyError) {
+      console.warn('Failed to record price history:', historyError);
+    }
+  } catch (error) {
+    console.error('Failed to record strategy execution:', error);
+  }
 }
 
 /**
@@ -328,17 +468,36 @@ function calculateNewPrice(strategy, competitorPrice, currentPrice) {
  */
 async function getCurrentEbayPrice(itemId) {
   try {
-    const { getCurrentEbayPrice: getRealPrice } = await import(
-      './inventoryService.js'
-    );
-    const result = await getRealPrice(itemId);
+    // Use dynamic import to avoid module conflicts
+    const inventoryModule = await import('./inventoryService.js');
+    const { getActiveListings } = inventoryModule;
 
-    if (result.success && result.price) {
-      return result.price;
-    } else {
-      return null;
+    // Try to get user ID from various sources
+    const userId = process.env.DEFAULT_USER_ID || '68430c2b0e746fb6c6ef1a7a';
+
+    const response = await getActiveListings(userId);
+
+    if (response.success && response.data.GetMyeBaySellingResponse) {
+      const itemArray =
+        response.data.GetMyeBaySellingResponse.ActiveList?.ItemArray;
+      let items = [];
+
+      if (Array.isArray(itemArray?.Item)) {
+        items = itemArray.Item;
+      } else if (itemArray?.Item) {
+        items = [itemArray.Item];
+      }
+
+      const item = items.find((i) => i.ItemID === itemId);
+      if (item && item.BuyItNowPrice) {
+        return parseFloat(item.BuyItNowPrice);
+      }
     }
+
+    console.warn(`Item ${itemId} not found in eBay listings`);
+    return null;
   } catch (error) {
+    console.error(`Error getting current eBay price for ${itemId}:`, error);
     return null;
   }
 }
@@ -350,10 +509,17 @@ async function getCurrentEbayPrice(itemId) {
  */
 async function updateEbayPrice(itemId, newPrice) {
   try {
-    const { getActiveListings } = await import('./inventoryService.js');
-    const response = await getActiveListings();
+    // Get user ID from environment or find the first user with eBay credentials
+    const userId = process.env.DEFAULT_USER_ID || '68430c2b0e746fb6c6ef1a7a';
 
-    let itemSku = 'PART123';
+    // Get the item's SKU first
+    const inventoryModule = await import('./inventoryService.js');
+    const { getActiveListings, updateEbayPrice: directUpdatePrice } =
+      inventoryModule;
+
+    const response = await getActiveListings(userId);
+
+    let itemSku = itemId; // Use itemId as fallback SKU
     if (response.success && response.data.GetMyeBaySellingResponse) {
       const itemArray =
         response.data.GetMyeBaySellingResponse.ActiveList?.ItemArray;
@@ -371,21 +537,29 @@ async function updateEbayPrice(itemId, newPrice) {
       }
     }
 
-    const { updateEbayPrice: directUpdatePrice } = await import(
-      './inventoryService.js'
-    );
-    const result = await directUpdatePrice(itemId, itemSku, newPrice, null);
+    // Use the inventory service to update the price
+    const result = await directUpdatePrice(itemId, itemSku, newPrice, userId);
 
     if (result.success) {
+      console.log(
+        `✅ Successfully updated eBay price for ${itemId} to ${newPrice}`
+      );
+
+      // Trigger related item sync after a delay
       setTimeout(() => {
         triggerRelatedItemSync(itemId);
       }, 2000);
 
       return result;
     } else {
+      console.error(
+        `❌ Failed to update eBay price for ${itemId}:`,
+        result.error
+      );
       return result;
     }
   } catch (error) {
+    console.error(`❌ Error updating eBay price for ${itemId}:`, error);
     return {
       success: false,
       error: error.message,
@@ -434,88 +608,156 @@ async function triggerRelatedItemSync(changedItemId) {
 }
 
 /**
- * Record strategy execution in history
- * @param {String} strategyId
- * @param {String} itemId
- * @param {Object} executionData
- */
-async function recordStrategyExecution(strategyId, itemId, executionData) {
-  try {
-    const strategy = await getStrategyById(strategyId);
-    if (strategy) {
-      strategy.executionHistory.push({
-        timestamp: executionData.timestamp,
-        itemId: itemId,
-        details: executionData,
-        success: true,
-      });
-
-      // Keep only last 100 executions to prevent database bloat
-      if (strategy.executionHistory.length > 100) {
-        strategy.executionHistory = strategy.executionHistory.slice(-100);
-      }
-
-      await strategy.save();
-    }
-  } catch (error) {
-    // Handle error silently
-  }
-}
-
-/**
  * Apply pricing logic to update product prices based on strategy
  * @param {String} itemId - The product item ID
- * @param {Object} strategy - The applied strategy
+ * @param {Object} strategy - The applied strategy from MongoDB
  */
 async function executePricingStrategy(itemId, strategy) {
   try {
-    // Get current competitor price - fix the import
-    const { getCompetitorPrice } = await import('./inventoryService.js');
+    console.log(`🔄 Executing pricing strategy for item ${itemId}:`, {
+      strategyName: strategy.strategyName,
+      repricingRule: strategy.repricingRule,
+      value: strategy.value,
+      beatBy: strategy.beatBy,
+      stayAboveBy: strategy.stayAboveBy,
+      minPrice: strategy.minPrice,
+      maxPrice: strategy.maxPrice,
+      noCompetitionAction: strategy.noCompetitionAction,
+    });
+
+    // Get current competitor price
+    const inventoryModule = await import('./inventoryService.js');
+    const { getCompetitorPrice } = inventoryModule;
+
     const competitorData = await getCompetitorPrice(itemId);
 
-    if (!competitorData.success || !competitorData.price) {
-      // Handle no competition scenario
-      let newPrice;
-      switch (strategy.noCompetitionAction) {
-        case 'USE_MAX_PRICE':
-          newPrice = strategy.maxPrice;
-          break;
-        case 'USE_MIN_PRICE':
-          newPrice = strategy.minPrice;
-          break;
-        case 'KEEP_CURRENT':
-        default:
-          return {
-            success: false,
-            reason: 'No competitor data, keeping current price',
-          };
+    let competitorPrice = null;
+    if (competitorData.success && competitorData.price) {
+      // Parse competitor price (remove USD prefix if present)
+      if (typeof competitorData.price === 'string') {
+        competitorPrice = parseFloat(
+          competitorData.price.replace(/[^0-9.]/g, '')
+        );
+      } else {
+        competitorPrice = parseFloat(competitorData.price);
       }
-
-      if (newPrice) {
-        const updateResult = await updateEbayPrice(itemId, newPrice);
-        return updateResult;
-      }
-      return { success: false, reason: 'No valid price to set' };
-    }
-
-    // Parse competitor price (remove USD prefix if present)
-    let competitorPrice;
-    if (typeof competitorData.price === 'string') {
-      competitorPrice = parseFloat(competitorData.price.replace('USD', ''));
+      console.log(`📊 Competitor price found: ${competitorPrice}`);
     } else {
-      competitorPrice = parseFloat(competitorData.price);
+      console.log(`⚠️ No competitor data found for ${itemId}`);
     }
 
     // Get current eBay price for this item
     const currentPrice = await getCurrentEbayPrice(itemId);
+
+    // If we can't get current price, try a different approach
     if (!currentPrice) {
-      return { success: false, reason: 'Could not get current price' };
+      console.error(`❌ Could not get current price for item ${itemId}`);
+
+      // If we have competitor price and strategy constraints, we can still calculate and update
+      if (competitorPrice && strategy) {
+        console.log(`🔄 Attempting direct price update for ${itemId}`);
+
+        // Calculate new price based on strategy configuration from MongoDB
+        const calculatedPrice = calculateNewPrice(
+          strategy,
+          competitorPrice,
+          competitorPrice // Use competitor price as fallback current price
+        );
+        console.log(
+          `🎯 Calculated price using strategy "${strategy.strategyName}": ${calculatedPrice}`
+        );
+
+        // Attempt to update the price directly
+        const updateResult = await updateEbayPrice(itemId, calculatedPrice);
+
+        if (updateResult.success) {
+          console.log(
+            `✅ Successfully updated price for ${itemId} to ${calculatedPrice} using strategy "${strategy.strategyName}"`
+          );
+
+          // Record the execution in strategy history
+          await recordStrategyExecution(strategy._id, itemId, {
+            oldPrice: null,
+            newPrice: calculatedPrice,
+            competitorPrice: competitorPrice,
+            timestamp: new Date(),
+            success: true,
+            sku: null,
+            apiResponse: updateResult,
+          });
+
+          return {
+            success: true,
+            oldPrice: null,
+            newPrice: calculatedPrice,
+            competitorPrice,
+            priceChanged: true,
+            updateDetails: updateResult,
+            calculatedFromCompetitor: true,
+            strategyUsed: strategy.strategyName,
+          };
+        } else {
+          console.error(
+            `❌ Failed to update price for ${itemId}:`,
+            updateResult.error
+          );
+
+          return {
+            success: false,
+            reason: updateResult.error,
+            oldPrice: null,
+            calculatedPrice: calculatedPrice,
+            competitorPrice,
+            strategyUsed: strategy.strategyName,
+          };
+        }
+      }
+
+      return {
+        success: false,
+        reason: 'Could not get current price and no competitor data available',
+        strategyUsed: strategy.strategyName,
+      };
     }
 
-    // Calculate new price based on strategy
+    console.log(`💰 Current eBay price: ${currentPrice}`);
+
+    // Calculate new price based on strategy configuration from MongoDB
     const newPrice = calculateNewPrice(strategy, competitorPrice, currentPrice);
+    console.log(
+      `🎯 Calculated new price using strategy "${strategy.strategyName}": ${newPrice}`
+    );
+
+    // Check if price actually needs to change
+    if (Math.abs(newPrice - currentPrice) < 0.01) {
+      console.log(`✅ Price already optimal for ${itemId}: ${currentPrice}`);
+
+      // Still record this as a successful execution (no change needed)
+      await recordStrategyExecution(strategy._id, itemId, {
+        oldPrice: currentPrice,
+        newPrice: currentPrice,
+        competitorPrice: competitorPrice,
+        timestamp: new Date(),
+        success: true,
+        sku: null,
+        apiResponse: null,
+      });
+
+      return {
+        success: true,
+        reason: 'Price already optimal',
+        oldPrice: currentPrice,
+        newPrice: currentPrice,
+        competitorPrice,
+        priceChanged: false,
+        strategyUsed: strategy.strategyName,
+      };
+    }
 
     // Update the price
+    console.log(
+      `🔄 Updating price for ${itemId} from ${currentPrice} to ${newPrice} using strategy "${strategy.strategyName}"`
+    );
     const updateResult = await updateEbayPrice(itemId, newPrice);
 
     if (updateResult.success) {
@@ -525,19 +767,46 @@ async function executePricingStrategy(itemId, strategy) {
         newPrice: newPrice,
         competitorPrice: competitorPrice,
         timestamp: new Date(),
+        success: true,
+        sku: null,
+        apiResponse: updateResult,
       });
 
+      console.log(
+        `✅ Successfully executed strategy "${strategy.strategyName}" for ${itemId}`
+      );
       return {
         success: true,
         oldPrice: currentPrice,
         newPrice,
         competitorPrice,
+        priceChanged: true,
+        updateDetails: updateResult,
+        strategyUsed: strategy.strategyName,
       };
     } else {
-      return { success: false, reason: updateResult.error };
+      console.error(
+        `❌ Failed to update price for ${itemId}:`,
+        updateResult.error
+      );
+
+      return {
+        success: false,
+        reason: updateResult.error,
+        oldPrice: currentPrice,
+        calculatedPrice: newPrice,
+        competitorPrice,
+        strategyUsed: strategy.strategyName,
+      };
     }
   } catch (error) {
-    return { success: false, reason: error.message };
+    console.error(`❌ Error executing pricing strategy for ${itemId}:`, error);
+
+    return {
+      success: false,
+      reason: error.message,
+      strategyUsed: strategy?.strategyName || 'Unknown',
+    };
   }
 }
 
@@ -600,10 +869,78 @@ export async function executeAllActiveStrategies() {
  */
 export async function executeStrategiesForItem(itemId, userId = null) {
   try {
+    console.log(`🚀 Starting strategy execution for item ${itemId}`);
+
     // Get all strategies for this item
     const strategies = await getStrategiesForItem(itemId);
 
     if (!strategies || strategies.length === 0) {
+      console.log(`⚠️ No strategies found for item ${itemId}`);
+
+      // Check if there are no competitors - if so, apply max price if strategy exists
+      try {
+        const inventoryModule = await import('./inventoryService.js');
+        const { getCompetitorPrice } = inventoryModule;
+
+        const competitorData = await getCompetitorPrice(itemId);
+
+        if (!competitorData.success || !competitorData.price) {
+          console.log(
+            `📊 No competitors found for ${itemId}, checking for strategies to apply max price`
+          );
+
+          // Even without explicit strategies, we should check price history for applied strategies
+          try {
+            const { default: PriceHistory } = await import(
+              '../models/PriceHistory.js'
+            );
+
+            const latestRecord = await PriceHistory.findOne({
+              itemId: itemId,
+              strategyName: { $exists: true, $ne: null },
+            })
+              .sort({ createdAt: -1 })
+              .lean();
+
+            if (latestRecord && latestRecord.maxPrice) {
+              console.log(
+                `🔄 Found strategy in history, applying max price: ${latestRecord.maxPrice}`
+              );
+
+              const updateResult = await updateEbayPrice(
+                itemId,
+                latestRecord.maxPrice
+              );
+
+              if (updateResult.success) {
+                return {
+                  success: true,
+                  message: `Applied max price ${latestRecord.maxPrice} for item ${itemId} (no competition)`,
+                  results: [
+                    {
+                      success: true,
+                      itemId,
+                      strategyName: latestRecord.strategyName,
+                      oldPrice: null,
+                      newPrice: latestRecord.maxPrice,
+                      reason: 'No competition - applied max price',
+                      priceChanged: true,
+                    },
+                  ],
+                  totalStrategies: 1,
+                  successfulExecutions: 1,
+                  priceChanges: 1,
+                };
+              }
+            }
+          } catch (historyError) {
+            console.error('Error checking price history:', historyError);
+          }
+        }
+      } catch (competitorError) {
+        console.error('Error checking competitors:', competitorError);
+      }
+
       return {
         success: false,
         message: `No strategies found for item ${itemId}`,
@@ -611,105 +948,75 @@ export async function executeStrategiesForItem(itemId, userId = null) {
       };
     }
 
+    console.log(`📋 Found ${strategies.length} strategies for item ${itemId}`);
     const results = [];
 
-    // Execute each strategy
+    // Execute each strategy (usually there should be only one)
     for (const strategy of strategies) {
       try {
-        // FIX: Ensure min/max prices are properly passed to the strategy execution
-        const strategyData = {
-          strategyName: strategy.strategyName,
-          repricingRule: strategy.repricingRule,
-          beatBy: strategy.beatBy,
-          stayAboveBy: strategy.stayAboveBy,
-          value: strategy.value,
-          minPrice: strategy.minPrice, // ✅ Make sure this is included
-          maxPrice: strategy.maxPrice, // ✅ Make sure this is included
-          noCompetitionAction: strategy.noCompetitionAction,
-        };
+        console.log(`🔄 Executing strategy: ${strategy.strategyName}`);
 
-        // Get userId from strategy if not provided
-        const executionUserId = userId || strategy.createdBy;
-
-        if (!executionUserId) {
-          results.push({
-            success: false,
-            itemId,
-            strategyName: strategy.strategyName,
-            error: 'No userId found for execution',
-          });
-          continue;
-        }
-
-        // FIX: Import the function properly using default export
-        const editProductModule = await import('./editProduct.js');
-        const updatePriceViaStrategy =
-          editProductModule.default.updatePriceViaStrategy;
-
-        if (!updatePriceViaStrategy) {
-          results.push({
-            success: false,
-            itemId,
-            strategyName: strategy.strategyName,
-            error: 'updatePriceViaStrategy function not available',
-          });
-          continue;
-        }
-
-        const result = await updatePriceViaStrategy(
-          itemId,
-          strategyData,
-          executionUserId
-        );
+        const executionResult = await executePricingStrategy(itemId, strategy);
 
         results.push({
-          success: result.success,
+          success: executionResult.success,
           itemId,
           strategyName: strategy.strategyName,
-          oldPrice: result.oldPrice,
-          newPrice: result.newPrice,
-          priceUpdated: result.priceUpdated,
-          message: result.message,
-          constraintApplied: result.constraintApplied,
+          repricingRule: strategy.repricingRule,
+          oldPrice: executionResult.oldPrice,
+          newPrice: executionResult.newPrice,
+          competitorPrice: executionResult.competitorPrice,
+          priceChanged: executionResult.priceChanged,
+          reason: executionResult.reason,
+          constraintApplied: executionResult.constraintApplied,
+          error: executionResult.success ? null : executionResult.reason,
         });
-      } catch (strategyError) {
+      } catch (error) {
+        console.error('Error executing strategy:', error);
         results.push({
           success: false,
           itemId,
           strategyName: strategy.strategyName,
-          error: strategyError.message,
+          error: error.message,
         });
       }
     }
 
-    const successCount = results.filter((r) => r.success).length;
+    const successfulExecutions = results.filter((r) => r.success).length;
+    const priceChanges = results.filter(
+      (r) => r.success && r.priceChanged
+    ).length;
 
     return {
-      success: successCount > 0,
-      message: `Executed ${successCount}/${strategies.length} strategies for item ${itemId}`,
+      success: true,
+      message: `Executed ${results.length} strategies for item ${itemId}`,
       results,
+      totalStrategies: strategies.length,
+      successfulExecutions,
+      priceChanges,
     };
   } catch (error) {
+    console.error('Error executing strategies for item:', error);
     return {
       success: false,
-      message: `Error executing strategies: ${error.message}`,
+      message: error.message,
       results: [],
     };
   }
 }
 
 /**
- * Remove an item from all strategies to avoid duplicates
+ * Remove an item from all strategies that it's currently applied to
  * @param {String} itemId
  * @param {String|null} sku
  */
 async function removeItemFromAllStrategies(itemId, sku = null) {
   try {
-    const strategiesWithItem = await PricingStrategy.find({
+    const strategies = await PricingStrategy.find({
       'appliesTo.itemId': itemId,
     });
 
-    for (const strategy of strategiesWithItem) {
+    for (const strategy of strategies) {
       strategy.appliesTo = strategy.appliesTo.filter((entry) => {
         if (entry.itemId !== itemId) return true;
         if (sku && entry.sku !== sku) return true;
@@ -718,90 +1025,17 @@ async function removeItemFromAllStrategies(itemId, sku = null) {
       await strategy.save();
     }
   } catch (error) {
-    // Handle error silently
+    console.error('Error removing item from strategies:', error);
   }
 }
 
 /**
- * Get strategy display information for a product
- * @param {String} itemId
- * @param {String|null} sku
- */
-export async function getStrategyDisplayForProduct(itemId, sku = null) {
-  try {
-    const strategies = await getStrategiesForItem(itemId, sku);
-
-    if (!strategies || strategies.length === 0) {
-      return {
-        strategy: 'Assign Strategy',
-        minPrice: 'Set',
-        maxPrice: 'Set',
-        hasStrategy: false,
-      };
-    }
-
-    // Use the most recently applied strategy (sort by dateApplied)
-    let mostRecentStrategy = strategies[0];
-    let mostRecentDate = new Date(0);
-
-    for (const strategy of strategies) {
-      const appliedEntry = strategy.appliesTo.find(
-        (entry) =>
-          entry.itemId === itemId && (sku === null || entry.sku === sku)
-      );
-      if (appliedEntry && new Date(appliedEntry.dateApplied) > mostRecentDate) {
-        mostRecentStrategy = strategy;
-        mostRecentDate = new Date(appliedEntry.dateApplied);
-      }
-    }
-
-    const strategy = mostRecentStrategy;
-
-    let strategyDisplay = strategy.strategyName;
-    if (strategy.value) {
-      strategyDisplay += ` (${strategy.value}`;
-      if (
-        strategy.beatBy === 'PERCENTAGE' ||
-        strategy.stayAboveBy === 'PERCENTAGE'
-      ) {
-        strategyDisplay += '%)';
-      } else {
-        strategyDisplay += ')';
-      }
-    }
-
-    return {
-      strategy: strategyDisplay,
-      minPrice: strategy.minPrice
-        ? `USD${parseFloat(strategy.minPrice).toFixed(2)}`
-        : 'Set',
-      maxPrice: strategy.maxPrice
-        ? `USD${parseFloat(strategy.maxPrice).toFixed(2)}`
-        : 'Set',
-      hasStrategy: true,
-      strategyData: strategy,
-    };
-  } catch (error) {
-    return {
-      strategy: 'Error',
-      minPrice: 'Set',
-      maxPrice: 'Set',
-      hasStrategy: false,
-    };
-  }
-}
-
-/**
- * Apply multiple strategies to a single product/item.
+ * Apply multiple strategies to a single item
  * @param {String} itemId
  * @param {Array<String>} strategyIds
  * @param {String|null} sku
  */
-export async function applyStrategiesToProduct(
-  itemId,
-  strategyIds,
-  sku = null
-) {
+export async function applyStrategiesToItem(itemId, strategyIds, sku = null) {
   if (!itemId) {
     throw new Error('Item ID is required');
   }
@@ -855,4 +1089,77 @@ export async function applyStrategiesToProduct(
   }
 
   return results;
+}
+
+/**
+ * Get display information for a product's pricing strategy
+ * @param {String} itemId
+ * @param {String|null} sku
+ */
+export async function getStrategyDisplayForProduct(itemId, sku = null) {
+  try {
+    console.log(
+      `🔍 Getting strategy display for product ${itemId}${
+        sku ? ` with SKU ${sku}` : ''
+      }`
+    );
+
+    // Get strategies applied to this item
+    const strategies = await getStrategiesForItem(itemId, sku);
+
+    if (!strategies || strategies.length === 0) {
+      console.log(`⚠️ No strategies found for item ${itemId}`);
+      return {
+        strategy: 'Assign Strategy',
+        minPrice: 'Set',
+        maxPrice: 'Set',
+        hasStrategy: false,
+        appliedStrategies: [],
+        strategyCount: 0,
+      };
+    }
+
+    // Use the first (most recent) strategy
+    const primaryStrategy = strategies[0];
+
+    console.log(`✅ Found strategy for ${itemId}:`, {
+      strategyName: primaryStrategy.strategyName,
+      repricingRule: primaryStrategy.repricingRule,
+      minPrice: primaryStrategy.minPrice,
+      maxPrice: primaryStrategy.maxPrice,
+      value: primaryStrategy.value,
+      beatBy: primaryStrategy.beatBy,
+      stayAboveBy: primaryStrategy.stayAboveBy,
+    });
+
+    return {
+      strategy: primaryStrategy.strategyName, // Just use the actual strategy name
+      minPrice: primaryStrategy.minPrice
+        ? `$${primaryStrategy.minPrice.toFixed(2)}`
+        : 'Set',
+      maxPrice: primaryStrategy.maxPrice
+        ? `$${primaryStrategy.maxPrice.toFixed(2)}`
+        : 'Set',
+      hasStrategy: true,
+      appliedStrategies: strategies,
+      strategyCount: strategies.length,
+      repricingRule: primaryStrategy.repricingRule,
+      strategyName: primaryStrategy.strategyName, // Keep original name for reference
+      value: primaryStrategy.value,
+      beatBy: primaryStrategy.beatBy,
+      stayAboveBy: primaryStrategy.stayAboveBy,
+      rawStrategy: primaryStrategy, // Include the full strategy object for debugging
+    };
+  } catch (error) {
+    console.error(`❌ Error getting strategy display for ${itemId}:`, error);
+    return {
+      strategy: 'Assign Strategy',
+      minPrice: 'Set',
+      maxPrice: 'Set',
+      hasStrategy: false,
+      appliedStrategies: [],
+      strategyCount: 0,
+      error: error.message,
+    };
+  }
 }

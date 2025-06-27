@@ -1,5 +1,3 @@
-// routes/priceHistoryRoutes.js
-
 import express from 'express';
 import { requireAuth } from '../controllers/middleware/authMiddleware.js';
 import PriceHistory from '../models/PriceHistory.js';
@@ -25,9 +23,7 @@ router.get('/product/:itemId', requireAuth, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    console.log(
-      `📊 Found ${history.length} price history records for ${itemId}`
-    );
+    console.log(`📊 Found ${history.length} price history records for ${itemId}`);
 
     return res.json({
       success: true,
@@ -143,6 +139,57 @@ router.post('/manual', requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error creating price history record',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Get paginated price history
+ * GET /api/price-history/product/:itemId/paginated
+ */
+router.get('/product/:itemId/paginated', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const {
+      limit = 100,
+      page = 1,
+      sku = null,
+      sortBy = 'createdAt',
+      sortOrder = -1,
+    } = req.query;
+
+    const query = { itemId };
+    if (sku) query.sku = sku;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sort = {};
+    sort[sortBy] = parseInt(sortOrder);
+
+    const [history, total] = await Promise.all([
+      PriceHistory.find(query)
+        .sort(sort)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      PriceHistory.countDocuments(query),
+    ]);
+
+    return res.json({
+      success: true,
+      data: history,
+      pagination: {
+        current: parseInt(page),
+        total: Math.ceil(total / parseInt(limit)),
+        count: history.length,
+        totalRecords: total,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching paginated price history:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching paginated price history',
       error: error.message,
     });
   }
