@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://api.17autoparts.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path, // Keep the /api prefix
