@@ -5,6 +5,31 @@ import Product from '../models/Product.js';
 import mongoose from 'mongoose'; // Add missing mongoose import
 
 /**
+ * Helper function to get all rules with filtering
+ */
+const getAllRules = async (options = {}) => {
+  try {
+    const { userId, isActive = null } = options;
+
+    const query = {};
+
+    if (userId) {
+      query.createdBy = userId;
+    }
+
+    if (isActive !== null) {
+      query.isActive = isActive;
+    }
+
+    const rules = await CompetitorRule.find(query).sort({ ruleName: 1 });
+    return rules;
+  } catch (error) {
+    console.error('Error in getAllRules:', error);
+    throw error;
+  }
+};
+
+/**
  * Extract core logic for creating a competitor rule
  */
 const createCompetitorRuleLogic = async (data) => {
@@ -84,8 +109,18 @@ const createCompetitorRule = async (req, res) => {
  */
 const getAllCompetitorRules = async (req, res) => {
   try {
-    const { active, userId } = req.query;
+    const { userId, active } = req.query;
 
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required',
+      });
+    }
+
+    console.log(`📋 Fetching competitor rules for user: ${userId}`);
+
+    // Convert active parameter to boolean if provided
     let isActive = null;
     if (active === 'true') {
       isActive = true;
@@ -93,28 +128,21 @@ const getAllCompetitorRules = async (req, res) => {
       isActive = false;
     }
 
-    const query = {};
-    if (isActive !== null) {
-      query.isActive = isActive;
-    }
-    if (userId) {
-      query.createdBy = userId;
-    }
+    const rules = await getAllRules({ userId, isActive });
 
-    const rules = await CompetitorRule.find(query).sort({ ruleName: 1 });
+    console.log(`📋 Found ${rules.length} competitor rules`);
 
-    res.status(200).json({
+    return res.json({
       success: true,
       count: rules.length,
-      rules: rules,
-      data: rules, // Include both for compatibility
+      data: rules,
+      rules: rules, // Also include in rules field for compatibility
     });
   } catch (error) {
     console.error('Error fetching competitor rules:', error);
-    
-    // Only send error response if headers haven't been sent yet
+
     if (!res.headersSent) {
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: 'Error fetching competitor rules',
         error: error.message,
@@ -576,11 +604,13 @@ const getCompetitorRuleForProduct = async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching rule for product:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Error fetching rule for product',
-      error: err.message,
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching rule for product',
+        error: err.message,
+      });
+    }
   }
 };
 
@@ -677,6 +707,7 @@ export {
   createCompetitorRule,
   createCompetitorRuleLogic,
   getAllCompetitorRules,
+  getAllRules, // Export the helper function
   getCompetitorRule,
   updateCompetitorRule,
   deleteCompetitorRule,

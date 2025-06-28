@@ -67,6 +67,12 @@ const priceHistorySchema = new mongoose.Schema(
       default: null,
     },
 
+    competitorPrice: {
+      type: Number,
+      min: [0, 'Competitor price cannot be negative'],
+      default: null,
+    }, // Keep this as a real field
+
     strategyName: {
       type: String,
       trim: true,
@@ -303,6 +309,10 @@ priceHistorySchema.pre('save', function (next) {
 // Post-save middleware for logging (optional)
 priceHistorySchema.post('save', function (doc) {});
 
+// Ensure virtual fields are serialized (if we add any in the future)
+priceHistorySchema.set('toJSON', { virtuals: true });
+
 const PriceHistory = mongoose.model('PriceHistory', priceHistorySchema);
 
 export default PriceHistory;
+

@@ -11,7 +11,7 @@ import syncRoutes from './routes/syncRoute.js';
 import ebayRoutes from './routes/ebayRoutes.js';
 import authRoutes from './routes/authRoute.js';
 import pricingStrategiesRouter from './routes/pricingStrategies.js';
-import priceHistoryRoutes from './routes/priceHistory.js'; // Change from priceHistoryRoutes.js to priceHistory.js
+import priceHistoryRoutes from './routes/priceHistory.js';
 import competitorRulesRouter from './routes/competitorRule.js';
 
 // Models (if you need to attach models to `app.locals` or `app.set('models', {...})`)

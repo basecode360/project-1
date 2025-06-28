@@ -29,7 +29,7 @@ export async function getCompetitorPrice(itemId, userId = null) {
       });
 
       if (manualCompetitorDoc && manualCompetitorDoc.competitors.length > 0) {
-        // Extract prices from manual competitors
+        // Extract prices from manual competitors - USE STORED PRICES ONLY
         const prices = manualCompetitorDoc.competitors
           .map((comp) => {
             const price = parseFloat(comp.price);
@@ -45,7 +45,7 @@ export async function getCompetitorPrice(itemId, userId = null) {
 
           return {
             success: true,
-            price: `USD${lowestPrice.toFixed(2)}`,
+            price: lowestPrice.toFixed(2),
             count: prices.length,
             allPrices: prices,
             productInfo: manualCompetitorDoc.competitors,
@@ -60,75 +60,23 @@ export async function getCompetitorPrice(itemId, userId = null) {
       );
     }
 
-    // Fallback to competitor rules API or external service
-    try {
-      // Try to get competitor data from external API or competitor rules
-      // This would be where you integrate with your actual competitor price service
-      console.log(
-        `🔍 No manual competitors found, checking external sources for ${itemId}`
-      );
-
-      // For now, we'll check if there are any competitor rules applied
-      const { default: CompetitorRule } = await import(
-        '../models/competitorSchema.js'
-      );
-
-      const competitorRule = await CompetitorRule.findOne({
-        'appliesTo.itemId': itemId,
-        isActive: true,
-      });
-
-      if (competitorRule) {
-        console.log(
-          `📋 Found competitor rule for ${itemId}: ${competitorRule.ruleName}`
-        );
-        // Here you would execute the competitor rule to find prices
-        // For now, we'll use mock data but indicate it's from rules
-        return {
-          success: true,
-          price: 'USD11.63', // This should come from actual competitor price lookup
-          count: 3,
-          allPrices: [11.63, 12.15, 12.45],
-          productInfo: [],
-          source: 'competitor_rules',
-        };
-      }
-    } catch (ruleError) {
-      console.warn(
-        'Failed to get competitor data from rules:',
-        ruleError.message
-      );
-    }
-
-    // Final fallback - use mock data but make it more realistic
-    console.warn(
-      `⚠️ No competitor data found for ${itemId}, using fallback mock data`
-    );
-
-    // Generate more realistic mock price based on itemId
-    const mockBasePrice = 10 + parseInt(itemId.slice(-2)) / 10; // Use last 2 digits of itemId
-    const mockPrices = [
-      mockBasePrice,
-      mockBasePrice + 0.5,
-      mockBasePrice + 1.0,
-      mockBasePrice + 1.5,
-    ];
-
-    const lowestMockPrice = Math.min(...mockPrices);
+    // If no manual competitors, return no competition
+    console.log(`⚠️ No manual competitors found for ${itemId}`);
 
     return {
-      success: true,
-      price: `USD${lowestMockPrice.toFixed(2)}`,
-      count: mockPrices.length,
-      allPrices: mockPrices,
+      success: false,
+      price: '0.00',
+      count: 0,
+      allPrices: [],
       productInfo: [],
-      source: 'mock_fallback',
+      source: 'no_competitors',
+      message: 'No competitors found',
     };
   } catch (error) {
     console.error(`❌ Error getting competitor price for ${itemId}:`, error);
     return {
       success: false,
-      price: 'USD0.00',
+      price: '0.00',
       count: 0,
       allPrices: [],
       productInfo: [],
@@ -220,7 +168,7 @@ export async function getActiveListings(userId = null) {
 export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
   try {
     console.log(
-      `🔄 Attempting to update eBay price for ${itemId} to ${newPrice}`
+      `🔄 [INVENTORY] Attempting to update eBay price for ${itemId} to $${newPrice}`
     );
 
     // Get user with eBay credentials
@@ -286,6 +234,23 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
     }
 
     const authToken = user.ebay.accessToken;
+
+    // First try to get current price to verify the change
+    let currentPriceBeforeUpdate = null;
+    try {
+      const currentPriceResult = await getCurrentEbayPrice(itemId);
+      if (currentPriceResult) {
+        currentPriceBeforeUpdate = currentPriceResult;
+        console.log(
+          `📊 Current price before update: $${currentPriceBeforeUpdate}`
+        );
+      }
+    } catch (priceError) {
+      console.warn(
+        'Could not get current price before update:',
+        priceError.message
+      );
+    }
 
     // First try to get item details to check if it uses SKU management
     const getItemRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -385,11 +350,33 @@ export async function updateEbayPrice(itemId, sku, newPrice, userId = null) {
           reviseResponseData.Ack === 'Warning'
         ) {
           console.log(
-            `✅ eBay price update successful for ${itemId} using ReviseFixedPriceItem`
+            `✅ [INVENTORY] eBay price update successful for ${itemId} using ReviseFixedPriceItem`
           );
 
-          // Don't record price history here - let the strategy service handle it
-          // This prevents duplicate records
+          // Verify the actual price change occurred
+          let actualPriceChangeConfirmed = false;
+          if (currentPriceBeforeUpdate) {
+            const priceChange = Math.abs(newPrice - currentPriceBeforeUpdate);
+            actualPriceChangeConfirmed = priceChange >= 0.01;
+            console.log(
+              `📊 Price change verification: $${currentPriceBeforeUpdate} → $${newPrice} (change: $${priceChange.toFixed(
+                2
+              )}, confirmed: ${actualPriceChangeConfirmed})`
+            );
+          }
+
+          return {
+            success: true,
+            itemId,
+            oldPrice: currentPriceBeforeUpdate,
+            newPrice,
+            priceChangeConfirmed: actualPriceChangeConfirmed,
+            message:
+              'Price updated successfully on eBay via ReviseFixedPriceItem',
+            ebayResponse: reviseResponseData,
+            timestamp: new Date(),
+            method: 'ReviseFixedPriceItem',
+          };
         } else {
           throw new Error(
             reviseResponseData.Errors?.LongMessage ||

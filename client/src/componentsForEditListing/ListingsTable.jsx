@@ -40,9 +40,16 @@ export default function PriceChangeSubmissions() {
         100 // Get last 100 records
       );
 
-      if (historyData.success && historyData.priceHistory) {
+      console.log('📊 Raw API response:', historyData);
+
+      // FIXED: Use 'data' field instead of 'priceHistory' field
+      if (
+        historyData.success &&
+        historyData.data &&
+        Array.isArray(historyData.data)
+      ) {
         // Transform the data to ensure all fields are properly formatted
-        const transformedHistory = historyData.priceHistory.map((record) => ({
+        const transformedHistory = historyData.data.map((record) => ({
           ...record,
           // Ensure numeric values
           newPrice: record.newPrice
@@ -72,9 +79,12 @@ export default function PriceChangeSubmissions() {
             record.date || record.timestamp || record.createdAt || new Date(),
         }));
 
+        console.log('📊 Transformed history:', transformedHistory.slice(0, 3));
+
         setPriceHistory(transformedHistory);
         setError(null);
       } else {
+        console.warn('📊 API response structure unexpected:', historyData);
         setPriceHistory([]);
         setError('No price history found');
       }

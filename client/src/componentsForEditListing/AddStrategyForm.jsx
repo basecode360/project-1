@@ -198,29 +198,15 @@ export default function AddStrategyPage() {
 
       const strategyPayload = getPricingStrategyPayload();
 
-      let response;
-      if (formData.assignToActiveListings) {
-        // Create strategy and apply to all active listings
-        const strategyResp = await apiService.pricingStrategies.createStrategy(
-          strategyPayload
-        );
-        if (strategyResp.success) {
-          // Apply to all active listings would need a separate endpoint
-          showAlert('Pricing strategy created successfully!', 'success');
-          response = strategyResp;
-        } else {
-          throw new Error(strategyResp.message || 'Failed to create strategy');
-        }
+      // FIXED: Only create the strategy, don't apply it to any listing
+      const response = await apiService.pricingStrategies.createStrategy(
+        strategyPayload
+      );
+
+      if (response.success) {
+        showAlert('Pricing strategy created successfully!', 'success');
       } else {
-        // Create strategy and apply to specific product
-        response = await apiService.pricingStrategies.createStrategyOnProduct(
-          ItemId,
-          strategyPayload
-        );
-        showAlert(
-          'Pricing strategy created and applied to product!',
-          'success'
-        );
+        throw new Error(response.message || 'Failed to create strategy');
       }
 
       // Navigate back after success

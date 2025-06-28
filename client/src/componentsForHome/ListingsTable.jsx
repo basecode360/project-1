@@ -422,10 +422,10 @@ export default function ListingsTable({
           setRows(validListings);
           modifyProductsArray(validListings);
 
-          // Start auto-sync monitoring in background
+          // FIXED: Reduced background monitoring frequency
           setTimeout(() => {
             startBackgroundMonitoring();
-          }, 2000);
+          }, 10000); // Increased delay to 10 seconds
         } else {
           setError('There are no products');
         }
@@ -441,7 +441,7 @@ export default function ListingsTable({
     }
   };
 
-  // NEW: Background monitoring function
+  // NEW: Background monitoring function - FIXED: Reduced frequency
   const startBackgroundMonitoring = async () => {
     if (autoSyncInProgress) return;
 
@@ -449,43 +449,10 @@ export default function ListingsTable({
       setAutoSyncInProgress(true);
       console.log('🔄 Starting background competitor monitoring...');
 
-      // First, execute strategies for all items immediately
-      const executeResponse = await fetch(
-        `${
-          import.meta.env.VITE_BACKEND_URL
-        }/api/competitor-rules/execute-strategies`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('app_jwt')}`,
-          },
-          body: JSON.stringify({
-            userId: localStorage.getItem('user_id'),
-          }),
-        }
-      );
+      // REMOVED: Immediate strategy execution on page load (causing too many records)
+      // Only trigger the background monitoring service, not immediate execution
 
-      if (executeResponse.ok) {
-        const executeResult = await executeResponse.json();
-        console.log(
-          '✅ Immediate strategy execution completed:',
-          executeResult
-        );
-
-        if (executeResult.result?.priceChanges > 0) {
-          console.log(
-            `💰 ${executeResult.result.priceChanges} prices were updated!`
-          );
-
-          // Refresh the table to show updated prices
-          setTimeout(() => {
-            fetchEbayListings();
-          }, 2000);
-        }
-      }
-
-      // Then trigger the background monitoring service
+      // Trigger the background monitoring service
       const response = await fetch(
         `${
           import.meta.env.VITE_BACKEND_URL
@@ -508,13 +475,13 @@ export default function ListingsTable({
 
         if (result.strategies?.priceChanges > 0) {
           console.log(
-            `💰 Additional ${result.strategies.priceChanges} prices were updated by monitoring!`
+            `💰 ${result.strategies.priceChanges} prices were updated by monitoring!`
           );
 
-          // Refresh the table again to show any additional updates
+          // Only refresh if there were actual price changes
           setTimeout(() => {
             fetchEbayListings();
-          }, 3000);
+          }, 5000); // Increased delay to 5 seconds
         }
       }
     } catch (error) {

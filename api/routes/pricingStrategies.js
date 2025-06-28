@@ -17,15 +17,29 @@ import {
 
 const router = express.Router();
 
-// 1) Create a new strategy
+// 1) Create a new strategy WITHOUT applying it to any listing
 //    POST /api/pricing-strategies
 router.post('/', requireAuth, async (req, res) => {
   try {
+    console.log('📝 Creating new strategy (without applying to any listing):', {
+      strategyName: req.body.strategyName,
+      repricingRule: req.body.repricingRule,
+    });
+
     const strategy = await createStrategy({
       ...req.body,
       createdBy: req.user.id,
     });
-    return res.status(201).json({ success: true, data: strategy });
+
+    console.log(
+      `✅ Strategy "${strategy.strategyName}" created successfully with ID: ${strategy._id}`
+    );
+
+    return res.status(201).json({
+      success: true,
+      data: strategy,
+      message: `Strategy "${strategy.strategyName}" created successfully. You can now apply it to specific listings.`,
+    });
   } catch (err) {
     console.error('Error in POST /api/pricing-strategies:', err.message);
     return res.status(400).json({ success: false, message: err.message });

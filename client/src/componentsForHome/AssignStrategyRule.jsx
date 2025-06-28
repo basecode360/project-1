@@ -9,6 +9,13 @@ import {
   Alert,
   Collapse,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +32,11 @@ export default function AssignStrategyRule() {
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
   const [alertSeverity, setAlertSeverity] = useState('info');
+
+  // Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogItemId, setDialogItemId] = useState('');
+  const [dialogItemTitle, setDialogItemTitle] = useState('');
 
   useEffect(() => {
     fetchAvailableStrategies();
@@ -67,6 +79,43 @@ export default function AssignStrategyRule() {
       );
     } catch (error) {
       showAlert('Failed to assign strategy: ' + error.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenDialog = (itemId, itemTitle) => {
+    setDialogItemId(itemId);
+    setDialogItemTitle(itemTitle);
+    setDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setSelectedStrategy('');
+  };
+
+  const handleAssignStrategyToItem = async () => {
+    if (!selectedStrategy) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response =
+        await apiService.pricingStrategies.applyStrategyToProduct(
+          dialogItemId,
+          [selectedStrategy]
+        );
+
+      if (response.success) {
+        showAlert('Strategy assigned successfully!', 'success');
+        handleCloseDialog();
+      } else {
+        showAlert('Failed to assign strategy: ' + response.message, 'error');
+      }
+    } catch (error) {
+      showAlert('Error: ' + error.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -177,6 +226,72 @@ export default function AssignStrategyRule() {
           </Button>
         </Box>
       </Box>
+
+      {/* Assign Strategy to Specific Listing Dialog */}
+      <Dialog
+        open={dialogOpen}
+        onClose={handleCloseDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Assign Strategy to Listing</DialogTitle>
+
+        <DialogContent>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+            Assign a pricing strategy to: <strong>{dialogItemTitle}</strong>
+          </Typography>
+
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Select Strategy</InputLabel>
+            <Select
+              value={selectedStrategy}
+              onChange={(e) => setSelectedStrategy(e.target.value)}
+              label="Select Strategy"
+              disabled={loading}
+            >
+              {availableStrategies.map((strategy) => (
+                <MenuItem key={strategy._id} value={strategy._id}>
+                  <Box>
+                    <Typography variant="body1">
+                      {strategy.strategyName}
+                    </Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {strategy.repricingRule} - Min: $
+                      {strategy.minPrice || 'N/A'} - Max: $
+                      {strategy.maxPrice || 'N/A'}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {availableStrategies.length === 0 && (
+            <Typography
+              variant="body2"
+              color="textSecondary"
+              sx={{ fontStyle: 'italic' }}
+            >
+              No strategies available. Create a strategy first.
+            </Typography>
+          )}
+        </DialogContent>
+
+        <DialogActions>
+          <Button onClick={handleCloseDialog} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAssignStrategyToItem}
+            variant="contained"
+            disabled={
+              loading || !selectedStrategy || availableStrategies.length === 0
+            }
+          >
+            {loading ? 'Assigning...' : 'Assign Strategy'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

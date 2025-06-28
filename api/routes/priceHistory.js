@@ -23,12 +23,15 @@ router.get('/product/:itemId', requireAuth, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    console.log(`📊 Found ${history.length} price history records for ${itemId}`);
+    console.log(
+      `📊 Found ${history.length} price history records for ${itemId}`
+    );
 
     return res.json({
       success: true,
       count: history.length,
-      data: history,
+      data: history, // Make sure we're returning 'data' field
+      priceHistory: history, // Also include for backward compatibility
     });
   } catch (error) {
     console.error('Error fetching price history:', error);
@@ -114,16 +117,38 @@ router.post('/manual', requireAuth, async (req, res) => {
       });
     }
 
+    // Calculate change amount and percentage
+    let changeAmount = null;
+    let changePercentage = null;
+    let changeDirection = null;
+
+    if (oldPrice !== undefined && oldPrice !== null) {
+      changeAmount = newPrice - oldPrice;
+      if (oldPrice > 0) {
+        changePercentage = (changeAmount / oldPrice) * 100;
+      }
+      changeDirection =
+        changeAmount > 0
+          ? 'increased'
+          : changeAmount < 0
+          ? 'decreased'
+          : 'unchanged';
+    }
+
     const record = new PriceHistory({
       itemId,
       sku,
       oldPrice,
       newPrice,
       currency,
+      changeAmount,
+      changePercentage,
+      changeDirection,
       source: 'manual',
       status: 'completed',
       success: true,
       userId: req.user.id,
+      reason: reason || 'Manual update',
       metadata: { reason: reason || 'Manual update' },
     });
 

@@ -44,33 +44,36 @@ const competitorSchema = new mongoose.Schema({
   },
 });
 
-const manualCompetitorSchema = new mongoose.Schema({
-  userId: {
-    type: String,
-    required: true,
-    index: true,
+const manualCompetitorSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    itemId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    competitors: [competitorSchema],
+    monitoringEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    monitoringFrequency: {
+      type: Number,
+      default: 20, // minutes
+    },
+    lastMonitoringCheck: {
+      type: Date,
+      default: null,
+    },
   },
-  itemId: {
-    type: String,
-    required: true,
-    index: true,
-  },
-  competitors: [competitorSchema],
-  monitoringEnabled: {
-    type: Boolean,
-    default: true,
-  },
-  monitoringFrequency: {
-    type: Number,
-    default: 20, // minutes
-  },
-  lastMonitoringCheck: {
-    type: Date,
-    default: null,
-  },
-}, {
-  timestamps: true,
-});
+  {
+    timestamps: true,
+  }
+);
 
 // Update the updatedAt field on save
 manualCompetitorSchema.pre('save', function (next) {

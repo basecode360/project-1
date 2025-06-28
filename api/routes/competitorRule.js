@@ -2629,7 +2629,7 @@ router.post(
 
           if (strategyResult.success && strategyResult.priceChanges > 0) {
             console.log(
-              `✅ Successfully updated price for ${itemId} based on new competitor`
+              `💰 Successfully updated price for ${itemId} based on new competitor`
             );
             strategyExecuted = true;
           }
@@ -2683,6 +2683,8 @@ router.get('/get-manual-competitors/:itemId', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'userId is required as query parameter',
+        competitors: [],
+        count: 0,
       });
     }
 
@@ -2779,23 +2781,22 @@ router.post('/trigger-monitoring', requireAuth, async (req, res) => {
       });
     }
 
-    console.log(`🔄 Triggering competitor monitoring for user ${userId}...`);
+    console.log(
+      `🔄 Triggering REAL competitor monitoring for user ${userId}...`
+    );
 
-    // Import and execute competitor monitoring
+    // Import and execute REAL competitor monitoring (no fake price changes)
     const { updateCompetitorPrices, executeStrategiesForAllItems } =
       await import('../services/competitorMonitoringService.js');
 
-    // First update competitor prices
-    const monitoringResult = await updateCompetitorPrices();
-
-    // Then execute strategies for all items
+    // Execute strategies for all items WITHOUT changing competitor prices
     const strategyResult = await executeStrategiesForAllItems();
 
     return res.json({
       success: true,
-      message: 'Competitor monitoring and strategy execution completed',
-      monitoring: monitoringResult,
+      message: 'Strategy execution completed (no fake price changes)',
       strategies: strategyResult,
+      note: 'Competitor prices are only updated with real eBay data during scheduled monitoring',
     });
   } catch (error) {
     console.error('❌ Error triggering monitoring:', error);
@@ -2815,7 +2816,7 @@ router.post('/execute-strategies', requireAuth, async (req, res) => {
     console.log(
       `🎯 Executing strategies for ${
         itemId ? `item ${itemId}` : 'all items'
-      }...`
+      } (no fake price changes)...`
     );
 
     const { triggerStrategyForItem, executeStrategiesForAllItems } =
@@ -2826,13 +2827,13 @@ router.post('/execute-strategies', requireAuth, async (req, res) => {
       // Execute for specific item
       result = await triggerStrategyForItem(itemId, userId);
     } else {
-      // Execute for all items
+      // Execute for all items WITHOUT changing competitor prices
       result = await executeStrategiesForAllItems();
     }
 
     return res.json({
       success: true,
-      message: 'Strategy execution completed',
+      message: 'Strategy execution completed (competitor prices unchanged)',
       result,
     });
   } catch (error) {
