@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireAuth } from '../controllers/middleware/authMiddleware.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 import PriceHistory from '../models/PriceHistory.js';
 
 const router = express.Router();
@@ -22,10 +22,6 @@ router.get('/product/:itemId', requireAuth, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .lean();
-
-    console.log(
-      `📊 Found ${history.length} price history records for ${itemId}`
-    );
 
     return res.json({
       success: true,

@@ -69,6 +69,16 @@ const manualCompetitorSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    lastLowestPrice: {
+      type: Number,
+      default: null,
+    },
+    strategyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PricingStrategy',
+      required: false,
+      default: null,
+    },
   },
   {
     timestamps: true,

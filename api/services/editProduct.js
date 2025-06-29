@@ -439,24 +439,44 @@ const updatePriceViaStrategy = async (itemId, strategyData, userId) => {
     }
 
     // Apply min/max constraints with detailed logging
-    const originalCalculatedPrice = newPriceFromStrategy;
+    // FIX: Fetch min/max from Product document if available
+    let listingMinPrice = strategyData.minPrice;
+    let listingMaxPrice = strategyData.maxPrice;
 
-    // FIX: Apply min price constraint first
-    if (
-      strategyData.minPrice !== undefined &&
-      strategyData.minPrice !== null &&
-      newPriceFromStrategy < strategyData.minPrice
-    ) {
-      newPriceFromStrategy = parseFloat(strategyData.minPrice);
+    // Fetch from Product if not provided
+    try {
+      const { default: Product } = await import('../models/Product.js');
+      let productDoc = await Product.findOne({ itemId });
+      if (!productDoc) {
+        // Upsert a new Product document if missing
+        productDoc = await Product.create({ itemId });
+      }
+      if (productDoc) {
+        if (productDoc.minPrice !== undefined && productDoc.minPrice !== null) {
+          listingMinPrice = productDoc.minPrice;
+        }
+        if (productDoc.maxPrice !== undefined && productDoc.maxPrice !== null) {
+          listingMaxPrice = productDoc.maxPrice;
+        }
+      }
+    } catch (err) {
+      // ignore error, fallback to strategyData values
     }
 
-    // FIX: Apply max price constraint second
+    // Apply min/max constraints
     if (
-      strategyData.maxPrice !== undefined &&
-      strategyData.maxPrice !== null &&
-      newPriceFromStrategy > strategyData.maxPrice
+      listingMinPrice !== undefined &&
+      listingMinPrice !== null &&
+      newPriceFromStrategy < listingMinPrice
     ) {
-      newPriceFromStrategy = parseFloat(strategyData.maxPrice);
+      newPriceFromStrategy = parseFloat(listingMinPrice);
+    }
+    if (
+      listingMaxPrice !== undefined &&
+      listingMaxPrice !== null &&
+      newPriceFromStrategy > listingMaxPrice
+    ) {
+      newPriceFromStrategy = parseFloat(listingMaxPrice);
     }
 
     const finalConstrainedPrice = newPriceFromStrategy;

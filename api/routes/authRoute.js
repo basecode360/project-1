@@ -17,7 +17,7 @@ import {
 import {
   generateEbayAuthCode,
   generateCodeMiddleware,
-} from '../controllers/middleware/authenticateUser.js';
+} from '../middleware/authenticateUser.js';
 
 const router = express.Router();
 

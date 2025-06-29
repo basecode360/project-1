@@ -12,9 +12,10 @@ import {
   getActiveStrategies,
   getStrategyDisplayForProduct,
   executeAllActiveStrategies,
-  executeStrategiesForItem,
+  executeStrategyForItem,
 } from '../services/strategyService.js';
-
+import PricingStrategy from '../models/PricingStrategy.js';
+import Product from '../models/Product.js';
 /**
  * Create a new pricing strategy
  * POST /api/pricing-strategies
@@ -405,29 +406,77 @@ const executeAllStrategiesController = async (req, res) => {
  * Execute strategies for a specific item
  * POST /api/pricing-strategies/products/:itemId/execute
  */
-const executeStrategiesForItemController = async (req, res) => {
+export const executeStrategyForItemController = async (req, res) => {
+  const { itemId } = req.params;
   try {
-    const { itemId } = req.params;
+    const result = await executeStrategyForItem(itemId);
 
-    const results = await executeStrategiesForItem(itemId);
-
-    return res.status(200).json({
-      success: true,
-      message: `Strategy execution completed for item ${itemId}`,
-      data: results,
-    });
-  } catch (error) {
-    console.error(
-      `Error executing strategies for item ${req.params.itemId}:`,
-      error.message
-    );
-    return res.status(500).json({
-      success: false,
-      message: 'Error executing strategies for item',
-      error: error.message,
-    });
+    if (result.success) {
+      return res.status(200).json({ success: true, data: result });
+    } else {
+      // e.g. “No strategy assigned to product”
+      return res.status(400).json({ success: false, message: result.reason });
+    }
+  } catch (err) {
+    console.error('❌ executeStrategyForItemController error:', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+export async function setStrategyForItemController(req, res) {
+  try {
+    const { itemId } = req.params;
+    const { strategyId, minPrice, maxPrice } = req.body;
+
+    if (!strategyId) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'strategyId required' });
+    }
+
+    // 1) make sure the strategy exists
+    const strategy = await PricingStrategy.findById(strategyId);
+    if (!strategy) {
+      return res
+        .status(404)
+        .json({ success: false, message: 'Strategy not found' });
+    }
+
+    // 2) upsert the Product record, setting its single .strategy + bounds
+    const updated = await Product.findOneAndUpdate(
+      { itemId, ebayAccountId: req.user.ebayAccountId },
+      {
+        $setOnInsert: {
+          itemId,
+          userId: req.user._id,
+          ebayAccountId: req.user.ebayAccountId,
+        },
+        $set: {
+          strategy: strategy._id,
+          minPrice: minPrice != null ? +minPrice : null,
+          maxPrice: maxPrice != null ? +maxPrice : null,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    // 3) immediately execute that strategy on eBay
+    const execution = await executeStrategyForItem(itemId);
+
+    return res.json({
+      success: true,
+      message: `Product ${itemId} now uses strategy "${strategy.strategyName}"`,
+      data: {
+        product: updated,
+        execution,
+      },
+    });
+  } catch (err) {
+    console.error('setStrategyForItemController error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
 
 export {
   createPricingStrategy,
@@ -441,5 +490,5 @@ export {
   getActivePricingStrategies,
   getStrategyDisplayForProductController,
   executeAllStrategiesController,
-  executeStrategiesForItemController,
+  
 };

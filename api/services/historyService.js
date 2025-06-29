@@ -48,6 +48,9 @@ export async function recordPriceChange({
   success,
   error = null,
   metadata = {},
+  minPrice = null, // <-- ensure these are included
+  maxPrice = null, // <-- ensure these are included
+  repricingRule = null,
 }) {
   // Check MongoDB connection
   const mongoose = (await import('mongoose')).default;
@@ -113,6 +116,9 @@ export async function recordPriceChange({
     success,
     error,
     metadata,
+    minPrice, // <-- use these
+    maxPrice, // <-- use these
+    repricingRule,
   };
 
   try {
@@ -128,10 +134,7 @@ export async function recordPriceChange({
     // Immediate verification
     const verification = await PriceHistory.findById(savedRecord._id);
     if (verification) {
-      
-      
     } else {
-      
     }
 
     return savedRecord;

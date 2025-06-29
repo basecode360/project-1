@@ -4,7 +4,7 @@ import axios from 'axios';
 import User from '../models/Users.js';
 import Product from '../models/Product.js'; // Import Product model
 import ManualCompetitor from '../models/ManualCompetitor.js'; // Import ManualCompetitor model
-import { requireAuth } from '../controllers/middleware/authMiddleware.js'; // Add this import
+import { requireAuth } from '../middleware/authMiddleware.js'; // Add this import
 import {
   createCompetitorRule,
   applyRuleToItems,
@@ -158,18 +158,20 @@ router.post('/products/:itemId', async (req, res) => {
     const { userId, sku, title } = req.body;
 
     // Create competitor rule using the extracted logic
-    const rule = await createCompetitorRuleLogic({
-      ...req.body,
-      appliesTo: [
-        {
-          itemId,
-          sku: sku || null,
-          title: title || null,
-          dateApplied: new Date(),
-        },
-      ],
-      createdBy: userId,
-    });
+    const rule = await createCompetitorRuleLogic(
+      {
+        ...req.body,
+        appliesTo: [
+          {
+            itemId,
+            sku: sku || null,
+            title: title || null,
+            dateApplied: new Date(),
+          },
+        ],
+      },
+      userId // <-- pass userId here!
+    );
 
     // Associate the created rule with the product
     await Product.findOneAndUpdate(
@@ -1287,7 +1289,9 @@ router.get('/products/:itemId', async (req, res) => {
       itemId
     );
     const hasCompetitorRule = competitorRule !== null;
-    getAllCompetitorRules(req, res);
+
+    // DO NOT call getAllCompetitorRules(req, res) here!
+    // Only send one response:
     res.json({
       success: true,
       itemId,
@@ -1403,7 +1407,7 @@ router.post('/create-rule/:itemId', createRuleForProduct);
 router.get('/fetch-rule/:itemId', getCompetitorRuleForProduct);
 
 // Route to fetch all competitor rules
-router.get('/', getAllCompetitorRules);
+router.get('/competitor-rules', getAllCompetitorRules);
 
 /**
  * ===============================
@@ -1640,11 +1644,11 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
 
       try {
         // Import and execute strategy for this item
-        const { executeStrategiesForItem } = await import(
+        const { executeStrategyForItem } = await import(
           '../services/strategyService.js'
         );
 
-        strategyResult = await executeStrategiesForItem(itemId, userId);
+        strategyResult = await executeStrategyForItem(itemId, userId);
 
         if (strategyResult.success) {
           if (strategyResult.priceChanges > 0) {
@@ -1771,11 +1775,11 @@ router.delete(
 
       try {
         // Always execute strategy when competitors are removed to recalculate pricing
-        const { executeStrategiesForItem } = await import(
+        const { executeStrategyForItem } = await import(
           '../services/strategyService.js'
         );
 
-        strategyResult = await executeStrategiesForItem(itemId, userId);
+        strategyResult = await executeStrategyForItem(itemId, userId);
 
         if (strategyResult.success) {
           strategyExecuted = true;
@@ -2566,11 +2570,11 @@ router.post(
       if (newLowest && (!currentLowest || newLowest < currentLowest)) {
         try {
           // Import and execute strategy for this item
-          const { executeStrategiesForItem } = await import(
+          const { executeStrategyForItem } = await import(
             '../services/strategyService.js'
           );
 
-          strategyResult = await executeStrategiesForItem(itemId, userId);
+          strategyResult = await executeStrategyForItem(itemId, userId);
 
           if (strategyResult.success && strategyResult.priceChanges > 0) {
             strategyExecuted = true;
@@ -2692,18 +2696,16 @@ router.post('/trigger-monitoring', requireAuth, async (req, res) => {
       });
     }
 
-    // Import and execute REAL competitor monitoring (no fake price changes)
-    const { updateCompetitorPrices, executeStrategiesForAllItems } =
+    // Import and execute your real competitor-price check (which already fires your repricer)
+    const { updateCompetitorPrices } =
       await import('../services/competitorMonitoringService.js');
 
-    // Execute strategies for all items WITHOUT changing competitor prices
-    const strategyResult = await executeStrategiesForAllItems();
+    const result = await updateCompetitorPrices();
 
     return res.json({
       success: true,
-      message: 'Strategy execution completed (no fake price changes)',
-      strategies: strategyResult,
-      note: 'Competitor prices are only updated with real eBay data during scheduled monitoring',
+      message: 'Monitoring run completed',
+      result,  // contains whatever summary updateCompetitorPrices returns
     });
   } catch (error) {
     console.error('❌ Error triggering monitoring:', error);
@@ -2793,5 +2795,8 @@ router.get('/monitoring-status', requireAuth, async (req, res) => {
     });
   }
 });
+
+// Add this route at the top or after imports, before other /products/:itemId routes
+router.get('/', getAllCompetitorRules);
 
 export default router;

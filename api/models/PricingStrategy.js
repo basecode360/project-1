@@ -145,15 +145,6 @@ const pricingStrategySchema = new mongoose.Schema({
           type: Date,
           default: Date.now,
         },
-        // Add listing-specific min/max prices here
-        minPrice: {
-          type: Number,
-          min: [0, 'Minimum price cannot be negative'],
-        },
-        maxPrice: {
-          type: Number,
-          min: [0, 'Maximum price cannot be negative'],
-        },
       },
     ],
     default: [],
@@ -240,13 +231,7 @@ pricingStrategySchema.pre('validate', function (next) {
 });
 
 // Instance method to apply strategy to an item
-pricingStrategySchema.methods.applyToItem = function (
-  itemId,
-  sku,
-  title,
-  minPrice,
-  maxPrice
-) {
+pricingStrategySchema.methods.applyToItem = function (itemId, sku, title) {
   // Check if this item is already in the appliesTo array
   const existingIndex = this.appliesTo.findIndex(
     (item) =>
@@ -259,17 +244,11 @@ pricingStrategySchema.methods.applyToItem = function (
       sku,
       title,
       dateApplied: new Date(),
-      minPrice: minPrice || null,
-      maxPrice: maxPrice || null,
     });
   } else {
     // Update existing entry
     this.appliesTo[existingIndex].dateApplied = new Date();
     if (title) this.appliesTo[existingIndex].title = title;
-    if (minPrice !== undefined)
-      this.appliesTo[existingIndex].minPrice = minPrice;
-    if (maxPrice !== undefined)
-      this.appliesTo[existingIndex].maxPrice = maxPrice;
   }
 
   return this.save();

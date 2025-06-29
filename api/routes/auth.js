@@ -1,7 +1,7 @@
 // routes/auth.js
 
 import express from 'express';
-import { requireAuth } from '../controllers/middleware/authMiddleware.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -26,7 +26,6 @@ router.post('/update-ebay-token', requireAuth, async (req, res) => {
       'ebay.accessToken': accessToken,
       'ebay.tokenExpires': new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours
     });
-
 
     return res.json({
       success: true,

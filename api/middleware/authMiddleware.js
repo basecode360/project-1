@@ -1,6 +1,6 @@
 // middleware/authMiddleware.js
 import jwt from 'jsonwebtoken';
-import User from '../../models/Users.js';
+import User from '../models/Users.js';
 
 // Provide a fallback JWT secret if not set in environment
 const JWT_SECRET =
@@ -27,15 +27,18 @@ export const requireAuth = async (req, res, next) => {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
-      
+
       // Check if token is about to expire (within 5 minutes)
       const currentTime = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = decoded.exp - currentTime;
-      
-      if (timeUntilExpiry < 300) { // Less than 5 minutes
-        console.warn(`⚠️ JWT token expiring soon for user ${decoded.id} (${timeUntilExpiry}s remaining)`);
+
+      if (timeUntilExpiry < 300) {
+        // Less than 5 minutes
+        console.warn(
+          `⚠️ JWT token expiring soon for user ${decoded.id} (${timeUntilExpiry}s remaining)`
+        );
       }
-      
+
       const user = await User.findById(decoded.id);
 
       if (!user) {
@@ -49,7 +52,7 @@ export const requireAuth = async (req, res, next) => {
       next();
     } catch (jwtError) {
       console.error('JWT verification error:', jwtError.message);
-      
+
       if (jwtError.name === 'TokenExpiredError') {
         return res.status(401).json({
           success: false,
@@ -57,7 +60,7 @@ export const requireAuth = async (req, res, next) => {
           expired: true,
         });
       }
-      
+
       return res.status(401).json({
         success: false,
         message: 'Invalid token.',

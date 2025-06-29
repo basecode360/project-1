@@ -16,11 +16,11 @@ export const useProductStore = create(
       modifySearch: (searchProduct) => set({ searchProduct }),
       setEntriesLimit: (entriesLimit) => set({ entriesLimit }),
       performSearch: ({ search, limit }) => {
-        const { AllProducts } = get();
-        let filtered = AllProducts;
+        const all = Array.isArray(get().AllProducts) ? get().AllProducts : [];
+        let filtered = all;
 
         if (search) {
-          filtered = AllProducts.filter(
+          filtered = all.filter(
             (product) =>
               product.name?.toLowerCase().includes(search.toLowerCase()) ||
               product.id?.toString().includes(search) ||
@@ -41,6 +41,18 @@ export const useProductStore = create(
     }),
     {
       name: 'product-store',
+      whitelist: [
+        'searchProduct',
+        'entriesLimit',
+        'sku',
+        'ItemId',
+        'competitors',
+      ],
+      partialize: (state) => {
+        // Only persist the properties you want
+        const { AllProducts, filteredProducts, ...toKeep } = state;
+        return toKeep;
+      },
     }
   )
 );

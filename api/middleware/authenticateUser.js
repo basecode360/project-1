@@ -1,4 +1,4 @@
-import User from '../../models/Users.js';
+import User from '../models/Users.js';
 import puppeteer from 'puppeteer';
 import dotenv from 'dotenv';
 dotenv.config();

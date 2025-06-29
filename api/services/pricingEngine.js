@@ -46,6 +46,28 @@ export async function applyPricingRule(userId, itemId, strategy) {
     const title = item.title;
     const categoryId = item.category.id;
 
+    // Fetch min/max from Product document
+    let listingMinPrice = strategy.minPrice;
+    let listingMaxPrice = strategy.maxPrice;
+    try {
+      const { default: Product } = await import('../models/Product.js');
+      let productDoc = await Product.findOne({ itemId });
+      if (!productDoc) {
+        // Upsert a new Product document if missing
+        productDoc = await Product.create({ itemId });
+      }
+      if (productDoc) {
+        if (productDoc.minPrice !== undefined && productDoc.minPrice !== null) {
+          listingMinPrice = productDoc.minPrice;
+        }
+        if (productDoc.maxPrice !== undefined && productDoc.maxPrice !== null) {
+          listingMaxPrice = productDoc.maxPrice;
+        }
+      }
+    } catch (err) {
+      // ignore error, fallback to strategy values
+    }
+
     console.log(`📊 Current item details:`, {
       itemId,
       title,
@@ -80,16 +102,16 @@ export async function applyPricingRule(userId, itemId, strategy) {
     let constrainedPrice = newPriceRaw;
     let constraintApplied = false;
 
-    if (strategy.minPrice && constrainedPrice < strategy.minPrice) {
-      constrainedPrice = strategy.minPrice;
+    if (listingMinPrice && constrainedPrice < listingMinPrice) {
+      constrainedPrice = listingMinPrice;
       constraintApplied = true;
-      console.log(`⬆️ Price constrained by minimum: ${strategy.minPrice}`);
+      console.log(`⬆️ Price constrained by minimum: ${listingMinPrice}`);
     }
 
-    if (strategy.maxPrice && constrainedPrice > strategy.maxPrice) {
-      constrainedPrice = strategy.maxPrice;
+    if (listingMaxPrice && constrainedPrice > listingMaxPrice) {
+      constrainedPrice = listingMaxPrice;
       constraintApplied = true;
-      console.log(`⬇️ Price constrained by maximum: ${strategy.maxPrice}`);
+      console.log(`⬇️ Price constrained by maximum: ${listingMaxPrice}`);
     }
 
     // 5) Round to two decimals (eBay requires valid currency formats)
@@ -115,6 +137,8 @@ export async function applyPricingRule(userId, itemId, strategy) {
       constraintApplied,
       strategy: strategy.type,
       params: strategy.params,
+      minPrice: listingMinPrice,
+      maxPrice: listingMaxPrice,
     };
   } catch (error) {
     console.error(`❌ Error applying pricing rule for ${itemId}:`, error);

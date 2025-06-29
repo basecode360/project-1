@@ -32,7 +32,7 @@ const getAllRules = async (options = {}) => {
 /**
  * Extract core logic for creating a competitor rule
  */
-const createCompetitorRuleLogic = async (data) => {
+const createCompetitorRuleLogic = async (data, userId) => {
   const {
     ruleName,
     minPercentOfCurrentPrice = 0,
@@ -42,12 +42,16 @@ const createCompetitorRuleLogic = async (data) => {
     excludeProductTitleWords = [],
     excludeSellers = [],
     findCompetitorsBasedOnMPN = false,
-    createdBy,
     appliesTo = [],
   } = data;
 
+  // Always use userId as creator
+  const creator = userId;
   if (!ruleName) {
     throw new Error('Rule name is required');
+  }
+  if (!creator) {
+    throw new Error('userId is required');
   }
 
   const existing = await CompetitorRule.findOne({ ruleName });
@@ -64,7 +68,7 @@ const createCompetitorRuleLogic = async (data) => {
     excludeProductTitleWords,
     excludeSellers,
     findCompetitorsBasedOnMPN,
-    createdBy,
+    createdBy: creator,
     appliesTo,
     usageCount: appliesTo.length,
     lastUsed: appliesTo.length ? new Date() : null,
@@ -89,7 +93,9 @@ const createCompetitorRuleLogic = async (data) => {
  */
 const createCompetitorRule = async (req, res) => {
   try {
-    const rule = await createCompetitorRuleLogic(req.body);
+    // Always get userId from req.body or req.user
+    const userId = req.body.userId || req.user?.id || req.user?._id;
+    const rule = await createCompetitorRuleLogic(req.body, userId);
     return res.status(201).json({
       success: true,
       message: 'Competitor rule created successfully',
@@ -132,11 +138,11 @@ const getAllCompetitorRules = async (req, res) => {
 
     console.log(`📋 Found ${rules.length} competitor rules`);
 
+    // Only send response once
     return res.json({
       success: true,
-      count: rules.length,
-      data: rules,
-      rules: rules, // Also include in rules field for compatibility
+      rules, // Use 'rules' for frontend compatibility
+      data: rules, // Optionally include 'data' for other consumers
     });
   } catch (error) {
     console.error('Error fetching competitor rules:', error);
@@ -631,20 +637,20 @@ const createRuleForProduct = async (req, res) => {
       excludeSellers,
       findCompetitorsBasedOnMPN,
       assignToAll = false,
-      createdBy,
     } = req.body;
 
+    // Always get userId from req.body or req.user
+    const userId = req.body.userId || req.user?.id || req.user?._id;
     if (!ruleName) {
       return res.status(400).json({
         success: false,
         message: 'Rule name is required',
       });
     }
-
-    if (!createdBy) {
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'createdBy (userId) is required in request body',
+        message: 'userId is required in request body',
       });
     }
 
@@ -667,7 +673,7 @@ const createRuleForProduct = async (req, res) => {
       excludeProductTitleWords: excludeProductTitleWords || [],
       excludeSellers: excludeSellers || [],
       findCompetitorsBasedOnMPN: findCompetitorsBasedOnMPN || false,
-      createdBy,
+      createdBy: userId,
       appliesTo: [
         {
           itemId,

@@ -1,7 +1,8 @@
 // routes/inventory.js
 
 import express from 'express';
-import { requireAuth } from '../controllers/middleware/authMiddleware.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
+import Product from '../models/Product.js';
 import {
   getActiveListings,
   getCompetitorPrice,
@@ -18,7 +19,6 @@ router.post('/sync-price/:itemId', requireAuth, async (req, res) => {
   try {
     const { itemId } = req.params;
     const userId = req.user?.id;
-
 
     const result = await syncPriceWithStrategy(itemId, userId);
 
@@ -119,6 +119,48 @@ router.post('/force-price-update/:itemId', requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error forcing price update',
+      error: error.message,
+    });
+  }
+});
+
+// Update listing specific min and max prices
+router.put('/pricing/:itemId', requireAuth, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { minPrice, maxPrice } = req.body;
+
+    const update = {};
+    if (minPrice !== undefined) {
+      update.minPrice =
+        minPrice === null || minPrice === '' ? null : parseFloat(minPrice);
+    }
+    if (maxPrice !== undefined) {
+      update.maxPrice =
+        maxPrice === null || maxPrice === '' ? null : parseFloat(maxPrice);
+    }
+
+    // Always upsert (create if not exists)
+    const product = await Product.findOneAndUpdate(
+      { itemId },
+      { $set: update },
+      { new: true, upsert: true }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Listing pricing updated',
+      data: {
+        itemId: product.itemId,
+        minPrice: product.minPrice,
+        maxPrice: product.maxPrice,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating listing pricing:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating listing pricing',
       error: error.message,
     });
   }
