@@ -1,90 +1,194 @@
 // services/inventoryService.js
-
 import axios from 'axios';
 import xml2js from 'xml2js';
 import User from '../models/Users.js';
 import Product from '../models/Product.js';
+import ManualCompetitor from '../models/ManualCompetitor.js';
+
+/**
+ * Fetch the live price of any eBay item using Trading API GetItem
+ */
+async function fetchEbayListingPrice(itemId, authToken) {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+    <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+      <RequesterCredentials>
+        <eBayAuthToken>${authToken}</eBayAuthToken>
+      </RequesterCredentials>
+      <ItemID>${itemId}</ItemID>
+      <DetailLevel>ReturnAll</DetailLevel>
+    </GetItemRequest>`;
+  const endpoint =
+    process.env.NODE_ENV === 'production'
+      ? 'https://api.ebay.com/ws/api.dll'
+      : 'https://api.sandbox.ebay.com/ws/api.dll';
+
+  const res = await axios.post(endpoint, xml, {
+    headers: {
+      'Content-Type': 'text/xml',
+      'X-EBAY-API-CALL-NAME': 'GetItem',
+      'X-EBAY-API-SITEID': '0',
+      'X-EBAY-API-COMPATIBILITY-LEVEL': '1155',
+    },
+  });
+  const parser = new xml2js.Parser({ explicitArray: false, ignoreAttrs: true });
+  const { Item } =
+    (await parser.parseStringPromise(res.data)).GetItemResponse || {};
+
+  // try BuyItNowPrice, then StartPrice, then CurrentPrice
+  const priceNode =
+    Item?.BuyItNowPrice ||
+    Item?.StartPrice ||
+    Item?.SellingStatus?.CurrentPrice;
+
+  if (!priceNode) throw new Error('No price found on eBay response');
+  return parseFloat(priceNode.Value || priceNode);
+}
+
+/**
+ * Refresh _all_ manual competitor prices for a given listing in Mongo _before_
+ * you compute lowest or alarm your repricer.
+ */
+export async function refreshManualCompetitorPrices(itemId, userId) {
+  console.log(`🔄 [refresh] called for ${itemId} / user ${userId}`);
+  const doc = await ManualCompetitor.findOne({ userId, itemId });
+  if (!doc) return;
+
+  // 1) get fresh OAuth token
+  const { access_token: token } = await getValidTokenForUser(userId);
+
+  // 2) XML parser
+  const parser = new xml2js.Parser({
+    explicitArray: false,
+    ignoreAttrs: false,
+  });
+
+  let changed = false;
+
+  for (let comp of doc.competitors) {
+    try {
+      // 3) ask eBay for that competitor item
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+        <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${token}</eBayAuthToken>
+          </RequesterCredentials>
+          <ItemID>${comp.competitorItemId}</ItemID>
+          <DetailLevel>ReturnAll</DetailLevel>
+        </GetItemRequest>`;
+
+      const endpoint =
+        process.env.NODE_ENV === 'production'
+          ? 'https://api.ebay.com/ws/api.dll'
+          : 'https://api.sandbox.ebay.com/ws/api.dll';
+
+      const resp = await axios.post(endpoint, xml, {
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-CALL-NAME': 'GetItem',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1155',
+        },
+      });
+
+      // 4) parse
+      const result = await parser.parseStringPromise(resp.data);
+      const item = result.GetItemResponse?.Item;
+      if (!item) continue;
+
+      // 5) drill into SellingStatus.CurrentPrice
+      const cp = item.SellingStatus?.CurrentPrice;
+      // sometimes price is in cp._ or cp.__value__ or cp._
+      let newPrice = null;
+      if (cp) {
+        newPrice =
+          parseFloat(cp._) ||
+          parseFloat(cp.__value__) ||
+          parseFloat(cp.Value) ||
+          NaN;
+      }
+
+      // fallback to StartPrice or BuyItNowPrice
+      if ((!newPrice || isNaN(newPrice)) && item.StartPrice) {
+        newPrice = parseFloat(
+          item.StartPrice._ ||
+            item.StartPrice.__value__ ||
+            item.StartPrice.Value
+        );
+      }
+      if ((!newPrice || isNaN(newPrice)) && item.BuyItNowPrice) {
+        newPrice = parseFloat(
+          item.BuyItNowPrice._ ||
+            item.BuyItNowPrice.__value__ ||
+            item.BuyItNowPrice.Value
+        );
+      }
+
+      // 6) if it’s a real number, and different than we've stored, overwrite
+      if (!isNaN(newPrice) && newPrice > 0 && comp.price !== newPrice) {
+        comp.price = newPrice;
+        changed = true;
+      }
+    } catch (err) {
+      console.warn(
+        `Failed to refresh price for competitor ${comp.competitorItemId}:`,
+        err.message
+      );
+    }
+  }
+
+  if (changed) {
+    await doc.save();
+    console.log(`🔄 Manual competitor prices updated for ${itemId}`);
+  }
+}
 
 /**
  * Get competitor prices for a specific item
- * @param {String} itemId - The eBay item ID
- * @param {String} userId - The user ID (optional)
+ * (now with live refresh baked in)
  */
 export async function getCompetitorPrice(itemId, userId = null) {
-  try {
-    console.log(`🔍 Getting competitor price for item ${itemId}`);
+  const ManualCompetitor = (await import('../models/ManualCompetitor.js'))
+    .default;
 
-    // First, try to get manually added competitors from MongoDB
-    const userId_actual =
-      userId || process.env.DEFAULT_USER_ID || '68430c2b0e746fb6c6ef1a7a';
-
-    try {
-      // Get manually added competitors
-      const { default: ManualCompetitor } = await import(
-        '../models/ManualCompetitor.js'
-      );
-
-      const manualCompetitorDoc = await ManualCompetitor.findOne({
-        userId: userId_actual,
-        itemId,
-      });
-
-      if (manualCompetitorDoc && manualCompetitorDoc.competitors.length > 0) {
-        // Extract prices from manual competitors - USE STORED PRICES ONLY
-        const prices = manualCompetitorDoc.competitors
-          .map((comp) => {
-            const price = parseFloat(comp.price);
-            return isNaN(price) ? null : price;
-          })
-          .filter((price) => price !== null && price > 0);
-
-        if (prices.length > 0) {
-          const lowestPrice = Math.min(...prices);
-          console.log(
-            `📊 Found ${prices.length} manual competitor prices, lowest: ${lowestPrice}`
-          );
-
-          return {
-            success: true,
-            price: lowestPrice.toFixed(2),
-            count: prices.length,
-            allPrices: prices,
-            productInfo: manualCompetitorDoc.competitors,
-            source: 'manual_competitors',
-          };
-        }
-      }
-    } catch (mongoError) {
-      console.warn(
-        'Failed to get manual competitors from MongoDB:',
-        mongoError.message
-      );
-    }
-
-    // If no manual competitors, return no competition
-    console.log(`⚠️ No manual competitors found for ${itemId}`);
-
-    return {
-      success: false,
-      price: '0.00',
-      count: 0,
-      allPrices: [],
-      productInfo: [],
-      source: 'no_competitors',
-      message: 'No competitors found',
-    };
-  } catch (error) {
-    console.error(`❌ Error getting competitor price for ${itemId}:`, error);
-    return {
-      success: false,
-      price: '0.00',
-      count: 0,
-      allPrices: [],
-      productInfo: [],
-      error: error.message,
-      source: 'error',
-    };
+  // determine actual userId
+  const uid = userId || process.env.DEFAULT_USER_ID;
+  if (!uid) {
+    throw new Error('No userId provided or defaulted');
   }
+
+  // 1) Pull live prices for every manual competitor
+  await refreshManualCompetitorPrices(itemId, uid);
+
+  // 2) Re-fetch the doc (with updated prices)
+  const doc = await ManualCompetitor.findOne({ itemId, userId: uid });
+  if (doc?.competitors?.length) {
+    const prices = doc.competitors
+      .map((c) => parseFloat(c.price))
+      .filter((p) => !isNaN(p) && p > 0);
+
+    if (prices.length) {
+      const lowest = Math.min(...prices);
+      return {
+        success: true,
+        price: lowest.toFixed(2),
+        count: prices.length,
+        allPrices: prices,
+        productInfo: doc.competitors,
+        source: 'manual_competitors',
+      };
+    }
+  }
+
+  // fallback if no manual
+  return {
+    success: false,
+    price: '0.00',
+    count: 0,
+    allPrices: [],
+    productInfo: [],
+    source: 'no_competitors',
+    message: 'No manual competitors found',
+  };
 }
 
 /**

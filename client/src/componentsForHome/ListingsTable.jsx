@@ -302,7 +302,6 @@ export default function ListingsTable({
               // Process strategy display with better error handling and debugging
               let strategyDisplay = {
                 strategy: 'Assign Strategy',
-                strategy: 'Assign Strategy',
                 minPrice: 'Set',
                 maxPrice: 'Set',
                 hasStrategy: false,
