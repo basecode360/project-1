@@ -110,7 +110,6 @@ const getAllPricingStrategies = async (req, res) => {
     // Handle userId from multiple sources: query param, route-set userId, or authenticated user
     const userId = req.query.userId || req.userId || req.user?._id;
 
-    
     const strategies = await getAllStrategies(isActive, userId);
 
     return res.status(200).json({
@@ -173,8 +172,6 @@ const updatePricingStrategy = async (req, res) => {
       stayAboveBy,
       value,
       noCompetitionAction,
-      maxPrice,
-      minPrice,
       isActive,
       isDefault,
     } = req.body;
@@ -187,8 +184,6 @@ const updatePricingStrategy = async (req, res) => {
       stayAboveBy,
       value,
       noCompetitionAction,
-      maxPrice,
-      minPrice,
       isActive,
       isDefault,
     });
@@ -257,6 +252,7 @@ const applyStrategyToItemsController = async (req, res) => {
       });
     }
 
+    // Updated to pass min/max prices per item
     const results = await applyStrategyToItems(id, items);
 
     return res.status(200).json({
@@ -388,7 +384,6 @@ const getStrategyDisplayForProductController = async (req, res) => {
  */
 const executeAllStrategiesController = async (req, res) => {
   try {
-  
     const results = await executeAllActiveStrategies();
 
     return res.status(200).json({
@@ -413,8 +408,6 @@ const executeAllStrategiesController = async (req, res) => {
 const executeStrategiesForItemController = async (req, res) => {
   try {
     const { itemId } = req.params;
-
-
 
     const results = await executeStrategiesForItem(itemId);
 

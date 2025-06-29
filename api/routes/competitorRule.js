@@ -1543,10 +1543,6 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
           addedAt: new Date().toISOString(),
         };
 
-        console.log(
-          `✅ Competitor ${compItemId}: ${currency} ${price} - ${itemData.Title}`
-        );
-
         validCompetitors.push(competitorInfo);
 
         // Add small delay to avoid rate limiting
@@ -1633,13 +1629,6 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
           addedAt: new Date(),
         };
 
-        console.log(`📊 Adding competitor ${index + 1}:`, {
-          itemId: competitorData.itemId,
-          title: competitorData.title?.substring(0, 50),
-          price: competitorData.price,
-          hasRequiredFields: !!competitorData.itemId,
-        });
-
         manualCompetitorDoc.competitors.push(competitorData);
       });
 
@@ -1650,10 +1639,6 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
       let strategyResult = null;
 
       try {
-        console.log(
-          `🚀 Auto-executing strategies for ${itemId} after adding competitors`
-        );
-
         // Import and execute strategy for this item
         const { executeStrategiesForItem } = await import(
           '../services/strategyService.js'
@@ -1662,19 +1647,8 @@ router.post('/add-competitors-manually/:itemId', async (req, res) => {
         strategyResult = await executeStrategiesForItem(itemId, userId);
 
         if (strategyResult.success) {
-          console.log(`✅ Successfully executed strategies for ${itemId}:`, {
-            totalStrategies: strategyResult.totalStrategies,
-            successfulExecutions: strategyResult.successfulExecutions,
-            priceChanges: strategyResult.priceChanges,
-            strategiesUsed:
-              strategyResult.results?.map((r) => r.strategyName) || [],
-          });
-
           if (strategyResult.priceChanges > 0) {
             strategyExecuted = true;
-            console.log(
-              `💰 Price updated for ${itemId} based on strategy configuration from MongoDB`
-            );
           }
         } else {
           console.warn(
@@ -1791,16 +1765,6 @@ router.delete(
         newLowest = newPrices.length > 0 ? Math.min(...newPrices) : null;
       }
 
-      console.log(
-        `💰 Price comparison after competitor removal for ${itemId}:`,
-        {
-          currentLowest,
-          newLowest,
-          priceIncreased: newLowest > currentLowest,
-          competitorsRemaining: afterDoc?.competitors?.length || 0,
-        }
-      );
-
       // Check if competitor price landscape changed and execute strategy
       let strategyExecuted = false;
       let strategyResult = null;
@@ -1811,15 +1775,9 @@ router.delete(
           '../services/strategyService.js'
         );
 
-        console.log(
-          `🚀 Auto-executing strategies for ${itemId} after competitor removal`
-        );
         strategyResult = await executeStrategiesForItem(itemId, userId);
 
         if (strategyResult.success) {
-          console.log(
-            `✅ Successfully recalculated price for ${itemId} after competitor removal`
-          );
           strategyExecuted = true;
         }
       } catch (strategyError) {
@@ -2601,36 +2559,20 @@ router.post(
         .filter((price) => !isNaN(price) && price > 0);
       const newLowest = allPrices.length > 0 ? Math.min(...allPrices) : null;
 
-      console.log(`💰 Price comparison for ${itemId}:`, {
-        currentLowest,
-        newLowest,
-        priceDropped: newLowest < currentLowest,
-      });
-
       // Check if we have a new lower price and automatically execute strategy
       let strategyExecuted = false;
       let strategyResult = null;
 
       if (newLowest && (!currentLowest || newLowest < currentLowest)) {
-        console.log(
-          `🔔 New lower competitor price detected for ${itemId}: ${newLowest}`
-        );
-
         try {
           // Import and execute strategy for this item
           const { executeStrategiesForItem } = await import(
             '../services/strategyService.js'
           );
 
-          console.log(
-            `🚀 Auto-executing strategies for ${itemId} due to lower competitor price`
-          );
           strategyResult = await executeStrategiesForItem(itemId, userId);
 
           if (strategyResult.success && strategyResult.priceChanges > 0) {
-            console.log(
-              `💰 Successfully updated price for ${itemId} based on new competitor`
-            );
             strategyExecuted = true;
           }
         } catch (strategyError) {
@@ -2675,10 +2617,6 @@ router.get('/get-manual-competitors/:itemId', async (req, res) => {
     const { itemId } = req.params;
     const { userId } = req.query;
 
-    console.log(
-      `📊 Getting manual competitors for itemId: ${itemId}, userId: ${userId}`
-    );
-
     if (!userId) {
       return res.status(400).json({
         success: false,
@@ -2693,23 +2631,6 @@ router.get('/get-manual-competitors/:itemId', async (req, res) => {
       userId,
       itemId,
     });
-
-    console.log(
-      `📊 Found competitor doc:`,
-
-      manualCompetitorDoc
-        ? {
-            id: manualCompetitorDoc._id,
-            competitorCount: manualCompetitorDoc.competitors?.length || 0,
-            competitors: manualCompetitorDoc.competitors?.map((c) => ({
-              competitorItemId: c.competitorItemId,
-              itemId: c.itemId,
-              title: c.title?.substring(0, 30),
-              price: c.price,
-            })),
-          }
-        : 'No document found'
-    );
 
     if (!manualCompetitorDoc || !manualCompetitorDoc.competitors.length) {
       return res.json({
@@ -2735,16 +2656,6 @@ router.get('/get-manual-competitors/:itemId', async (req, res) => {
       addedAt: comp.addedAt,
       source: 'Manual',
     }));
-
-    console.log(
-      `📊 Returning ${competitors.length} competitors for ${itemId}:`,
-      competitors.map((c) => ({
-        itemId: c.itemId,
-        competitorItemId: c.competitorItemId,
-        title: c.title?.substring(0, 50),
-        price: c.price,
-      }))
-    );
 
     res.json({
       success: true,
@@ -2781,10 +2692,6 @@ router.post('/trigger-monitoring', requireAuth, async (req, res) => {
       });
     }
 
-    console.log(
-      `🔄 Triggering REAL competitor monitoring for user ${userId}...`
-    );
-
     // Import and execute REAL competitor monitoring (no fake price changes)
     const { updateCompetitorPrices, executeStrategiesForAllItems } =
       await import('../services/competitorMonitoringService.js');
@@ -2812,12 +2719,6 @@ router.post('/trigger-monitoring', requireAuth, async (req, res) => {
 router.post('/execute-strategies', requireAuth, async (req, res) => {
   try {
     const { userId, itemId } = req.body;
-
-    console.log(
-      `🎯 Executing strategies for ${
-        itemId ? `item ${itemId}` : 'all items'
-      } (no fake price changes)...`
-    );
 
     const { triggerStrategyForItem, executeStrategiesForAllItems } =
       await import('../services/competitorMonitoringService.js');

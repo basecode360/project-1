@@ -9,7 +9,6 @@ import cron from 'node-cron';
  */
 export async function updateCompetitorPrices() {
   try {
-    console.log('🔄 Starting competitor price update cycle...');
 
     const { default: ManualCompetitor } = await import(
       '../models/ManualCompetitor.js'
@@ -35,7 +34,6 @@ export async function updateCompetitorPrices() {
         }
 
         // Only execute strategies based on existing competitor data
-        console.log(`🎯 Executing strategy for ${doc.itemId}...`);
 
         const strategyResult = await triggerStrategyForItem(
           doc.itemId,
@@ -44,7 +42,6 @@ export async function updateCompetitorPrices() {
 
         if (strategyResult.success) {
           strategiesTriggered++;
-          console.log(`✅ Successfully executed strategy for ${doc.itemId}`);
         }
 
         // Update last monitoring check
@@ -58,9 +55,6 @@ export async function updateCompetitorPrices() {
       }
     }
 
-    console.log(
-      `✅ Competitor monitoring completed: ${strategiesTriggered} strategies executed`
-    );
     return { totalChecked, totalUpdated, strategiesTriggered };
   } catch (error) {
     console.error('❌ Error in updateCompetitorPrices:', error);
@@ -73,14 +67,12 @@ export async function updateCompetitorPrices() {
  */
 export async function triggerStrategyForItem(itemId, userId) {
   try {
-    console.log(`🎯 Triggering strategy execution for item ${itemId}`);
 
     const { executeStrategiesForItem } = await import('./strategyService.js');
     const result = await executeStrategiesForItem(itemId, userId);
 
     return result;
   } catch (error) {
-    console.error(`❌ Error executing strategy for ${itemId}:`, error);
     return { success: false, error: error.message };
   }
 }
@@ -90,8 +82,6 @@ export async function triggerStrategyForItem(itemId, userId) {
  */
 export async function executeStrategiesForAllItems() {
   try {
-    console.log('🚀 Executing strategies for all items with competitors...');
-
     const { default: ManualCompetitor } = await import(
       '../models/ManualCompetitor.js'
     );
@@ -136,19 +126,16 @@ export async function executeStrategiesForAllItems() {
  * Start the automated monitoring system
  */
 export function startCompetitorMonitoring() {
-  console.log('🚀 Starting competitor monitoring service...');
 
   // Run every 20 minutes
   cron.schedule('*/20 * * * *', async () => {
     try {
-      console.log('⏰ Running scheduled competitor monitoring...');
       await updateCompetitorPrices();
     } catch (error) {
       console.error('❌ Error in scheduled competitor monitoring:', error);
     }
   });
 
-  console.log('✅ Competitor monitoring service started');
 }
 
 /**

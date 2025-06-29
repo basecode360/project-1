@@ -305,45 +305,20 @@ export default function EditStrategy() {
         return;
       }
 
-      // Step 1: Update the strategy with new min/max prices
-      const updatePayload = {
-        strategyName: selectedStrategyObj.strategyName,
-        repricingRule: selectedStrategyObj.repricingRule,
-        description: selectedStrategyObj.description,
-        beatBy: selectedStrategyObj.beatBy,
-        stayAboveBy: selectedStrategyObj.stayAboveBy,
-        value: selectedStrategyObj.value,
-        noCompetitionAction: selectedStrategyObj.noCompetitionAction,
-        minPrice: parseFloat(formData.minPrice),
-        maxPrice: parseFloat(formData.maxPrice),
-        isActive: selectedStrategyObj.isActive,
-        isDefault: selectedStrategyObj.isDefault,
-      };
-
-      const strategyResponse =
-        await apiService.pricingStrategies.updateStrategy(
-          selectedStrategyObj._id,
-          updatePayload
-        );
-
-      if (!strategyResponse.success) {
-        showAlert(
-          'Failed to update strategy: ' + strategyResponse.message,
-          'error'
-        );
-        return;
-      }
-
+      // FIXED: Apply strategy to this specific product with listing-specific min/max prices
       const applyResponse =
-        await apiService.pricingStrategies.applyStrategyToProduct(productId, [
-          selectedStrategyObj._id,
-        ]);
+        await apiService.pricingStrategies.applyStrategyToProduct(productId, {
+          strategyId: selectedStrategyObj._id,
+          sku: product?.sku || null,
+          title: product?.productTitle || null,
+          minPrice: parseFloat(formData.minPrice),
+          maxPrice: parseFloat(formData.maxPrice),
+        });
 
       if (!applyResponse.success) {
         showAlert(
-          'Strategy updated but failed to apply to product: ' +
-            applyResponse.message,
-          'warning'
+          'Failed to apply strategy to product: ' + applyResponse.message,
+          'error'
         );
         return;
       }
@@ -355,11 +330,11 @@ export default function EditStrategy() {
 
       if (priceUpdated) {
         showAlert(
-          'Strategy updated, applied to product, and price updated automatically!',
+          'Strategy applied to product and price updated automatically!',
           'success'
         );
       } else {
-        showAlert('Strategy updated and applied successfully!', 'success');
+        showAlert('Strategy applied successfully!', 'success');
       }
 
       // Force immediate refresh with multiple signals

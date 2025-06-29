@@ -107,21 +107,21 @@ const pricingStrategySchema = new mongoose.Schema({
     default: 'USE_MAX_PRICE',
   },
 
-  // Price Constraints
-  maxPrice: {
-    type: Number,
-    min: [0, 'Maximum price cannot be negative'],
-  },
-  minPrice: {
-    type: Number,
-    min: [0, 'Minimum price cannot be negative'],
-    validate: {
-      validator: function (v) {
-        return !this.maxPrice || v <= this.maxPrice;
-      },
-      message: 'Minimum price cannot be greater than maximum price',
-    },
-  },
+  // Remove these fields from the main strategy document
+  // maxPrice: {
+  //   type: Number,
+  //   min: [0, 'Maximum price cannot be negative'],
+  // },
+  // minPrice: {
+  //   type: Number,
+  //   min: [0, 'Minimum price cannot be negative'],
+  //   validate: {
+  //     validator: function (v) {
+  //       return !this.maxPrice || v <= this.maxPrice;
+  //     },
+  //     message: 'Minimum price cannot be greater than maximum price',
+  //   },
+  // },
 
   // Advanced Options
   isActive: {
@@ -144,6 +144,15 @@ const pricingStrategySchema = new mongoose.Schema({
         dateApplied: {
           type: Date,
           default: Date.now,
+        },
+        // Add listing-specific min/max prices here
+        minPrice: {
+          type: Number,
+          min: [0, 'Minimum price cannot be negative'],
+        },
+        maxPrice: {
+          type: Number,
+          min: [0, 'Maximum price cannot be negative'],
         },
       },
     ],
@@ -231,7 +240,13 @@ pricingStrategySchema.pre('validate', function (next) {
 });
 
 // Instance method to apply strategy to an item
-pricingStrategySchema.methods.applyToItem = function (itemId, sku, title) {
+pricingStrategySchema.methods.applyToItem = function (
+  itemId,
+  sku,
+  title,
+  minPrice,
+  maxPrice
+) {
   // Check if this item is already in the appliesTo array
   const existingIndex = this.appliesTo.findIndex(
     (item) =>
@@ -244,11 +259,17 @@ pricingStrategySchema.methods.applyToItem = function (itemId, sku, title) {
       sku,
       title,
       dateApplied: new Date(),
+      minPrice: minPrice || null,
+      maxPrice: maxPrice || null,
     });
   } else {
     // Update existing entry
     this.appliesTo[existingIndex].dateApplied = new Date();
     if (title) this.appliesTo[existingIndex].title = title;
+    if (minPrice !== undefined)
+      this.appliesTo[existingIndex].minPrice = minPrice;
+    if (maxPrice !== undefined)
+      this.appliesTo[existingIndex].maxPrice = maxPrice;
   }
 
   return this.save();

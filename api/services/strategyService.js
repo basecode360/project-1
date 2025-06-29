@@ -63,10 +63,6 @@ export async function createStrategy(data) {
 
   const savedStrategy = await strategy.save();
 
-  console.log(
-    `✅ Strategy "${strategyName}" created successfully WITHOUT auto-applying to any listings`
-  );
-
   return savedStrategy;
 }
 
@@ -222,16 +218,29 @@ export async function applyStrategyToItems(idOrStrategyId, items) {
       continue;
     }
     try {
+      // Remove any existing entry for this item/sku
+      strategy.appliesTo = strategy.appliesTo.filter(
+        (entry) =>
+          !(
+            entry.itemId === item.itemId &&
+            (!item.sku || entry.sku === item.sku)
+          )
+      );
+      // Add new entry with per-listing min/max
       strategy.appliesTo.push({
         itemId: item.itemId,
         sku: item.sku || null,
         title: item.title || null,
         dateApplied: new Date(),
+        minPrice: item.minPrice !== undefined ? item.minPrice : null,
+        maxPrice: item.maxPrice !== undefined ? item.maxPrice : null,
       });
       results.push({
         success: true,
         itemId: item.itemId,
         sku: item.sku || null,
+        minPrice: item.minPrice,
+        maxPrice: item.maxPrice,
       });
     } catch (err) {
       results.push({
@@ -242,12 +251,9 @@ export async function applyStrategyToItems(idOrStrategyId, items) {
       });
     }
   }
-
-  // Update usageCount + lastUsed
   strategy.usageCount += results.filter((r) => r.success).length;
   strategy.lastUsed = new Date();
   await strategy.save();
-
   return results;
 }
 
@@ -361,15 +367,9 @@ function calculateNewPrice(strategy, competitorPrice, currentPrice) {
 
   // Apply min/max price constraints from the strategy
   if (strategy.minPrice && newPrice < strategy.minPrice) {
-    console.log(
-      `🔼 Price ${newPrice} below minimum ${strategy.minPrice}, adjusting to minimum`
-    );
     newPrice = strategy.minPrice;
   }
   if (strategy.maxPrice && newPrice > strategy.maxPrice) {
-    console.log(
-      `🔽 Price ${newPrice} above maximum ${strategy.maxPrice}, adjusting to maximum`
-    );
     newPrice = strategy.maxPrice;
   }
 
@@ -382,9 +382,6 @@ function calculateNewPrice(strategy, competitorPrice, currentPrice) {
 
     // If calculated price is significantly lower than max price, use max price
     if (strategy.maxPrice - calculatedPrice >= 2) {
-      console.log(
-        `💡 Using max price ${strategy.maxPrice} instead of calculated ${calculatedPrice} (gap >= $2)`
-      );
       newPrice = strategy.maxPrice;
     }
   }
@@ -438,24 +435,17 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
 
     // Skip recording if prices are the same (no actual change)
     if (oldPrice && newPrice && Math.abs(newPrice - oldPrice) < 0.01) {
-      console.log(
-        `⚠️ Skipping price history - no actual price change for ${itemId} (${oldPrice} → ${newPrice})`
-      );
       return;
     }
 
     // Only record if there was a meaningful price change
     if (!executionData.priceChanged || !executionData.success) {
-      console.log(
-        `⚠️ Skipping price history - execution failed or no price change for ${itemId}`
-      );
       return;
     }
 
     // Check if we recently recorded for this item with same price
     const recentRecordKey = `${itemId}_${newPrice}`;
     if (executionCache.has(recentRecordKey)) {
-      console.log(`⚠️ Skipping duplicate price history record for ${itemId}`);
       return;
     }
 
@@ -474,9 +464,6 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
       });
 
       if (existingRecord) {
-        console.log(
-          `⚠️ Identical price record found for ${itemId}, skipping duplicate`
-        );
         return;
       }
 
@@ -531,15 +518,6 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
         },
       };
 
-      console.log('💾 Recording ACTUAL price change:', {
-        itemId,
-        strategyName: historyRecord.strategyName,
-        oldPrice: historyRecord.oldPrice,
-        newPrice: historyRecord.newPrice,
-        changeAmount: historyRecord.changeAmount,
-        changeDirection: historyRecord.changeDirection,
-      });
-
       const savedRecord = await new PriceHistory(historyRecord).save();
 
       // Mark this record to prevent immediate duplicates
@@ -547,8 +525,6 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
       setTimeout(() => {
         executionCache.delete(recentRecordKey);
       }, 2 * 60 * 1000); // 2 minutes cache
-
-      console.log('✅ Price history record saved with ID:', savedRecord._id);
 
       return savedRecord;
     } catch (historyError) {
@@ -638,10 +614,6 @@ async function updateEbayPrice(itemId, newPrice) {
     const result = await directUpdatePrice(itemId, itemSku, newPrice, userId);
 
     if (result.success) {
-      console.log(
-        `✅ Successfully updated eBay price for ${itemId} to ${newPrice}`
-      );
-
       // Trigger related item sync after a delay
       setTimeout(() => {
         triggerRelatedItemSync(itemId);
@@ -709,11 +681,6 @@ async function triggerRelatedItemSync(changedItemId) {
  */
 async function executePricingStrategy(itemId, strategy) {
   try {
-    console.log(`🔄 Executing pricing strategy for item ${itemId}:`, {
-      strategyName: strategy.strategyName,
-      repricingRule: strategy.repricingRule,
-    });
-
     // Get current competitor price
     const inventoryModule = await import('./inventoryService.js');
     const { getCompetitorPrice } = inventoryModule;
@@ -725,7 +692,6 @@ async function executePricingStrategy(itemId, strategy) {
       competitorPrice = parseFloat(
         competitorData.price.replace(/[^0-9.]/g, '')
       );
-      console.log(`📊 Competitor price found: $${competitorPrice}`);
     }
 
     // Get current eBay price for this item
@@ -741,21 +707,14 @@ async function executePricingStrategy(itemId, strategy) {
       };
     }
 
-    console.log(`💰 Current eBay price: $${currentPrice}`);
-
     // Calculate new price based on strategy
     const newPrice = calculateNewPrice(strategy, competitorPrice, currentPrice);
-    console.log(`🎯 Calculated new price: $${newPrice}`);
 
     // ENHANCED: More precise price change detection
     const priceChangeAmount = Math.abs(newPrice - currentPrice);
     const needsPriceUpdate = priceChangeAmount >= 0.01;
 
     if (!needsPriceUpdate) {
-      console.log(
-        `✅ Price already optimal for ${itemId}: $${currentPrice} (difference: $${priceChangeAmount})`
-      );
-
       return {
         success: true,
         reason: 'Price already optimal',
@@ -768,11 +727,6 @@ async function executePricingStrategy(itemId, strategy) {
     }
 
     // Update the price on eBay
-    console.log(
-      `🔄 Updating price for ${itemId} from $${currentPrice} to $${newPrice} (change: $${(
-        newPrice - currentPrice
-      ).toFixed(2)})`
-    );
 
     const updateResult = await updateEbayPrice(itemId, newPrice);
 
@@ -790,10 +744,6 @@ async function executePricingStrategy(itemId, strategy) {
         apiResponse: updateResult,
         competitorCount: competitorData.count || 0,
       });
-
-      console.log(
-        `✅ Successfully executed strategy for ${itemId}: $${currentPrice} → $${newPrice}`
-      );
 
       return {
         success: true,
@@ -894,7 +844,6 @@ export async function executeStrategiesForItem(itemId, userId = null) {
   try {
     // FIXED: Check cooldown to prevent rapid executions
     if (isItemInCooldown(itemId)) {
-      console.log(`⏸️ Item ${itemId} is in cooldown, skipping execution`);
       return {
         success: true,
         message: `Item ${itemId} was recently processed, skipping to prevent duplicates`,
@@ -905,8 +854,6 @@ export async function executeStrategiesForItem(itemId, userId = null) {
       };
     }
 
-    console.log(`🚀 Starting strategy execution for item ${itemId}`);
-
     // Mark item as being executed
     markItemExecuted(itemId);
 
@@ -914,7 +861,6 @@ export async function executeStrategiesForItem(itemId, userId = null) {
     const strategies = await getStrategiesForItem(itemId);
 
     if (!strategies || strategies.length === 0) {
-      console.log(`⚠️ No strategies found for item ${itemId}`);
       return {
         success: false,
         message: `No strategies found for item ${itemId}`,
@@ -922,14 +868,11 @@ export async function executeStrategiesForItem(itemId, userId = null) {
       };
     }
 
-    console.log(`📋 Found ${strategies.length} strategies for item ${itemId}`);
     const results = [];
 
     // Execute each strategy (usually there should be only one)
     for (const strategy of strategies) {
       try {
-        console.log(`🔄 Executing strategy: ${strategy.strategyName}`);
-
         const executionResult = await executePricingStrategy(itemId, strategy);
 
         results.push({
@@ -1075,17 +1018,10 @@ export async function applyStrategiesToItem(itemId, strategyIds, sku = null) {
  */
 export async function getStrategyDisplayForProduct(itemId, sku = null) {
   try {
-    console.log(
-      `🔍 Getting strategy display for product ${itemId}${
-        sku ? ` with SKU ${sku}` : ''
-      }`
-    );
-
     // Get strategies applied to this item
     const strategies = await getStrategiesForItem(itemId, sku);
 
     if (!strategies || strategies.length === 0) {
-      console.log(`⚠️ No strategies found for item ${itemId}`);
       return {
         strategy: 'Assign Strategy',
         minPrice: 'Set',
@@ -1099,36 +1035,40 @@ export async function getStrategyDisplayForProduct(itemId, sku = null) {
     // Use the first (most recent) strategy
     const primaryStrategy = strategies[0];
 
-    console.log(`✅ Found strategy for ${itemId}:`, {
-      strategyName: primaryStrategy.strategyName,
-      repricingRule: primaryStrategy.repricingRule,
-      minPrice: primaryStrategy.minPrice,
-      maxPrice: primaryStrategy.maxPrice,
-      value: primaryStrategy.value,
-      beatBy: primaryStrategy.beatBy,
-      stayAboveBy: primaryStrategy.stayAboveBy,
-    });
+    // Find the appliesTo entry for this item/sku
+    let appliesToEntry = primaryStrategy.appliesTo.find(
+      (entry) => entry.itemId === itemId && (!sku || entry.sku === sku)
+    );
 
     return {
-      strategy: primaryStrategy.strategyName, // Just use the actual strategy name
-      minPrice: primaryStrategy.minPrice
-        ? `$${primaryStrategy.minPrice.toFixed(2)}`
-        : 'Set',
-      maxPrice: primaryStrategy.maxPrice
-        ? `$${primaryStrategy.maxPrice.toFixed(2)}`
-        : 'Set',
+      strategy: primaryStrategy.strategyName,
+      minPrice:
+        appliesToEntry &&
+        appliesToEntry.minPrice !== undefined &&
+        appliesToEntry.minPrice !== null
+          ? `$${parseFloat(appliesToEntry.minPrice).toFixed(2)}`
+          : 'Set',
+      maxPrice:
+        appliesToEntry &&
+        appliesToEntry.maxPrice !== undefined &&
+        appliesToEntry.maxPrice !== null
+          ? `$${parseFloat(appliesToEntry.maxPrice).toFixed(2)}`
+          : 'Set',
       hasStrategy: true,
       appliedStrategies: strategies,
       strategyCount: strategies.length,
       repricingRule: primaryStrategy.repricingRule,
-      strategyName: primaryStrategy.strategyName, // Keep original name for reference
+      strategyName: primaryStrategy.strategyName,
       value: primaryStrategy.value,
       beatBy: primaryStrategy.beatBy,
       stayAboveBy: primaryStrategy.stayAboveBy,
-      rawStrategy: primaryStrategy, // Include the full strategy object for debugging
+      rawStrategy: {
+        ...primaryStrategy.toObject(),
+        minPrice: appliesToEntry?.minPrice,
+        maxPrice: appliesToEntry?.maxPrice,
+      },
     };
   } catch (error) {
-    console.error(`❌ Error getting strategy display for ${itemId}:`, error);
     return {
       strategy: 'Assign Strategy',
       minPrice: 'Set',
@@ -1140,4 +1080,3 @@ export async function getStrategyDisplayForProduct(itemId, sku = null) {
     };
   }
 }
-

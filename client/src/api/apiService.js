@@ -417,17 +417,40 @@ const pricingStrategies = {
       throw err;
     }
   },
-  applyStrategyToProduct: async (itemId, strategyIds) => {
+  applyStrategyToProduct: async (itemId, strategyData) => {
     try {
-      const resp = await pricingClient.post(`/products/${itemId}`, {
-        strategyIds: Array.isArray(strategyIds) ? strategyIds : [strategyIds],
-      });
-      return resp.data;
-    } catch (err) {
-      if (err.response?.status === 401) {
-        throw new Error('Authentication failed. Please log in again.');
+      // Handle both array and single strategy formats
+      if (Array.isArray(strategyData) && strategyData.length === 1) {
+        const item = strategyData[0];
+        // Use pricingClient directly instead of makeRequest
+        const response = await pricingClient.post(`/products/${itemId}/apply`, {
+          strategyId: item.strategyId || item._id,
+          sku: item.sku,
+          title: item.title,
+          minPrice: item.minPrice,
+          maxPrice: item.maxPrice,
+        });
+        return response.data;
+      } else if (!Array.isArray(strategyData)) {
+        // Handle single object format
+        const response = await pricingClient.post(`/products/${itemId}/apply`, {
+          strategyId: strategyData.strategyId || strategyData._id,
+          sku: strategyData.sku,
+          title: strategyData.title,
+          minPrice: strategyData.minPrice,
+          maxPrice: strategyData.maxPrice,
+        });
+        return response.data;
+      } else {
+        // Handle multiple items or old format
+        const response = await pricingClient.post('/apply', {
+          items: strategyData,
+        });
+        return response.data;
       }
-      throw err;
+    } catch (error) {
+      console.error('Error applying strategy to product:', error);
+      throw error;
     }
   },
 
@@ -500,97 +523,28 @@ const pricingStrategies = {
   },
   getStrategyDisplayForProduct: async (itemId, sku = null) => {
     try {
-      const params = sku ? `?sku=${encodeURIComponent(sku)}` : '';
-
-      // Add cache-busting timestamp to prevent stale data
-      const cacheBuster = `${params ? '&' : '?'}t=${Date.now()}`;
-
-      console.log(`📊 Fetching strategy display for ${itemId}...`);
-
+      const queryParams = sku ? `?sku=${encodeURIComponent(sku)}` : '';
       const response = await pricingClient.get(
-        `/products/${itemId}/display${params}${cacheBuster}`
+        `/products/${itemId}/display${queryParams}`
       );
-
-      console.log(`📊 Strategy display response for ${itemId}:`, response.data);
-
-      if (response.data.success) {
-        return response.data;
-      } else {
-        console.warn(
-          `⚠️ Strategy display failed for ${itemId}:`,
-          response.data
-        );
-        return {
-          success: false,
-          error: response.data.message || 'Failed to get strategy display',
-          data: {
-            strategy: 'Assign Strategy',
-            minPrice: 'Set',
-            maxPrice: 'Set',
-            hasStrategy: false,
-          },
-        };
-      }
+      return response.data;
     } catch (error) {
-      console.error(`❌ Error fetching strategy display for ${itemId}:`, error);
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-        data: {
-          strategy: 'Assign Strategy',
-          minPrice: 'Set',
-          maxPrice: 'Set',
-          hasStrategy: false,
-        },
-      };
+      console.error('Error getting strategy display:', error);
+      throw error;
     }
   },
 
   updatePrice: async (itemId) => {
     try {
-      const response = await pricingClient.post(
-        `/products/${itemId}/update-price`
-      );
+      const response = await pricingClient.post(`/products/${itemId}/execute`);
       return response.data;
     } catch (error) {
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-      };
+      console.error('Error updating price:', error);
+      throw error;
     }
   },
 
-  updateStrategy: async (strategyId, updateData) => {
-    try {
-      const response = await pricingClient.put(`/${strategyId}`, updateData);
-      return response.data;
-    } catch (error) {
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-      };
-    }
-  },
-
-  // Add new method to get strategy directly from MongoDB price history
-  getAppliedStrategyFromMongo: async (itemId) => {
-    try {
-      const userId = localStorage.getItem('user_id');
-      const response = await pricingClient.get(
-        `/products/${itemId}/mongo-strategy`,
-        {
-          params: { userId },
-        }
-      );
-      return response.data;
-    } catch (error) {
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-        data: null,
-      };
-    }
-  },
+  // ...existing code...
 };
 
 /** ————————————— COMPETITOR RULES ————————————— **/
