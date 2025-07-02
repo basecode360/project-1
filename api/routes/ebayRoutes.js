@@ -6,8 +6,15 @@ import getEbayListings from '../controllers/ebayController.js';
 import fetchProducts from '../services/getInventory.js';
 import editProductService from '../services/editProduct.js';
 import User from '../models/Users.js';
+import {
+  ebayRateLimit,
+  logEbayUsage,
+} from '../middleware/rateLimitMiddleware.js';
 
 const router = express.Router();
+
+// Apply rate limiting and usage logging to all routes
+router.use(logEbayUsage);
 
 // ── Helper Functions ────────────────────────────────────────────────────────────
 
@@ -51,43 +58,50 @@ async function makeEBayAPICall(xmlRequest, callName) {
 
 // ── Routes ──────────────────────────────────────────────────────────────────────
 
-router.get('/active-listings', fetchProducts.getActiveListings);
+router.get(
+  '/active-listings',
+  ebayRateLimit('GetMyeBaySelling'),
+  fetchProducts.getActiveListings
+);
 
 /**
  * Get competitor prices for a specific item
  */
-router.get('/competitor-prices/:itemId', async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const { userId } = req.query;
+router.get(
+  '/competitor-prices/:itemId',
+  ebayRateLimit('GetItem'),
+  async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const { userId } = req.query;
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'userId is required in query parameters',
-      });
-    }
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'userId is required in query parameters',
+        });
+      }
 
-    // Get user's eBay token
-    const user = await User.findById(userId);
-    if (!user || !user.ebay.accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'No eBay credentials found for this user',
-      });
-    }
+      // Get user's eBay token
+      const user = await User.findById(userId);
+      if (!user || !user.ebay.accessToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'No eBay credentials found for this user',
+        });
+      }
 
-    const oauthToken = user.ebay.accessToken;
-    const appId = process.env.CLIENT_ID; // Browse API
+      const oauthToken = user.ebay.accessToken;
+      const appId = process.env.CLIENT_ID; // Browse API
 
-    if (!oauthToken) {
-      return res
-        .status(400)
-        .json({ success: false, message: 'eBay auth token is required' });
-    }
+      if (!oauthToken) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'eBay auth token is required' });
+      }
 
-    // 1) GetItem request (Trading API)
-    const getItemXml = `
+      // 1) GetItem request (Trading API)
+      const getItemXml = `
       <?xml version="1.0" encoding="utf-8"?>
       <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
         <RequesterCredentials>
@@ -98,110 +112,131 @@ router.get('/competitor-prices/:itemId', async (req, res) => {
         <IncludeItemSpecifics>true</IncludeItemSpecifics>
       </GetItemRequest>
     `;
-    const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
-    const parsedItem = await parseXMLResponse(getItemResponse);
-    const itemResult = isEBayResponseSuccessful(parsedItem, 'GetItem');
-    const item = itemResult.Item;
-    if (!item) {
-      throw new Error(`Item ${itemId} not found`);
-    }
-
-    // Extract title & category for Browse call
-    const title = item.Title || '';
-    const categoryId = item.PrimaryCategory?.CategoryID || '';
-
-    // 2) Browse API competitor prices
-    const query = new URLSearchParams({
-      q: title,
-      category_ids: categoryId,
-      limit: 20,
-      sort: 'price',
-    });
-    const browseResponse = await axios.get(
-      `https://api.ebay.com/buy/browse/v1/item_summary/search?${query.toString()}`,
-      {
-        headers: {
-          Authorization: `Bearer ${oauthToken}`, // Fixed to use oauthToken
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
+      const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
+      const parsedItem = await parseXMLResponse(getItemResponse);
+      const itemResult = isEBayResponseSuccessful(parsedItem, 'GetItem');
+      const item = itemResult.Item;
+      if (!item) {
+        throw new Error(`Item ${itemId} not found`);
       }
-    );
 
-    const items = browseResponse.data.itemSummaries || [];
-    const competitorPrices = items
-      .filter((i) => i.itemId !== itemId)
-      .map((i) => {
-        const price = parseFloat(i.price.value);
-        const shipping = parseFloat(
-          i.shippingOptions?.[0]?.shippingCost?.value || '0'
-        );
-        return +(price + shipping).toFixed(2);
-      })
-      .filter((p) => !isNaN(p) && p > 0);
+      // Extract title & category for Browse call
+      const title = item.Title || '';
+      const categoryId = item.PrimaryCategory?.CategoryID || '';
 
-    res.json({
-      success: true,
-      itemId,
-      itemTitle: item.Title,
-      competitorPrices: {
-        allData: items.map((i) => ({
-          id: i.itemId,
-          title: i.title,
-          price: parseFloat(i.price.value),
-          shipping:
-            parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || '0') || 0,
-          imageurl: i.thumbnailImages[0]?.imageUrl || '',
-          seller: i.seller?.username,
-          condition: i.condition,
-          productUrl: i.itemWebUrl,
-          locale: i.itemLocation?.country,
-        })),
-        lowestPrice:
-          competitorPrices.length > 0 ? Math.min(...competitorPrices) : 0,
-        allPrices: competitorPrices,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching competitor prices:', error);
-    if (error.message.includes('rate limit')) {
-      return res.status(429).json({
-        success: false,
-        message: 'eBay API rate limit exceeded. Try again later.',
-        error: error.message,
+      // 2) Browse API competitor prices
+      const query = new URLSearchParams({
+        q: title,
+        category_ids: categoryId,
+        limit: 20,
+        sort: 'price',
       });
+      const browseResponse = await axios.get(
+        `https://api.ebay.com/buy/browse/v1/item_summary/search?${query.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${oauthToken}`, // Fixed to use oauthToken
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
+
+      const items = browseResponse.data.itemSummaries || [];
+      const competitorPrices = items
+        .filter((i) => i.itemId !== itemId)
+        .map((i) => {
+          const price = parseFloat(i.price.value);
+          const shipping = parseFloat(
+            i.shippingOptions?.[0]?.shippingCost?.value || '0'
+          );
+          return +(price + shipping).toFixed(2);
+        })
+        .filter((p) => !isNaN(p) && p > 0);
+
+      res.json({
+        success: true,
+        itemId,
+        itemTitle: item.Title,
+        competitorPrices: {
+          allData: items.map((i) => ({
+            id: i.itemId,
+            title: i.title,
+            price: parseFloat(i.price.value),
+            shipping:
+              parseFloat(i.shippingOptions?.[0]?.shippingCost?.value || '0') ||
+              0,
+            imageurl: i.thumbnailImages[0]?.imageUrl || '',
+            seller: i.seller?.username,
+            condition: i.condition,
+            productUrl: i.itemWebUrl,
+            locale: i.itemLocation?.country,
+          })),
+          lowestPrice:
+            competitorPrices.length > 0 ? Math.min(...competitorPrices) : 0,
+          allPrices: competitorPrices,
+        },
+        // Include usage info in response
+        apiUsage: req.ebayUsage,
+      });
+    } catch (error) {
+      console.error('Error fetching competitor prices:', error);
+      if (
+        error.message.includes('rate limit') ||
+        error.message.includes('usage limit')
+      ) {
+        return res.status(429).json({
+          success: false,
+          message: 'eBay API rate limit exceeded. Please try again later.',
+          error: error.message,
+          retryAfter: 3600, // 1 hour in seconds
+        });
+      }
+      return res.status(500).json({ success: false, message: error.message });
     }
-    return res.status(500).json({ success: false, message: error.message });
   }
-});
+);
 
 /**
  * Get active listings via feed
  */
-router.get('/active-listingsviaFeed', fetchProducts.getActiveListingsViaFeed);
+router.get(
+  '/active-listingsviaFeed',
+  ebayRateLimit('GetMyeBaySelling'),
+  fetchProducts.getActiveListingsViaFeed
+);
 
 /**
  * Get item variations for a specific item
  */
-router.get('/item-variations/:itemId', editProductService.getItemVariations);
+router.get(
+  '/item-variations/:itemId',
+  ebayRateLimit('GetItem'),
+  editProductService.getItemVariations
+);
 
 /**
  * Edit variation price for a specific variation
  */
-router.post('/edit-variation-price', editProductService.editVariationPrice);
+router.post(
+  '/edit-variation-price',
+  ebayRateLimit('ReviseInventoryStatus'),
+  editProductService.editVariationPrice
+);
 
 /**
  * Edit all variations prices for an item
  */
 router.post(
   '/edit-all-variations-price',
+  ebayRateLimit('ReviseInventoryStatus'),
   editProductService.editAllVariationsPrices
 );
 
 /**
  * Get item details by ID
  */
-router.get('/item/:itemId', async (req, res) => {
+router.get('/item/:itemId', ebayRateLimit('GetItem'), async (req, res) => {
   try {
     const { itemId } = req.params;
     const { userId } = req.query;
@@ -262,9 +297,22 @@ router.get('/item/:itemId', async (req, res) => {
         endTime: item.EndTime,
         listingStatus: item.SellingStatus?.ListingStatus,
       },
+      // Include usage info in response
+      apiUsage: req.ebayUsage,
     });
   } catch (error) {
     console.error('eBay Get Item Error:', error.message);
+    if (
+      error.message.includes('rate limit') ||
+      error.message.includes('usage limit')
+    ) {
+      return res.status(429).json({
+        success: false,
+        message: 'eBay API rate limit exceeded. Please try again later.',
+        error: error.message,
+        retryAfter: 3600,
+      });
+    }
     res.status(500).json({
       success: false,
       message: error.message,

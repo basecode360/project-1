@@ -32,7 +32,8 @@ import {
   TrendingFlat,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useProductStore } from '../store/productStore';
+import useProductStore from '../store/productStore';
+import { useAuth } from '../store/authStore';
 
 // Import your API service
 import apiService from '../api/apiService';
@@ -46,6 +47,7 @@ export default function ListingsTable({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [rows, setRows] = useState([]);
   const [listingsLoading, setListingsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -55,13 +57,22 @@ export default function ListingsTable({
   const [autoSyncInProgress, setAutoSyncInProgress] = useState(false);
   const [strategiesLoading, setStrategiesLoading] = useState(false);
   const {
+    loading,
+    getFilteredProducts,
+    sortBy: storeSortBy,
+    sortOrder,
+    modifySearch,
     modifyProductsArray,
-    modifyProductsId,
+    modifyProductsId, // Strategy-related updates
+    modifyProductsObj, // Competitor-related updates
+    modifyProductsIdWithNavigation,
+    modifyProductsObjWithNavigation,
+    updateProductById,
+    batchUpdateProducts,
+    setProductsLoading,
     AllProducts,
     modifySku,
     searchProduct,
-    modifyCompetitors,
-    modifyProductsObj,
   } = useProductStore();
 
   // Fetch data from eBay when component mounts
@@ -642,6 +653,50 @@ export default function ListingsTable({
       await fetchEbayListings();
     } catch (error) {
       console.error('Failed to update min/max:', error);
+    }
+  };
+
+  // Strategy-related product update (navigates to strategy form)
+  const handleStrategyUpdate = (productId, updates) => {
+    try {
+      modifyProductsIdWithNavigation(productId, updates, 'strategy');
+      console.log(`✅ Product ${productId} updated for strategy configuration`);
+    } catch (error) {
+      console.error(
+        `❌ Error updating product ${productId} for strategy:`,
+        error
+      );
+    }
+  };
+
+  // Competitor-related product update (navigates to competitor details)
+  const handleCompetitorUpdate = (productsData) => {
+    try {
+      modifyProductsObjWithNavigation(productsData, 'competitor');
+      console.log(
+        '✅ Bulk product update completed for competitor configuration'
+      );
+    } catch (error) {
+      console.error('❌ Error in competitor product update:', error);
+    }
+  };
+
+  // Regular product updates without navigation
+  const handleProductUpdate = (productId, updates) => {
+    try {
+      modifyProductsId(productId, updates);
+      console.log(`✅ Product ${productId} updated successfully`);
+    } catch (error) {
+      console.error(`❌ Error updating product ${productId}:`, error);
+    }
+  };
+
+  const handleBulkProductUpdate = (productsData) => {
+    try {
+      modifyProductsObj(productsData);
+      console.log('✅ Bulk product update completed');
+    } catch (error) {
+      console.error('❌ Error in bulk product update:', error);
     }
   };
 

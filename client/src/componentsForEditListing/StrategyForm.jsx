@@ -21,9 +21,8 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useProductStore } from '../store/productStore';
+import useProductStore from '../store/productStore';
 import apiService from '../api/apiService';
-
 
 export default function EditStrategy() {
   const { productId } = useParams(); // Get dynamic ID from route
@@ -314,15 +313,15 @@ export default function EditStrategy() {
         const newMin = parseFloat(formData.minPrice).toFixed(2);
         const newMax = parseFloat(formData.maxPrice).toFixed(2);
         if (typeof modifyProductsArray === 'function') {
-          modifyProductsArray(products =>
-            products.map(p =>
+          modifyProductsArray((products) =>
+            products.map((p) =>
               p.productId === productId
                 ? {
                     ...p,
                     strategy: selectedStrategyObj.strategyName,
                     minPrice: `$${newMin}`,
                     maxPrice: `$${newMax}`,
-                    hasStrategy: true
+                    hasStrategy: true,
                   }
                 : p
             )

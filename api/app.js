@@ -13,6 +13,7 @@ import authRoutes from './routes/authRoute.js';
 import pricingStrategiesRouter from './routes/pricingStrategies.js';
 import priceHistoryRoutes from './routes/priceHistory.js';
 import competitorRulesRouter from './routes/competitorRule.js';
+import ebayUsageRoutes from './routes/ebayUsageRoutes.js'; // Import the new routes
 
 // Models (if you need to attach models to `app.locals` or `app.set('models', {...})`)
 import PriceHistory from './models/PriceHistory.js';
@@ -62,6 +63,9 @@ app.use('/api/price-history', priceHistoryRoutes); // This should now work corre
 
 // 6) Competitor‐rules endpoints (create/edit/delete competitor rules, debug, etc.)
 app.use('/api/competitor-rules', competitorRulesRouter);
+
+// 7) eBay usage statistics routes
+app.use('/api/ebay-usage', ebayUsageRoutes); // Add the new routes
 
 // ── Basic sanity check endpoint ─────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -137,6 +141,80 @@ async function startServices() {
     console.log('✅ All background services started successfully');
   } catch (error) {
     console.error('❌ Error starting background services:', error);
+  }
+}
+
+// Add this after imports but before starting services
+async function checkApiLimitsBeforeStart() {
+  try {
+    console.log('🔍 Checking eBay API limits before starting services...');
+    
+    const ebayUsageService = await import('./services/ebayUsageService.js');
+    const getItemStatus = await ebayUsageService.default.canMakeAPICall('system', 'GetItem');
+    
+    console.log('📊 Current GetItem API status:', {
+      allowed: getItemStatus.allowed,
+      usage: getItemStatus.usage,
+      limit: getItemStatus.limit,
+      percentUsed: ((getItemStatus.usage / getItemStatus.limit) * 100).toFixed(1) + '%'
+    });
+    
+    if (!getItemStatus.allowed) {
+      console.log('🚨 WARNING: GetItem API limit exceeded!');
+      console.log('🛑 BACKGROUND SERVICES WILL NOT START to prevent further API calls');
+      console.log('⏰ Reset time:', getItemStatus.resetTime);
+      return false;
+    }
+    
+    if (getItemStatus.usage / getItemStatus.limit > 0.8) {
+      console.log('⚠️ WARNING: GetItem API usage > 80% - starting with reduced monitoring');
+      return 'reduced';
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Error checking API limits:', error);
+    return false;
+  }
+}
+
+// Modify your server startup section:
+async function startServer() {
+  try {
+    await connectToMongoDB();
+    
+    // Check API limits before starting any services
+    const apiStatus = await checkApiLimitsBeforeStart();
+    
+    if (apiStatus === false) {
+      console.log('🚨 Server starting in SAFE MODE - no background services');
+      console.log('💡 To start services manually, call: POST /api/competitor-rules/start-services');
+      // Don't start any monitoring services
+    } else if (apiStatus === 'reduced') {
+      console.log('⚠️ Server starting in REDUCED MODE - limited monitoring');
+      // Only start if explicitly enabled
+      if (process.env.ENABLE_SCHEDULER === 'true') {
+        const result = await startSchedulerService();
+        console.log('📊 Scheduler start result:', result);
+      }
+    } else {
+      console.log('✅ API limits OK - starting normal services');
+      if (process.env.ENABLE_SCHEDULER !== 'false') {
+        const result = await startSchedulerService();
+        console.log('📊 Scheduler start result:', result);
+      }
+    }
+    
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 Mode: ${apiStatus === false ? 'SAFE' : apiStatus === 'reduced' ? 'REDUCED' : 'NORMAL'}`);
+      console.log(`🔧 Scheduler enabled: ${process.env.ENABLE_SCHEDULER !== 'false'}`);
+    });
+    
+  } catch (error) {
+    console.error('❌ Server startup failed:', error);
+    process.exit(1);
   }
 }
 
