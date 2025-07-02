@@ -1,4 +1,4 @@
-// src/AppRoutes.jsx
+// src/AppRoutes.jsx - FIXED to use proper imports
 import React, { useState, useEffect } from 'react';
 import {
   BrowserRouter as Router,
@@ -7,8 +7,8 @@ import {
   Navigate,
   useLocation,
 } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
-import useAuthStore from './store/authStore'; // Fixed import
+import { useAuth } from './hooks/useAuth'; // FIXED: Use named import
+import useAuthStore from './store/authStore';
 import getValidAuthToken from './utils/getValidAuthToken';
 
 // Import your page components
@@ -37,14 +37,16 @@ const EditCompetitorRulePage = React.lazy(() =>
   import('./pages/EditCompetitorRulePage.jsx')
 );
 
-// Protected Route component
+// FIXED Protected Route component
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading } = useAuth(); // FIXED: Use named import
+
+  console.log('🛡️ ProtectedRoute check:', { isAuthenticated, loading, timestamp: Date.now() });
 
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
-        Loading...
+        <div>Loading...</div>
       </div>
     );
   }
@@ -54,7 +56,7 @@ const ProtectedRoute = ({ children }) => {
 
 export default function AppRoutes() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const user = useAuthStore((store) => store.user); // Fixed reference
+  const user = useAuthStore((store) => store.user);
   const location = useLocation();
 
   useEffect(() => {
@@ -66,90 +68,32 @@ export default function AppRoutes() {
     ) {
       return; // skip auto‐refresh on login or popup callback
     }
+    
+    console.log('🔄 Attempting eBay token refresh for user:', user.id);
+    
     (async () => {
       try {
         await getValidAuthToken(user.id);
+        console.log('✅ eBay token refresh successful');
       } catch (err) {
-        console.warn(
-          'Could not refresh eBay token. User may need to reconnect.'
-        );
+        console.warn('⚠️ Could not refresh eBay token. User may need to reconnect:', err.message);
       }
     })();
-  }, [location.pathname, user]);
-
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-  };
-
-  const handleLogout = () => {
-    useAuthStore.getState().logout(); // Fixed reference - use logout method from store
-    localStorage.removeItem('ebay_user_token');
-    setIsLoggedIn(false);
-  };
+  }, [user, location.pathname]);
 
   return (
-    <React.Suspense
-      fallback={
-        <div className="flex justify-center items-center min-h-screen">
-          Loading...
-        </div>
-      }
-    >
+    <React.Suspense fallback={
+      <div className="flex justify-center items-center min-h-screen">
+        <div>Loading application...</div>
+      </div>
+    }>
       <Routes>
-        {/* If root, redirect based on login status */}
-        <Route
-          path="/"
-          element={
-            <Navigate to={isLoggedIn || user ? '/home' : '/login'} replace />
-          }
-        />
-
-        {/* 1) Login (your existing username/password page) */}
-        <Route path="/login" element={<Login handleLogin={handleLogin} />} />
-
-        {/* 3) Protected "Home" + nested children */}
-        <Route
-          path="/home"
-          element={
-            isLoggedIn || user ? (
-              <Home handleLogout={handleLogout} />
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
-        >
-          <Route path="edit-listing" element={<EditListing />} />
-          <Route
-            path="update-strategy/:productId"
-            element={<PriceStrategy />}
-          />
-          <Route path="competitors/:itemId" element={<CompetitorDetails />} />
-          <Route
-            path="add-competitor-manually/:itemId"
-            element={<AddCompetitorManually />}
-          />
-          <Route path="add-strategy" element={<AddStrategy />} />
-          <Route path="add-competitor-rule" element={<CompetitorRule />} />
-          <Route path="competitors" element={<CompetitorsPage />} />
-          <Route
-            path="pricing-strategies"
-            element={<PricingStrategiesPage />}
-          />
-          <Route
-            path="edit-strategy/:strategyName"
-            element={<EditStrategyPage />}
-          />
-          <Route
-            path="edit-competitor-rule/:ruleName"
-            element={<EditCompetitorRulePage />}
-          />
-        </Route>
-
+        <Route path="/login" element={<Login handleLogin={() => setIsLoggedIn(true)} />} />
         <Route
           path="/home"
           element={
             <ProtectedRoute>
-              <Home handleLogout={handleLogout} />
+              <Home />
             </ProtectedRoute>
           }
         />
@@ -177,6 +121,63 @@ export default function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/price-strategy"
+          element={
+            <ProtectedRoute>
+              <PriceStrategy />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/competitor-details/:itemId"
+          element={
+            <ProtectedRoute>
+              <CompetitorDetails />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/add-competitor-manually/:itemId"
+          element={
+            <ProtectedRoute>
+              <AddCompetitorManually />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/add-strategy"
+          element={
+            <ProtectedRoute>
+              <AddStrategy />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/competitor-rule"
+          element={
+            <ProtectedRoute>
+              <CompetitorRule />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/edit-strategy/:id"
+          element={
+            <ProtectedRoute>
+              <EditStrategyPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/edit-competitor-rule/:id"
+          element={
+            <ProtectedRoute>
+              <EditCompetitorRulePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/" element={<Navigate to="/home" replace />} />
       </Routes>
     </React.Suspense>
   );

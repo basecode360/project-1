@@ -1,15 +1,16 @@
+// src/componentsForHome/CompetitorCount.jsx - SIMPLE & RELIABLE VERSION
 import React, { useState, useEffect } from 'react';
 import apiService from '../api/apiService';
 
 const CompetitorCount = ({ itemId }) => {
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState('...');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchCompetitorCount = async () => {
       if (!itemId) {
-        setLoading(false);
         setCount(0);
+        setLoading(false);
         return;
       }
 
@@ -18,7 +19,6 @@ const CompetitorCount = ({ itemId }) => {
 
         const manualResponse =
           await apiService.inventory.getManuallyAddedCompetitors(itemId);
-
         console.log(
           `📊 Manual competitors response for ${itemId}:`,
           manualResponse
@@ -27,14 +27,20 @@ const CompetitorCount = ({ itemId }) => {
         let manualCount = 0;
 
         if (manualResponse.success) {
-          // Handle both possible response structures
-          const competitors =
-            manualResponse.competitors ||
-            manualResponse.data?.competitors ||
-            [];
-          manualCount = Array.isArray(competitors) ? competitors.length : 0;
-
-        
+          // Use the count field directly from API if available
+          if (typeof manualResponse.count === 'number') {
+            manualCount = manualResponse.count;
+            console.log(
+              `✅ Using API count field for ${itemId}: ${manualCount}`
+            );
+          } else {
+            // Fallback: calculate from competitors array
+            const competitors = manualResponse.competitors || [];
+            manualCount = Array.isArray(competitors) ? competitors.length : 0;
+            console.log(
+              `✅ Calculated count from array for ${itemId}: ${manualCount}`
+            );
+          }
         } else {
           console.warn(
             `⚠️ Failed to get manual competitors for ${itemId}:`,

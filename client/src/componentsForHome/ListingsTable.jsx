@@ -1,5 +1,5 @@
-// src/componentForHome/ListingsTable.jsx
-import React, { useState, useEffect } from 'react';
+// src/componentsForHome/ListingsTable.jsx - FIXED LOADING ISSUES
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Table,
   TableBody,
@@ -33,12 +33,25 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import useProductStore from '../store/productStore';
-import { useAuth } from '../store/authStore';
+import useAuthHook from '../store/authStore';
 
 // Import your API service
 import apiService from '../api/apiService';
 import CompetitorCount from './CompetitorCount';
 const { pricingStrategies } = apiService;
+
+// CRITICAL: Lightning-fast auth check to prevent delays
+const lightningAuthCheck = () => {
+  try {
+    const authStore = JSON.parse(localStorage.getItem('auth-store') || '{}');
+    const appJwt = localStorage.getItem('app_jwt');
+    const userId = localStorage.getItem('user_id');
+    return !!(authStore.state?.user || appJwt || userId);
+  } catch {
+    return false;
+  }
+};
+
 export default function ListingsTable({
   currentPage = 1,
   itemsPerPage = 10,
@@ -47,7 +60,7 @@ export default function ListingsTable({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user } = useAuthHook();
   const [rows, setRows] = useState([]);
   const [listingsLoading, setListingsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -56,6 +69,17 @@ export default function ListingsTable({
   const [sortDirection, setSortDirection] = useState('asc');
   const [autoSyncInProgress, setAutoSyncInProgress] = useState(false);
   const [strategiesLoading, setStrategiesLoading] = useState(false);
+
+  // FIXED: Add refresh control state
+  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  const [lastStrategyRefresh, setLastStrategyRefresh] = useState(0);
+  const mountedRef = useRef(true);
+
+  // FIXED: Refresh cooldown periods
+  const REFRESH_COOLDOWN = 30000; // 30 seconds minimum between refreshes
+  const STRATEGY_REFRESH_COOLDOWN = 60000; // 60 seconds for strategy refreshes
+  const BACKGROUND_MONITOR_COOLDOWN = 300000; // 5 minutes for background monitoring
+
   const {
     loading,
     getFilteredProducts,
@@ -63,29 +87,316 @@ export default function ListingsTable({
     sortOrder,
     modifySearch,
     modifyProductsArray,
-    modifyProductsId, // Strategy-related updates
-    modifyProductsObj, // Competitor-related updates
+    modifyProductsId,
+    modifyProductsObj,
     modifyProductsIdWithNavigation,
     modifyProductsObjWithNavigation,
     updateProductById,
     batchUpdateProducts,
     setProductsLoading,
     AllProducts,
-    modifySku,
     searchProduct,
   } = useProductStore();
 
-  // Fetch data from eBay when component mounts
+  // CRITICAL: FIXED fetchEbayListings with guaranteed loading state clear
+  const fetchEbayListings = useCallback(
+    async (force = false) => {
+      console.log('📋 ListingsTable: ⚡ Starting FIXED fetchEbayListings...');
+
+      // LIGHTNING PATH: Skip auth delays if we have stored credentials
+      const hasStoredAuth = lightningAuthCheck();
+      if (!user && !hasStoredAuth) {
+        console.log('📋 ListingsTable: ❌ No auth available, skipping fetch');
+        setListingsLoading(false); // ALWAYS clear loading state
+        setError('Authentication required. Please log in.');
+        return;
+      }
+
+      if (!user && hasStoredAuth) {
+        console.log(
+          '📋 ListingsTable: ⚡ No user state but has stored auth - proceeding anyway'
+        );
+      }
+
+      const now = Date.now();
+
+      // Check cooldown period unless forced
+      if (!force && now - lastRefreshTime < REFRESH_COOLDOWN) {
+        console.log(
+          '⏳ Skipping fetchEbayListings - too soon since last fetch'
+        );
+        setListingsLoading(false); // ALWAYS clear loading state
+        return;
+      }
+
+      // Check if already loading
+      if (listingsLoading && !force) {
+        console.log('⏳ Listings already loading, skipping...');
+        return;
+      }
+
+      try {
+        setLastRefreshTime(now);
+        setListingsLoading(true);
+        setError(null);
+
+        console.log('🔄 Fetching eBay listings...');
+        const response = await apiService.inventory.getActiveListings();
+
+        console.log('📦 API Response received:', response);
+
+        // CRITICAL FIX: Always clear loading state regardless of component mount state
+        const clearLoadingState = () => {
+          setListingsLoading(false);
+        };
+
+        if (response.success) {
+          // Check for eBay API errors in the response data
+          if (response.data?.GetMyeBaySellingResponse?.Ack === 'Failure') {
+            const ebayError = response.data.GetMyeBaySellingResponse.Errors;
+
+            if (ebayError?.ErrorCode === '932') {
+              console.warn('eBay token is hard expired');
+              localStorage.removeItem('ebay_user_token');
+              localStorage.removeItem('ebay_refresh_token');
+              window.dispatchEvent(new CustomEvent('ebayTokenExpired'));
+              setError(
+                'eBay token expired. Please reconnect your eBay account.'
+              );
+              clearLoadingState(); // ALWAYS clear loading
+              return;
+            }
+
+            setError(
+              `eBay API Error: ${ebayError?.ShortMessage || 'Unknown error'}`
+            );
+            clearLoadingState(); // ALWAYS clear loading
+            return;
+          }
+
+          let ebayListings = [];
+
+          if (
+            response.data &&
+            response.data.GetMyeBaySellingResponse &&
+            response.data.GetMyeBaySellingResponse.ActiveList &&
+            response.data.GetMyeBaySellingResponse.ActiveList.ItemArray
+          ) {
+            const itemArray =
+              response.data.GetMyeBaySellingResponse.ActiveList.ItemArray;
+            if (Array.isArray(itemArray.Item)) {
+              ebayListings = itemArray.Item;
+            } else if (itemArray.Item) {
+              ebayListings = [itemArray.Item];
+            }
+          }
+
+          // CRITICAL FIX: Show basic listings first, then enhance with additional data
+          if (ebayListings.length > 0) {
+            console.log(
+              `📦 Processing ${ebayListings.length} eBay listings...`
+            );
+
+            // STEP 1: Create basic listings and display immediately
+            const basicListings = ebayListings.map((item) => ({
+              productTitle: item.Title,
+              productId: item.ItemID,
+              sku: item.SKU || ' ',
+              status: [
+                item.SellingStatus?.ListingStatus || 'Active',
+                item.ConditionDisplayName || 'New',
+              ],
+              price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
+              qty: parseInt(item.Quantity || '0', 10),
+              myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
+              competition: 'Loading...',
+              strategy: 'Loading...',
+              minPrice: 'Loading...',
+              maxPrice: 'Loading...',
+              hasStrategy: false,
+              competitors: 0,
+            }));
+
+            // STEP 2: Display basic data immediately and clear loading
+            if (mountedRef.current) {
+              console.log(
+                `✅ Displaying ${basicListings.length} basic listings immediately`
+              );
+              setRows(basicListings);
+              modifyProductsArray(basicListings);
+              clearLoadingState(); // Clear loading immediately after showing basic data
+            }
+
+            // STEP 3: Enhance with additional data in background (non-blocking)
+            setTimeout(async () => {
+              if (!mountedRef.current) return;
+
+              console.log(
+                '🔄 Enhancing listings with competitor and strategy data...'
+              );
+
+              const enhancedListings = await Promise.allSettled(
+                basicListings.map(async (basicItem) => {
+                  try {
+                    const itemID = basicItem.productId;
+
+                    // Get additional data with fallbacks
+                    const [manualCompetitorsRes, strategyDisplayRes] =
+                      await Promise.allSettled([
+                        apiService.inventory.getManuallyAddedCompetitors(
+                          itemID
+                        ),
+                        apiService.pricingStrategies.getStrategyDisplayForProduct(
+                          itemID
+                        ),
+                      ]);
+
+                    // Process competitor data - FIXED: Use count field from API
+                    let competitorData = { count: 0, lowestPrice: 'None' };
+                    if (
+                      manualCompetitorsRes.status === 'fulfilled' &&
+                      manualCompetitorsRes.value.success
+                    ) {
+                      const response = manualCompetitorsRes.value;
+
+                      // Use count field from API if available, otherwise calculate from array
+                      competitorData.count =
+                        typeof response.count === 'number'
+                          ? response.count
+                          : (response.competitors || []).length;
+
+                      const competitors = response.competitors || [];
+                      if (competitors.length > 0) {
+                        const prices = competitors
+                          .map((comp) => parseFloat(comp.price))
+                          .filter((price) => !isNaN(price));
+
+                        if (prices.length > 0) {
+                          const minPrice = Math.min(...prices);
+                          competitorData.lowestPrice = `USD ${minPrice.toFixed(
+                            2
+                          )}`;
+                        }
+                      }
+                    }
+
+                    // Process strategy data
+                    let strategyData = {
+                      strategy: 'Assign Strategy',
+                      minPrice: 'Set',
+                      maxPrice: 'Set',
+                      hasStrategy: false,
+                    };
+                    if (
+                      strategyDisplayRes.status === 'fulfilled' &&
+                      strategyDisplayRes.value.success
+                    ) {
+                      strategyData =
+                        strategyDisplayRes.value.data || strategyData;
+                    }
+
+                    // Return enhanced item
+                    return {
+                      ...basicItem,
+                      competition: competitorData.lowestPrice,
+                      strategy: strategyData.strategy,
+                      minPrice: strategyData.minPrice,
+                      maxPrice: strategyData.maxPrice,
+                      hasStrategy: strategyData.hasStrategy,
+                      competitors: competitorData.count,
+                    };
+                  } catch (error) {
+                    console.warn(
+                      `⚠️ Error enhancing ${basicItem.productId}:`,
+                      error.message
+                    );
+                    return basicItem; // Return basic data if enhancement fails
+                  }
+                })
+              );
+
+              // Update with enhanced data
+              const validEnhancedListings = enhancedListings
+                .filter((result) => result.status === 'fulfilled')
+                .map((result) => result.value);
+
+              if (mountedRef.current && validEnhancedListings.length > 0) {
+                console.log(
+                  `✅ Updated with enhanced data for ${validEnhancedListings.length} listings`
+                );
+                setRows(validEnhancedListings);
+                modifyProductsArray(validEnhancedListings);
+
+                // ADDED: Force a small re-render to ensure CompetitorCount components update
+                setTimeout(() => {
+                  if (mountedRef.current) {
+                    setRows((prevRows) => [...prevRows]); // Trigger re-render
+                  }
+                }, 500);
+              }
+            }, 100); // Very short delay to ensure UI renders basic data first
+          } else {
+            console.warn('No active listings found');
+            setError('No active listings found');
+            clearLoadingState(); // ALWAYS clear loading
+          }
+        } else {
+          console.error('API error:', response.error);
+          setError('Failed to fetch eBay listings');
+          clearLoadingState(); // ALWAYS clear loading
+        }
+      } catch (error) {
+        console.error('Error fetching eBay data:', error);
+        setError(error.message);
+        setListingsLoading(false); // ALWAYS clear loading state on error
+      }
+    },
+    [lastRefreshTime, listingsLoading, modifyProductsArray, user]
+  );
+
+  // CRITICAL: Lightning-fast initial fetch with immediate auth check
   useEffect(() => {
-    fetchEbayListings();
+    mountedRef.current = true;
+
+    console.log('📋 ListingsTable: ⚡ LIGHTNING initial load check...');
+
+    // Immediate fetch if we have any auth indication
+    const hasAuth = lightningAuthCheck();
+    if (hasAuth || user) {
+      console.log('📋 ListingsTable: ⚡ INSTANT fetch - auth detected');
+      fetchEbayListings(true); // Force initial fetch immediately
+    } else {
+      console.log('📋 ListingsTable: ⏳ No immediate auth, waiting briefly...');
+      // Wait very briefly for auth to load, then try anyway
+      const authTimeout = setTimeout(() => {
+        if (mountedRef.current) {
+          console.log(
+            '📋 ListingsTable: ⚡ Timeout reached, attempting fetch anyway'
+          );
+          fetchEbayListings(true);
+        }
+      }, 1000); // Reduced to 1 second
+
+      return () => {
+        clearTimeout(authTimeout);
+        mountedRef.current = false;
+      };
+    }
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, []); // Only run once on mount
 
+  // FIXED: AllProducts sync with proper dependency
   useEffect(() => {
-    if (AllProducts && AllProducts.length > 0) {
+    if (AllProducts && AllProducts.length > 0 && mountedRef.current) {
       setRows(AllProducts);
+      setListingsLoading(false); // Ensure loading is cleared when we have data
     }
   }, [AllProducts]);
 
+  // Search filtering effect
   useEffect(() => {
     if (!Array.isArray(AllProducts)) {
       setRows([]);
@@ -102,14 +413,13 @@ export default function ListingsTable({
     setRows(filtered);
   }, [searchProduct, AllProducts]);
 
-  // Calculate pagination
+  // Pagination calculation
   useEffect(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const paginated = rows.slice(startIndex, endIndex);
     setPaginatedRows(paginated);
 
-    // Calculate total pages and notify parent
     const totalPages = Math.ceil(rows.length / itemsPerPage);
     if (onTotalPagesChange) {
       onTotalPagesChange(totalPages);
@@ -126,7 +436,7 @@ export default function ListingsTable({
     }
   };
 
-  // Sort rows before pagination
+  // Sort and paginate effect
   useEffect(() => {
     let sortedRows = [...rows];
     if (sortBy) {
@@ -134,7 +444,6 @@ export default function ListingsTable({
         let aValue = a[sortBy];
         let bValue = b[sortBy];
 
-        // Handle numbers and strings
         if (typeof aValue === 'string' && typeof bValue === 'string') {
           aValue = aValue.toLowerCase();
           bValue = bValue.toLowerCase();
@@ -150,7 +459,6 @@ export default function ListingsTable({
           sortBy === 'minPrice' ||
           sortBy === 'maxPrice'
         ) {
-          // Extract number from string like "USD 12.34"
           aValue = parseFloat((aValue || '').replace(/[^\d.]/g, '')) || 0;
           bValue = parseFloat((bValue || '').replace(/[^\d.]/g, '')) || 0;
         }
@@ -167,7 +475,6 @@ export default function ListingsTable({
     const endIndex = startIndex + itemsPerPage;
     setPaginatedRows(sortedRows.slice(startIndex, endIndex));
 
-    // Calculate total pages and notify parent
     const totalPages = Math.ceil(sortedRows.length / itemsPerPage);
     if (onTotalPagesChange) {
       onTotalPagesChange(totalPages);
@@ -181,531 +488,15 @@ export default function ListingsTable({
     sortDirection,
   ]);
 
-  const fetchEbayListings = async () => {
-    try {
-      setListingsLoading(true);
-      const response = await apiService.inventory.getActiveListings();
-
-      if (response.success) {
-        // Check for eBay API errors in the response data
-        if (response.data?.GetMyeBaySellingResponse?.Ack === 'Failure') {
-          const ebayError = response.data.GetMyeBaySellingResponse.Errors;
-
-          // Check for hard expired token (error code 932)
-          if (ebayError?.ErrorCode === '932') {
-            console.warn('eBay token is hard expired');
-            // Clear expired tokens
-            localStorage.removeItem('ebay_user_token');
-            localStorage.removeItem('ebay_refresh_token');
-
-            // Dispatch event to notify Home component to show connect page
-            window.dispatchEvent(new CustomEvent('ebayTokenExpired'));
-
-            setError('eBay token expired. Please reconnect your eBay account.');
-            return;
-          }
-
-          // Handle other eBay API errors
-          setError(
-            `eBay API Error: ${ebayError?.ShortMessage || 'Unknown error'}`
-          );
-          return;
-        }
-
-        let ebayListings = [];
-
-        // Add better null checking for the response structure
-        if (
-          response.data &&
-          response.data.GetMyeBaySellingResponse &&
-          response.data.GetMyeBaySellingResponse.ActiveList &&
-          response.data.GetMyeBaySellingResponse.ActiveList.ItemArray
-        ) {
-          const itemArray =
-            response.data.GetMyeBaySellingResponse.ActiveList.ItemArray;
-          if (Array.isArray(itemArray.Item)) {
-            ebayListings = itemArray.Item;
-          } else if (itemArray.Item) {
-            ebayListings = [itemArray.Item];
-          }
-        } else {
-          // Handle case where there's no ActiveList or no items
-          console.warn('No active listings found in eBay response');
-          setError('No active listings found');
-          return;
-        }
-
-        console.log(`📦 Processing ${ebayListings.length} eBay listings...`);
-
-        const formattedListings = await Promise.all(
-          ebayListings.map(async (item, index) => {
-            const itemID = item.ItemID;
-            if (!itemID) return null;
-
-            try {
-              console.log(
-                `📊 [${index + 1}/${
-                  ebayListings.length
-                }] Processing ${itemID}...`
-              );
-
-              const [manualCompetitorsRes, strategyDisplayRes] =
-                await Promise.all([
-                  apiService.inventory
-                    .getManuallyAddedCompetitors(itemID)
-                    .catch((err) => {
-                      console.warn(
-                        `⚠️ Failed to get competitors for ${itemID}:`,
-                        err.message
-                      );
-                      return { success: false, competitors: [], count: 0 };
-                    }),
-                  // Use apiService instead of direct fetch
-                  apiService.pricingStrategies
-                    .getStrategyDisplayForProduct(itemID)
-                    .catch((err) => {
-                      console.warn(
-                        `⚠️ Failed to get strategy for ${itemID}:`,
-                        err.message
-                      );
-                      return {
-                        success: false,
-                        data: {
-                          strategy: 'Assign Strategy',
-                          minPrice: 'Set',
-                          maxPrice: 'Set',
-                          hasStrategy: false,
-                        },
-                      };
-                    }),
-                ]);
-
-              // Fix manual competitor count calculation
-              const manualCount = manualCompetitorsRes.success
-                ? manualCompetitorsRes.competitors?.length ||
-                  manualCompetitorsRes.count ||
-                  0
-                : 0;
-
-              console.log(`📊 Manual competitors for ${itemID}:`, {
-                success: manualCompetitorsRes.success,
-                count: manualCount,
-                competitors: manualCompetitorsRes.competitors?.length || 0,
-              });
-
-              // Get lowest price from manual competitors
-              let lowestCompetitorPrice = 'None';
-              if (
-                manualCompetitorsRes.success &&
-                manualCompetitorsRes.competitors &&
-                manualCompetitorsRes.competitors.length > 0
-              ) {
-                const prices = manualCompetitorsRes.competitors
-                  .map((comp) => parseFloat(comp.price))
-                  .filter((price) => !isNaN(price));
-
-                if (prices.length > 0) {
-                  const minPrice = Math.min(...prices);
-                  lowestCompetitorPrice = `USD ${minPrice.toFixed(2)}`;
-                }
-              }
-
-              // Process strategy display with better error handling and debugging
-              let strategyDisplay = {
-                strategy: 'Assign Strategy',
-                minPrice: 'Set',
-                maxPrice: 'Set',
-                hasStrategy: false,
-              };
-
-              if (strategyDisplayRes.success && strategyDisplayRes.data) {
-                strategyDisplay = strategyDisplayRes.data;
-
-                // Debug logging for strategy display
-                console.log(`✅ Strategy loaded for ${itemID}:`, {
-                  strategy: strategyDisplay.strategy,
-                  hasStrategy: strategyDisplay.hasStrategy,
-                  minPrice: strategyDisplay.minPrice,
-                  maxPrice: strategyDisplay.maxPrice,
-                  rawStrategy: strategyDisplay.rawStrategy?.strategy,
-                });
-              } else {
-                console.warn(
-                  `⚠️ No strategy data for ${itemID}:`,
-                  strategyDisplayRes
-                );
-              }
-
-              const formattedItem = {
-                productTitle: item.Title,
-                productId: item.ItemID,
-                sku: item.SKU || ' ',
-                status: [
-                  item.SellingStatus?.ListingStatus || 'Active',
-                  item.ConditionDisplayName || 'New',
-                ],
-                price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
-                qty: parseInt(item.Quantity || '0', 10),
-                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
-                  2
-                )}`,
-                competition: lowestCompetitorPrice,
-                strategy: strategyDisplay.strategy,
-                minPrice: strategyDisplay.minPrice,
-                maxPrice: strategyDisplay.maxPrice,
-                hasStrategy: strategyDisplay.hasStrategy,
-                competitors: manualCount, // Use the fixed count
-              };
-
-              console.log(
-                `✅ [${index + 1}/${ebayListings.length}] Processed ${itemID}:`,
-                {
-                  strategy: formattedItem.strategy,
-                  minPrice: formattedItem.minPrice,
-                  maxPrice: formattedItem.maxPrice,
-                  hasStrategy: formattedItem.hasStrategy,
-                  competitors: formattedItem.competitors,
-                }
-              );
-
-              return formattedItem;
-            } catch (error) {
-              console.error(
-                `❌ [${index + 1}/${
-                  ebayListings.length
-                }] Error processing ${itemID}:`,
-                error
-              );
-              return {
-                productTitle: item.Title,
-                productId: item.ItemID,
-                sku: item.SKU || ' ',
-                status: [
-                  item.SellingStatus?.ListingStatus || 'Active',
-                  item.ConditionDisplayName || 'New',
-                ],
-                price: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(2)}`,
-                qty: parseInt(item.Quantity || '0', 10),
-                myPrice: `USD ${parseFloat(item.BuyItNowPrice || 0).toFixed(
-                  2
-                )}`,
-                competition: 'Error',
-                strategy: 'Assign Strategy',
-                minPrice: 'Set',
-                maxPrice: 'Set',
-                hasStrategy: false,
-                competitors: 0,
-              };
-            }
-          })
-        );
-
-        const validListings = formattedListings.filter(Boolean);
-        if (validListings.length > 0) {
-          console.log(
-            `✅ Successfully processed ${validListings.length} listings`
-          );
-          setRows(validListings);
-          modifyProductsArray(validListings);
-
-          // FIXED: Reduced background monitoring frequency
-          setTimeout(() => {
-            startBackgroundMonitoring();
-          }, 10000); // Increased delay to 10 seconds
-        } else {
-          setError('There are no products');
-        }
-      } else {
-        setError('Failed to fetch eBay listings');
-        console.error('API error:', response.error);
-      }
-    } catch (error) {
-      setError(error.message);
-      console.error('Error fetching eBay data:', error);
-    } finally {
-      setListingsLoading(false);
-    }
-  };
-
-  // NEW: Background monitoring function - FIXED: Reduced frequency
-  const startBackgroundMonitoring = async () => {
-    if (autoSyncInProgress) return;
-
-    try {
-      setAutoSyncInProgress(true);
-      console.log('🔄 Starting background competitor monitoring...');
-
-      // REMOVED: Immediate strategy execution on page load (causing too many records)
-      // Only trigger the background monitoring service, not immediate execution
-
-      // Trigger the background monitoring service
-      const response = await fetch(
-        `${
-          import.meta.env.VITE_BACKEND_URL
-        }/api/competitor-rules/trigger-monitoring`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('app_jwt')}`,
-          },
-          body: JSON.stringify({
-            userId: localStorage.getItem('user_id'),
-          }),
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ Background monitoring triggered:', result);
-
-        if (result.strategies?.priceChanges > 0) {
-          console.log(
-            `💰 ${result.strategies.priceChanges} prices were updated by monitoring!`
-          );
-
-          // Only refresh if there were actual price changes
-          setTimeout(() => {
-            fetchEbayListings();
-          }, 5000); // Increased delay to 5 seconds
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ Failed to start background monitoring:', error);
-    } finally {
-      setAutoSyncInProgress(false);
-    }
-  };
-
-  // Refresh strategy data for a specific item
-  const refreshStrategyForItem = async (itemId) => {
-    try {
-      const strategyDisplayRes =
-        await apiService.pricingStrategies.getStrategyDisplayForProduct(itemId);
-      const strategyDisplay = strategyDisplayRes?.data || {
-        strategy: 'Assign Strategy',
-        minPrice: 'Set',
-        maxPrice: 'Set',
-        hasStrategy: false,
-      };
-      modifyProductsArray((products) =>
-        products.map((product) =>
-          product.productId === itemId
-            ? {
-                ...product,
-                strategy: strategyDisplay.strategy,
-                minPrice: strategyDisplay.minPrice,
-                maxPrice: strategyDisplay.maxPrice,
-                hasStrategy: strategyDisplay.hasStrategy,
-              }
-            : product
-        )
-      );
-    } catch (error) {
-      console.error(`❌ Error refreshing strategy for item ${itemId}:`, error);
-    }
-  };
-
-  // Refresh all strategy data
-  const refreshAllStrategies = async () => {
-    try {
-      setStrategiesLoading(true);
-
-      // ← make sure it’s an array
-      const products = Array.isArray(AllProducts) ? AllProducts : [];
-
-      const updatedProducts = await Promise.all(
-        products.map(async (product) => {
-          try {
-            const { data } =
-              await apiService.pricingStrategies.getStrategyDisplayForProduct(
-                product.productId
-              );
-            return {
-              ...product,
-              strategy: data.strategy,
-              minPrice: data.minPrice,
-              maxPrice: data.maxPrice,
-              hasStrategy: data.hasStrategy,
-            };
-          } catch (err) {
-            console.error(
-              `Error refreshing strategy for ${product.productId}:`,
-              err
-            );
-            return product;
-          }
-        })
-      );
-
-      modifyProductsArray(updatedProducts);
-    } catch (err) {
-      console.error('Error refreshing all strategies:', err);
-    } finally {
-      setStrategiesLoading(false);
-    }
-  };
-
-  // Listen for navigation back to refresh strategy data
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Refresh strategy data when user comes back to the page
-        refreshAllStrategies();
-      }
-    };
-
-    const handleFocus = () => {
-      // Also refresh when window gets focus (more reliable for navigation)
-      refreshAllStrategies();
-    };
-
-    // Add both visibility and focus listeners
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [AllProducts]);
-
-  // Also add a useEffect that runs when the component mounts or when we navigate back
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      // Small delay to ensure any pending strategy updates are completed
-      if (AllProducts && AllProducts.length > 0) {
-        refreshAllStrategies();
-      }
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [location?.pathname]); // Add location dependency if using react-router
-
-  // Check for strategy updates from localStorage with more aggressive checking
-  useEffect(() => {
-    const checkForUpdates = () => {
-      const lastUpdate = localStorage.getItem('strategyUpdated');
-      const lastPriceUpdate = localStorage.getItem('priceUpdated');
-
-      if (lastUpdate || lastPriceUpdate) {
-        const updateTime = parseInt(lastUpdate || lastPriceUpdate);
-        const now = Date.now();
-
-        // If update was within last 30 seconds, refresh
-        if (now - updateTime < 30000) {
-          // Clear all storage flags first
-          localStorage.removeItem('strategyUpdated');
-          localStorage.removeItem('priceUpdated');
-          localStorage.removeItem('forceRefresh');
-
-          // Force a complete refresh by clearing cache and refetching
-          console.log('🔄 Detected strategy update, refreshing data...');
-          setLoading(true);
-
-          // Clear the current products array to force a complete reload
-          modifyProductsArray([]);
-
-          // Fetch fresh data
-          setTimeout(() => {
-            fetchEbayListings();
-          }, 500);
-        }
-      }
-    };
-
-    // Check immediately on mount
-    checkForUpdates();
-
-    // Check very frequently for immediate updates
-    const interval = setInterval(checkForUpdates, 200); // Check every 200ms
-    return () => clearInterval(interval);
-  }, [location.pathname]);
-
-  // Update competitor count display in listings table
-  const getCompetitorCount = async (itemId) => {
-    try {
-      const userId = localStorage.getItem('user_id');
-
-      const manualResponse = await apiService.inventory
-        .getManuallyAddedCompetitors(itemId)
-        .catch(() => ({ success: false, competitors: [] }));
-
-      const manualCount = manualResponse.success
-        ? manualResponse.competitors?.length || 0
-        : 0;
-
-      return manualCount;
-    } catch (error) {
-      console.warn(`Failed to get competitor count for ${itemId}:`, error);
-      return 0;
-    }
-  };
-
-  // Add this function to update min/max and refresh listings
-  const updateMinMaxForItem = async (itemId, minPrice, maxPrice) => {
-    try {
-      await apiService.inventory.updateListingPricing(itemId, {
-        minPrice,
-        maxPrice,
-      });
-      // Refresh listings after update
-      await fetchEbayListings();
-    } catch (error) {
-      console.error('Failed to update min/max:', error);
-    }
-  };
-
-  // Strategy-related product update (navigates to strategy form)
-  const handleStrategyUpdate = (productId, updates) => {
-    try {
-      modifyProductsIdWithNavigation(productId, updates, 'strategy');
-      console.log(`✅ Product ${productId} updated for strategy configuration`);
-    } catch (error) {
-      console.error(
-        `❌ Error updating product ${productId} for strategy:`,
-        error
-      );
-    }
-  };
-
-  // Competitor-related product update (navigates to competitor details)
-  const handleCompetitorUpdate = (productsData) => {
-    try {
-      modifyProductsObjWithNavigation(productsData, 'competitor');
-      console.log(
-        '✅ Bulk product update completed for competitor configuration'
-      );
-    } catch (error) {
-      console.error('❌ Error in competitor product update:', error);
-    }
-  };
-
-  // Regular product updates without navigation
-  const handleProductUpdate = (productId, updates) => {
-    try {
-      modifyProductsId(productId, updates);
-      console.log(`✅ Product ${productId} updated successfully`);
-    } catch (error) {
-      console.error(`❌ Error updating product ${productId}:`, error);
-    }
-  };
-
-  const handleBulkProductUpdate = (productsData) => {
-    try {
-      modifyProductsObj(productsData);
-      console.log('✅ Bulk product update completed');
-    } catch (error) {
-      console.error('❌ Error in bulk product update:', error);
-    }
-  };
-
   if (listingsLoading) {
     return (
       <Container
         sx={{ mt: 4, mb: 2, display: 'flex', justifyContent: 'center', py: 5 }}
       >
         <CircularProgress />
+        <Typography sx={{ ml: 2 }} color="textSecondary">
+          Loading your listings...
+        </Typography>
       </Container>
     );
   }
@@ -717,9 +508,10 @@ export default function ListingsTable({
           Error loading listings: {error}
         </Typography>
         <Typography textAlign="center" mt={2}>
-          Showing sample data as fallback
+          <Button variant="outlined" onClick={() => fetchEbayListings(true)}>
+            Try Again
+          </Button>
         </Typography>
-        {/* Render table with sample data */}
       </Container>
     );
   }
@@ -747,7 +539,7 @@ export default function ListingsTable({
           { label: 'Min Price', key: 'minPrice' },
           { label: 'Max Price', key: 'maxPrice' },
         ];
-      default: // 'listings'
+      default:
         return [
           ...baseHeaders,
           { label: 'Competitors Rule', key: null },
@@ -857,8 +649,7 @@ export default function ListingsTable({
               }}
               onClick={() => {
                 modifyProductsId(row.productId);
-                modifySku(row.sku ? row.sku : '');
-                navigate(`/home/update-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               Assign Rule
@@ -893,7 +684,7 @@ export default function ListingsTable({
               }}
               onClick={() => {
                 modifyProductsObj(row);
-                navigate(`/home/competitors/${row.productId}`);
+                navigate(`/competitor-details/${row.productId}`);
               }}
             >
               <CompetitorCount itemId={row.productId} />
@@ -923,9 +714,11 @@ export default function ListingsTable({
                 },
               }}
               onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for product: ${row.productId}`
+                );
                 modifyProductsId(row.productId);
-                modifySku(row.sku ? row.sku : '');
-                navigate(`/home/update-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.strategy}
@@ -949,7 +742,13 @@ export default function ListingsTable({
                   textDecoration: 'underline',
                 },
               }}
-              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+              onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for min price: ${row.productId}`
+                );
+                modifyProductsId(row.productId);
+                navigate(`/price-strategy/${row.productId}`);
+              }}
             >
               {row.minPrice}
             </Typography>
@@ -972,7 +771,13 @@ export default function ListingsTable({
                   textDecoration: 'underline',
                 },
               }}
-              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+              onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for max price: ${row.productId}`
+                );
+                modifyProductsId(row.productId);
+                navigate(`/price-strategy/${row.productId}`);
+              }}
             >
               {row.maxPrice}
             </Typography>
@@ -999,6 +804,9 @@ export default function ListingsTable({
                 fontSize: '16px',
               }}
               onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form via Assign Rule: ${row.productId}`
+                );
                 modifyProductsId(row.productId);
                 modifySku(row.sku ? row.sku : '');
                 navigate(`/home/update-strategy/${row.productId}`);
@@ -1037,9 +845,11 @@ export default function ListingsTable({
                 },
               }}
               onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for product: ${row.productId}`
+                );
                 modifyProductsId(row.productId);
-                modifySku(row.sku ? row.sku : '');
-                navigate(`/home/update-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.strategy}
@@ -1063,7 +873,13 @@ export default function ListingsTable({
                   textDecoration: 'underline',
                 },
               }}
-              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+              onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for min price: ${row.productId}`
+                );
+                modifyProductsId(row.productId);
+                navigate(`/price-strategy/${row.productId}`);
+              }}
             >
               {row.minPrice}
             </Typography>
@@ -1086,7 +902,13 @@ export default function ListingsTable({
                   textDecoration: 'underline',
                 },
               }}
-              onClick={() => navigate(`/home/update-strategy/${row.productId}`)}
+              onClick={() => {
+                console.log(
+                  `🔀 Navigating to strategy form for max price: ${row.productId}`
+                );
+                modifyProductsId(row.productId);
+                navigate(`/price-strategy/${row.productId}`);
+              }}
             >
               {row.maxPrice}
             </Typography>
@@ -1108,8 +930,11 @@ export default function ListingsTable({
                 fontSize: '16px',
               }}
               onClick={() => {
+                console.log(
+                  `🔀 Navigating to competitor details for product: ${row.productId}`
+                );
                 modifyProductsObj(row);
-                navigate(`/home/competitors/${row.productId}`);
+                navigate(`/competitor-details/${row.productId}`);
               }}
             >
               <CompetitorCount itemId={row.productId} />
@@ -1136,7 +961,24 @@ export default function ListingsTable({
             ? 'Pricing Strategy Management'
             : 'Active Listings - Strategy Managed'}
         </Typography>
+        <Button
+          variant="outlined"
+          startIcon={<RefreshIcon />}
+          onClick={() => fetchEbayListings(true)}
+          disabled={listingsLoading}
+          sx={{ ml: 2 }}
+        >
+          {listingsLoading ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </Box>
+
+      {/* Show row count when data is available */}
+      {rows.length > 0 && (
+        <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          Showing {paginatedRows.length} of {rows.length} listings
+        </Typography>
+      )}
+
       <TableContainer
         component={Paper}
         sx={{ borderRadius: 2, border: '1px solid #ddd' }}
@@ -1191,21 +1033,38 @@ export default function ListingsTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {paginatedRows.map((row, idx) => (
-              <TableRow
-                key={idx}
-                sx={{
-                  '&:hover': {
-                    backgroundColor: '#f5f5f5',
-                    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.1)',
-                    cursor: 'pointer',
-                  },
-                  transition: 'all 0.3s ease',
-                }}
-              >
-                {renderTableCells(row)}
+            {paginatedRows.length > 0 ? (
+              paginatedRows.map((row, idx) => (
+                <TableRow
+                  key={row.productId || idx}
+                  sx={{
+                    '&:hover': {
+                      backgroundColor: '#f5f5f5',
+                      boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.1)',
+                      cursor: 'pointer',
+                    },
+                    transition: 'all 0.3s ease',
+                  }}
+                >
+                  {renderTableCells(row)}
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={headers.length}
+                  sx={{
+                    textAlign: 'center',
+                    py: 4,
+                    color: 'text.secondary',
+                  }}
+                >
+                  {listingsLoading
+                    ? 'Loading listings...'
+                    : 'No listings found'}
+                </TableCell>
               </TableRow>
-            ))}
+            )}
           </TableBody>
         </Table>
       </TableContainer>
