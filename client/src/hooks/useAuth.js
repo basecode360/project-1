@@ -1,128 +1,104 @@
-// src/hooks/useAuth.js - OPTIMIZED VERSION WITH FAST AUTH
-import { useEffect, useState } from 'react';
-import useAuthStore, { waitForHydration } from '../store/authStore';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 
-export const useAuth = () => {
+// Create Auth Context
+const AuthContext = createContext();
+
+// Auth Provider Component
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState(null);
 
-  // Get all auth state from Zustand store
-  const user = useAuthStore((state) => state.user);
-  const token = useAuthStore((state) => state.token);
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const _hasHydrated = useAuthStore((state) => state._hasHydrated);
-  const setHasHydrated = useAuthStore((state) => state.setHasHydrated);
-
-  // CRITICAL: Fast-track authentication check to eliminate 20-second delay
   useEffect(() => {
-    console.log(
-      '🔐 useAuth: Starting LIGHTNING-FAST auth check at:',
-      Date.now()
-    );
+    // Check for existing auth on mount
+    checkAuth();
+  }, []);
 
-    const lightningFastAuth = () => {
-      try {
-        // Immediate localStorage check without any delays
-        const authStore = JSON.parse(
-          localStorage.getItem('auth-store') || '{}'
-        );
-        const appJwt = localStorage.getItem('app_jwt');
-        const userId = localStorage.getItem('user_id');
+  const checkAuth = () => {
+    try {
+      const storedToken =
+        localStorage.getItem('authToken') || localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
 
-        console.log('🔐 useAuth: Lightning check results:', {
-          hasAuthStore: !!authStore.state?.user,
-          hasAppJwt: !!appJwt,
-          hasUserId: !!userId,
-          storeUser: !!user,
-          storeToken: !!token,
-          storeHydrated: _hasHydrated,
-        });
-
-        // If we have ANY auth indication, stop loading immediately
-        if (authStore.state?.user || appJwt || user || token || userId) {
-          console.log(
-            '🔐 useAuth: ⚡ INSTANT auth success - stopping loading NOW'
-          );
-          setLoading(false);
-          setHasHydrated(true);
-          return true;
-        }
-
-        return false;
-      } catch (error) {
-        console.error('🔐 useAuth: Lightning check error:', error);
-        return false;
+      if (storedToken && storedUser) {
+        setToken(storedToken);
+        setUser(JSON.parse(storedUser));
       }
-    };
-
-    // Execute lightning fast check immediately
-    const hasAuth = lightningFastAuth();
-
-    if (!hasAuth) {
-      // If no immediate auth found, wait VERY briefly then stop anyway
-      console.log('🔐 useAuth: No immediate auth - setting MINIMAL timeout');
-      const timeout = setTimeout(() => {
-        console.log(
-          '🔐 useAuth: ⚡ TIMEOUT (800ms) - stopping loading to prevent delays'
-        );
-        setLoading(false);
-        setHasHydrated(true);
-      }, 800); // Only 800ms maximum wait instead of 3+ seconds!
-
-      return () => clearTimeout(timeout);
-    }
-  }, [user, token, _hasHydrated, setHasHydrated]);
-
-  // INSTANT response when user/token appears
-  useEffect(() => {
-    if (user || token) {
-      console.log(
-        '🔐 useAuth: ⚡ INSTANT user/token detected - stopping loading'
-      );
+    } catch (error) {
+      console.error('Error checking auth:', error);
+      logout();
+    } finally {
       setLoading(false);
-      setHasHydrated(true);
     }
-  }, [user, token, setHasHydrated]);
+  };
 
-  // EMERGENCY brake - never let loading exceed 1 second total
-  useEffect(() => {
-    const emergencyTimeout = setTimeout(() => {
-      if (loading) {
-        console.warn(
-          '🔐 useAuth: 🚨 EMERGENCY STOP - Force stopping loading after 1 second'
-        );
-        setLoading(false);
-        setHasHydrated(true);
-      }
-    }, 1000); // Hard limit: 1 second maximum
+  const login = (userData, authToken) => {
+    setUser(userData);
+    setToken(authToken);
+    localStorage.setItem('authToken', authToken);
+    localStorage.setItem('user', JSON.stringify(userData));
+  };
 
-    return () => clearTimeout(emergencyTimeout);
-  }, [loading, setHasHydrated]);
+  const logout = () => {
+    setUser(null);
+    setToken(null);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  };
 
-  const authState = {
+  const updateUser = (userData) => {
+    setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
+  };
+
+  const value = {
     user,
     token,
     loading,
-    isAuthenticated: isAuthenticated || (!!user && !!token),
-    _hasHydrated,
-    login: useAuthStore.getState().setUser,
-    logout: useAuthStore.getState().logout,
+    login,
+    logout,
+    updateUser,
+    isAuthenticated: !!user && !!token,
   };
 
-  console.log('🔐 useAuth LIGHTNING state:', {
-    loading: authState.loading,
-    hasUser: !!authState.user,
-    hasToken: !!authState.token,
-    isAuthenticated: authState.isAuthenticated,
-    timestamp: Date.now(),
-  });
-
-  return authState;
+  // Changed from JSX to React.createElement
+  return React.createElement(AuthContext.Provider, { value }, children);
 };
 
-// Remove AuthProvider - we don't need it with Zustand
-export const AuthProvider = ({ children }) => {
-  console.log('⚠️  AuthProvider is deprecated, remove this wrapper');
-  return children;
+const useAuthHook = () => {
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+
+  return context;
 };
 
-export default useAuth;
+// Export the hook
+export const useAuth = useAuthHook;
+
+// Higher-order component for protected routes
+export const withAuth = (Component) => {
+  return function AuthenticatedComponent(props) {
+    const { isAuthenticated, loading } = useAuth();
+
+    if (loading) {
+      return React.createElement('div', null, 'Loading...');
+    }
+
+    if (!isAuthenticated) {
+      return React.createElement(
+        'div',
+        null,
+        'Please log in to access this page.'
+      );
+    }
+
+    return React.createElement(Component, props);
+  };
+};
+
+// Default export
+export default useAuthHook;

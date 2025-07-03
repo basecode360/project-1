@@ -27,9 +27,7 @@ import { requireAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// FIXED: Apply authentication middleware to all routes
 router.use(requireAuth);
-
 // 1) Create a new strategy WITHOUT applying it to any listing
 //    POST /api/pricing-strategies
 router.post('/', async (req, res) => {
@@ -59,18 +57,13 @@ router.get('/', async (req, res) => {
     if (active === 'true') isActive = true;
     else if (active === 'false') isActive = false;
 
-    // FIXED: Use authenticated user's ID
-    const userId = req.user.id || req.user._id;
-    console.log(`📊 Getting all strategies for user: ${userId}`);
-
-    const strategies = await getAllPricingStrategies(isActive, userId);
+    const strategies = await getAllPricingStrategies(isActive);
     return res.status(200).json({
       success: true,
       strategies, // Wrap strategies in the specified format
       rules: [], // Placeholder for rulesData if applicable
     });
   } catch (err) {
-    console.error('Error in GET /api/pricing-strategies:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -79,16 +72,12 @@ router.get('/', async (req, res) => {
 //      GET /api/pricing-strategies/active-listings
 router.get('/active-listings', async (req, res) => {
   try {
-    const { active } = req.query;
-
-    // FIXED: Use authenticated user's ID instead of query parameter
-    const userId = req.user.id || req.user._id;
-
-    console.log(`📊 Active listings request for authenticated user: ${userId}`);
+    const { userId, active } = req.query;
 
     // Set the userId in req for the controller to use
-    req.userId = userId;
-    req.query.userId = userId; // Also set in query for backward compatibility
+    if (userId) {
+      req.userId = userId;
+    }
 
     // Call the controller function instead of service directly
     const { getAllPricingStrategies } = await import(
@@ -97,11 +86,7 @@ router.get('/active-listings', async (req, res) => {
     return getAllPricingStrategies(req, res);
   } catch (err) {
     console.error('Error in GET /active-listings:', err.message);
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-      error: 'Failed to fetch active listings',
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -109,18 +94,13 @@ router.get('/active-listings', async (req, res) => {
 //      GET /api/pricing-strategies/active
 router.get('/active', async (req, res) => {
   try {
-    // FIXED: Use authenticated user's ID
-    const userId = req.user.id || req.user._id;
-    console.log(`✅ Getting active strategies for user: ${userId}`);
-
-    const strategies = await getActivePricingStrategies(null, userId);
+    const strategies = await getActivePricingStrategies();
     return res.status(200).json({
       success: true,
       strategies, // Wrap strategies in the specified format
       rules: [], // Placeholder for rulesData if applicable
     });
   } catch (err) {
-    console.error('Error in GET /active:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -129,17 +109,12 @@ router.get('/active', async (req, res) => {
 //    GET /api/pricing-strategies/:id
 router.get('/:id', async (req, res) => {
   try {
-    console.log(`🔍 Getting strategy by ID: ${req.params.id}`);
-
     const strategy = await getPricingStrategy(req.params.id);
     if (!strategy) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Strategy not found' });
+      return res.status(404).json({ success: false, message: 'Not found' });
     }
     return res.json({ success: true, data: strategy });
   } catch (err) {
-    console.error('Error in GET /api/pricing-strategies/:id:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -148,12 +123,9 @@ router.get('/:id', async (req, res) => {
 //    PUT /api/pricing-strategies/:id
 router.put('/:id', async (req, res) => {
   try {
-    console.log(`📝 Updating strategy: ${req.params.id}`);
-
     const updated = await updatePricingStrategy(req.params.id, req.body);
     return res.json({ success: true, data: updated });
   } catch (err) {
-    console.error('Error in PUT /api/pricing-strategies/:id:', err.message);
     if (err.message.includes('not found')) {
       return res.status(404).json({ success: false, message: err.message });
     }
@@ -165,15 +137,9 @@ router.put('/:id', async (req, res) => {
 //    DELETE /api/pricing-strategies/:id
 router.delete('/:id', async (req, res) => {
   try {
-    console.log(`🗑️ Deleting strategy: ${req.params.id}`);
-
     await deletePricingStrategy(req.params.id);
-    return res.json({
-      success: true,
-      message: 'Strategy deleted successfully',
-    });
+    return res.json({ success: true, message: 'Deleted successfully' });
   } catch (err) {
-    console.error('Error in DELETE /api/pricing-strategies/:id:', err.message);
     if (err.message.includes('not found')) {
       return res.status(404).json({ success: false, message: err.message });
     }
@@ -186,23 +152,67 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/apply', async (req, res) => {
   try {
     const items = req.body.items; // should be [{ itemId, sku?, title? }, …]
-    const strategyId = req.params.id;
-
-    console.log(
-      `📋 Applying strategy ${strategyId} to ${items?.length || 0} items`
-    );
-
-    const results = await applyStrategyToItemsController(strategyId, items);
+    const results = await applyStrategyToItemsController(req.params.id, items);
     return res.json({
       success: true,
       message: `Applied to ${results.filter((r) => r.success).length} item(s)`,
       results,
     });
   } catch (err) {
-    console.error('Error in POST /:id/apply:', err.message);
     if (err.message.includes('not found')) {
       return res.status(404).json({ success: false, message: err.message });
     }
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// 6.7) Update/Apply strategy to a specific product/item (PUT method)
+//      PUT /api/pricing-strategies/products/:itemId
+router.put('/products/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const strategyData = req.body;
+
+    // If the request contains a strategy ID, apply it to the product
+    if (strategyData._id || strategyData.strategyId) {
+      const strategyId = strategyData._id || strategyData.strategyId;
+      const results = await applyStrategiesToItem(
+        // Fixed function name
+        itemId,
+        [strategyId],
+        null
+      );
+
+      return res.json({
+        success: true,
+        message: `Strategy applied to item ${itemId}`,
+        results,
+      });
+    }
+
+    // If strategyIds array is provided, apply multiple strategies
+    if (strategyData.strategyIds && Array.isArray(strategyData.strategyIds)) {
+      const results = await applyStrategiesToItem(
+        // Fixed function name
+        itemId,
+        strategyData.strategyIds,
+        strategyData.sku || null
+      );
+      const successCount = results.filter((r) => r.success).length;
+
+      return res.json({
+        success: true,
+        message: `Applied ${successCount} of ${strategyData.strategyIds.length} strategies to item ${itemId}`,
+        results,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Strategy ID or strategyIds array is required',
+    });
+  } catch (err) {
+    console.error('Error updating strategies for product:', err);
     return res.status(400).json({ success: false, message: err.message });
   }
 });
@@ -213,8 +223,6 @@ router.get('/products/:itemId/display', async (req, res) => {
   try {
     const { itemId } = req.params;
     const { sku = null } = req.query;
-
-    console.log(`🎨 Getting strategy display for product: ${itemId}`);
 
     const { getStrategyDisplayForProduct } = await import(
       '../services/strategyService.js'
@@ -254,12 +262,7 @@ router.get('/products/:itemId/display', async (req, res) => {
 router.get('/products/:itemId/mongo-strategy', async (req, res) => {
   try {
     const { itemId } = req.params;
-    // FIXED: Use authenticated user's ID
-    const userId = req.user.id || req.user._id;
-
-    console.log(
-      `📊 Getting mongo strategy for product ${itemId}, user: ${userId}`
-    );
+    const { userId } = req.query;
 
     // Import PriceHistory model
     const { default: PriceHistory } = await import('../models/PriceHistory.js');
@@ -268,7 +271,7 @@ router.get('/products/:itemId/mongo-strategy', async (req, res) => {
     const latestRecord = await PriceHistory.findOne({
       itemId: itemId,
       strategyName: { $exists: true, $ne: null },
-      userId: userId, // FIXED: Always filter by authenticated user
+      ...(userId && { userId: userId }),
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -290,7 +293,6 @@ router.get('/products/:itemId/mongo-strategy', async (req, res) => {
     );
     const strategy = await PricingStrategy.findOne({
       strategyName: latestRecord.strategyName,
-      createdBy: userId, // FIXED: Filter by user
     }).lean();
 
     if (strategy) {
@@ -339,9 +341,6 @@ router.get('/products/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
     const { sku = null } = req.query;
-
-    console.log(`🔍 Getting strategies for product: ${itemId}`);
-
     const strategies = await getStrategiesForItem(itemId, sku);
     return res.json({
       success: true,
@@ -354,65 +353,12 @@ router.get('/products/:itemId', async (req, res) => {
   }
 });
 
-// 6.7) Update/Apply strategy to a specific product/item (PUT method)
-//      PUT /api/pricing-strategies/products/:itemId
-router.put('/products/:itemId', async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const strategyData = req.body;
-    const userId = req.user.id || req.user._id; // FIXED: Use authenticated user
-
-    console.log(
-      `📝 Updating strategies for product ${itemId}, user: ${userId}`
-    );
-
-    // If the request contains a strategy ID, apply it to the product
-    if (strategyData._id || strategyData.strategyId) {
-      const strategyId = strategyData._id || strategyData.strategyId;
-      const results = await applyStrategiesToItem(itemId, [strategyId], null);
-
-      return res.json({
-        success: true,
-        message: `Strategy applied to item ${itemId}`,
-        results,
-      });
-    }
-
-    // If strategyIds array is provided, apply multiple strategies
-    if (strategyData.strategyIds && Array.isArray(strategyData.strategyIds)) {
-      const results = await applyStrategiesToItem(
-        itemId,
-        strategyData.strategyIds,
-        strategyData.sku || null
-      );
-      const successCount = results.filter((r) => r.success).length;
-
-      return res.json({
-        success: true,
-        message: `Applied ${successCount} of ${strategyData.strategyIds.length} strategies to item ${itemId}`,
-        results,
-      });
-    }
-
-    return res.status(400).json({
-      success: false,
-      message: 'Strategy ID or strategyIds array is required',
-    });
-  } catch (err) {
-    console.error('Error updating strategies for product:', err);
-    return res.status(400).json({ success: false, message: err.message });
-  }
-});
-
 // 7) Get strategies that apply to a single item
 //    GET /api/pricing-strategies/item/:itemId?sku=<optional>
 router.get('/item/:itemId', async (req, res) => {
   try {
     const { itemId } = req.params;
     const { sku = null } = req.query;
-
-    console.log(`🔍 Getting strategies for item: ${itemId}`);
-
     const strategies = await getStrategiesForItem(itemId, sku);
     return res.json({
       success: true,
@@ -420,7 +366,6 @@ router.get('/item/:itemId', async (req, res) => {
       data: strategies,
     });
   } catch (err) {
-    console.error('Error in GET /item/:itemId:', err.message);
     return res.status(400).json({ success: false, message: err.message });
   }
 });
@@ -430,11 +375,6 @@ router.get('/item/:itemId', async (req, res) => {
 router.delete('/:id/item/:itemId', async (req, res) => {
   try {
     const { sku = null } = req.query;
-
-    console.log(
-      `🗑️ Removing strategy ${req.params.id} from item ${req.params.itemId}`
-    );
-
     await removeStrategyFromItemController(
       req.params.id,
       req.params.itemId,
@@ -445,7 +385,6 @@ router.delete('/:id/item/:itemId', async (req, res) => {
       message: `Removed strategy from item ${req.params.itemId}`,
     });
   } catch (err) {
-    console.error('Error in DELETE /:id/item/:itemId:', err.message);
     if (err.message.includes('not found')) {
       return res.status(404).json({ success: false, message: err.message });
     }
@@ -455,24 +394,14 @@ router.delete('/:id/item/:itemId', async (req, res) => {
 
 // 6.9) Execute all active strategies manually
 //      POST /api/pricing-strategies/execute-all
-router.post('/execute-all', async (req, res) => {
-  try {
-    console.log('🚀 Executing all active strategies');
-    return await executeAllStrategiesController(req, res);
-  } catch (err) {
-    console.error('Error in POST /execute-all:', err.message);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
+router.post('/execute-all', executeAllStrategiesController);
 
 // 6.11) Force price update for a specific item
 //       POST /api/pricing-strategies/products/:itemId/update-price
 router.post('/products/:itemId/update-price', async (req, res) => {
   try {
     const { itemId } = req.params;
-    const userId = req.user?.id || req.user?._id; // FIXED: Use authenticated user
-
-    console.log(`💰 Force price update for item ${itemId}, user: ${userId}`);
+    const userId = req.user?.id;
 
     // Get strategies for this item
     const strategies = await getStrategiesForItem(itemId);
@@ -531,8 +460,6 @@ router.post('/products/:itemId/update-price', async (req, res) => {
   }
 });
 
-// Apply strategy to a single product
-// POST /api/pricing-strategies/products/:itemId/apply
 router.post('/products/:itemId/apply', async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -544,11 +471,6 @@ router.post('/products/:itemId/apply', async (req, res) => {
       sku = null,
       title = null,
     } = req.body;
-
-    // FIXED: Use authenticated user's ID
-    const userId = req.user.id || req.user._id;
-
-    console.log(`💼 Applying strategy to product ${itemId} for user ${userId}`);
 
     // 1) Normalize incoming strategy IDs
     const ids = strategyIds?.length
@@ -564,16 +486,12 @@ router.post('/products/:itemId/apply', async (req, res) => {
       });
     }
 
-    // 2) Verify each strategy exists and belongs to this user
-    const found = await PricingStrategy.find({
-      _id: { $in: ids },
-      createdBy: userId, // FIXED: Ensure user owns the strategies
-    });
-
+    // 2) Verify each strategy exists
+    const found = await PricingStrategy.find({ _id: { $in: ids } });
     if (found.length !== ids.length) {
       return res.status(404).json({
         success: false,
-        message: 'One or more strategy IDs not found or not accessible',
+        message: 'One or more strategy IDs not found',
       });
     }
 
@@ -583,7 +501,7 @@ router.post('/products/:itemId/apply', async (req, res) => {
     // 4) Upsert listing-level overrides on Product
     const ebayAccountId =
       req.user?.ebayAccountId || process.env.DEFAULT_EBAY_ACCOUNT_ID;
-
+    const userId = req.user?._id || req.body.userId;
     const updated = await Product.findOneAndUpdate(
       { itemId, ebayAccountId },
       {
@@ -620,37 +538,12 @@ router.post('/products/:itemId/apply', async (req, res) => {
   }
 });
 
-// Set/Update strategy for a specific item
-// PUT /api/pricing-strategies/products/:itemId/strategy
-router.put('/products/:itemId/strategy', async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const { strategyId, minPrice, maxPrice, sku } = req.body;
-    const userId = req.user.id || req.user._id;
+router.put('/products/:itemId/strategy', setStrategyForItemController);
 
-    console.log(`🔄 Setting strategy for product ${itemId}, user: ${userId}`);
-
-    return await setStrategyForItemController(req, res);
-  } catch (err) {
-    console.error('Error in PUT /products/:itemId/strategy:', err.message);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// Execute strategy for a specific item
-// POST /api/pricing-strategies/products/:itemId/execute
 router.post('/products/:itemId/execute', async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const userId = req.user.id || req.user._id;
-
-    console.log(`⚡ Executing strategy for item ${itemId}, user: ${userId}`);
-
-    return await executeStrategyForItemController(req, res);
-  } catch (err) {
-    console.error('Error in POST /products/:itemId/execute:', err.message);
-    return res.status(500).json({ success: false, message: err.message });
-  }
+  const result = await executeStrategyForItem(req.params.itemId);
+  res.json(result);
 });
 
+router.post('/products/:itemId/execute', executeStrategyForItemController);
 export default router;

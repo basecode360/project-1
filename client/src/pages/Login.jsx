@@ -25,9 +25,7 @@ export default function Login({ handleLogin }) {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const navigate = useNavigate();
 
-  // FIXED: Change saveUser to setUser to match your authStore
-  const setUser = useAuthStore((store) => store.setUser);
-  const setToken = useAuthStore((store) => store.setToken);
+  const saveUser = useAuthStore((store) => store.saveUser);
   const user = useAuthStore((store) => store.user);
 
   useEffect(() => {
@@ -51,20 +49,10 @@ export default function Login({ handleLogin }) {
         localStorage.setItem('app_jwt', appJwt);
         localStorage.setItem('user_id', loggedUser.id);
 
-        // FIXED: Use setUser instead of saveUser and ensure proper data structure
-        setUser({
+        saveUser({
           id: loggedUser.id,
           email: loggedUser.email,
           token: appJwt,
-        });
-
-        // Also set the token and authentication status
-        setToken(appJwt);
-
-        console.log('✅ Login successful:', {
-          userId: loggedUser.id,
-          email: loggedUser.email,
-          hasToken: !!appJwt,
         });
 
         // 3) Fetch a valid eBay user token immediately
@@ -108,7 +96,6 @@ export default function Login({ handleLogin }) {
       }
     }
   };
-
   const togglePasswordVisibility = () => {
     setShowPassword((prev) => !prev);
   };

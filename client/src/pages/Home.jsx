@@ -1,9 +1,9 @@
-// src/pages/Home.jsx - OPTIMIZED VERSION WITH FAST AUTH
+// src/pages/Home.jsx
 import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import apiService from '../api/apiService';
 import getValidAuthToken from '../utils/getValidAuthToken';
-import useAuthStore from '../store/authStore';
+import { userStore } from '../store/authStore';
 
 import Header from '../componentsForHome/Header';
 import NavTabs from '../componentsForHome/NavTabs';
@@ -15,38 +15,18 @@ import Footer from '../componentsForHome/Footer';
 import ScrollToTopButton from '../componentsForHome/ScrollToTopButton';
 import AssignCompetitorRule from '../componentsForHome/AssignCompetitorRule';
 
-// CRITICAL: Lightning-fast auth check to eliminate delays
-const lightningFastAuthCheck = () => {
-  try {
-    const authStore = JSON.parse(localStorage.getItem('auth-store') || '{}');
-    const appJwt = localStorage.getItem('app_jwt');
-    const userId = localStorage.getItem('user_id');
-
-    console.log('🏠 Home: ⚡ Lightning auth check:', {
-      hasAuthStore: !!authStore.state?.user,
-      hasAppJwt: !!appJwt,
-      hasUserId: !!userId,
-    });
-
-    return !!(authStore.state?.user || appJwt || userId);
-  } catch (error) {
-    console.error('🏠 Home: Lightning auth check error:', error);
-    return false;
-  }
-};
-
 export default function Home({ handleLogout }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [itemsPerPage] = useState(10);
+  const [itemsPerPage] = useState(10); // You can make this configurable later
   const [ebayToken, setEbayToken] = useState(null);
   const [needsConnection, setNeedsConnection] = useState(false);
   const [loadingListings, setLoadingListings] = useState(false);
   const [listingsError, setListingsError] = useState(null);
 
-  const user = useAuthStore((store) => store.user);
+  const user = userStore((store) => store.user);
   const location = useLocation();
-  const popupRef = useRef(null);
+  const popupRef = useRef(null); // will hold reference to the OAuth popup window
 
   // Handle OAuth popup messages
   useEffect(() => {
@@ -81,9 +61,10 @@ export default function Home({ handleLogout }) {
             throw new Error(resp.error || 'Exchange failed');
           }
 
-          const expiresIn = resp.data.expires_in || 7200;
+          const expiresIn = resp.data.expires_in || 7200; // fallback to 2h
           const expiresAt = Date.now() + expiresIn * 1000;
 
+          // Store token with expiry info
           const tokenData = {
             value: resp.data.access_token,
             expiry: expiresAt,
@@ -99,6 +80,7 @@ export default function Home({ handleLogout }) {
           setEbayToken(resp.data.access_token);
           setNeedsConnection(false);
 
+          // Close the popup window if it exists
           if (popupRef.current && !popupRef.current.closed) {
             popupRef.current.close();
           }
@@ -115,61 +97,22 @@ export default function Home({ handleLogout }) {
     return () => window.removeEventListener('message', handleMessage);
   }, [user]);
 
-  // CRITICAL: LIGHTNING-FAST token check to eliminate 15+ second delays
+  // 1) On mount (and whenever the "user" changes), try to fetch/refresh the eBay token.
+  //    If none is available, show "Connect to eBay" button.
   useEffect(() => {
-    async function lightningTokenCheck() {
-      console.log('🏠 Home: ⚡ Starting LIGHTNING token check at:', Date.now());
+    async function checkToken() {
+      if (!user || !user.id) return;
 
-      // FAST PATH 1: Check if we have stored auth without waiting for user
-      const hasStoredAuth = lightningFastAuthCheck();
-      const storedUserId = localStorage.getItem('user_id');
-
-      // FAST PATH 2: Use stored user ID if available, don't wait for user state
-      const effectiveUserId = user?.id || storedUserId;
-
-      if (!effectiveUserId) {
-        if (hasStoredAuth && storedUserId) {
-          console.log(
-            '🏠 Home: ⚡ Using stored user ID, not waiting for user state'
-          );
-          await proceedWithTokenCheck(storedUserId);
-          return;
-        }
-
-        console.log('🏠 Home: ⏳ No user ID available yet');
-        // Don't wait forever - if we can't proceed in 2 seconds, something's wrong
-        setTimeout(() => {
-          if (!effectiveUserId && hasStoredAuth) {
-            console.warn(
-              '🏠 Home: ⚠️ Timeout waiting for user, proceeding with stored auth'
-            );
-            const fallbackUserId = localStorage.getItem('user_id');
-            if (fallbackUserId) {
-              proceedWithTokenCheck(fallbackUserId);
-            }
-          }
-        }, 2000);
-        return;
-      }
-
-      await proceedWithTokenCheck(effectiveUserId);
-    }
-
-    async function proceedWithTokenCheck(userId) {
-      console.log('🏠 Home: ⚡ Lightning token check for user:', userId);
-
-      // STEP 1: Lightning-fast localStorage check
+      // 1. Try localStorage first
       const localTokenStr = localStorage.getItem('ebay_user_token');
       if (localTokenStr) {
         try {
           const localTokenData = JSON.parse(localTokenStr);
           if (localTokenData.expiry > Date.now()) {
-            console.log('🏠 Home: ⚡ INSTANT - Valid token in localStorage');
             setEbayToken(localTokenData.value);
             setNeedsConnection(false);
             return;
           } else {
-            console.log('🏠 Home: 🗑️ Removing expired token from localStorage');
             localStorage.removeItem('ebay_user_token');
           }
         } catch (err) {
@@ -178,101 +121,73 @@ export default function Home({ handleLogout }) {
         }
       }
 
-      // STEP 2: Backend refresh with timeout to prevent delays
+      // 2. Try to get/refresh token from backend
       try {
-        console.log(
-          '🏠 Home: 🔄 Fetching token from backend (with 3s timeout)...'
-        );
-
-        const tokenPromise = getValidAuthToken(userId);
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error('Backend token fetch timeout')),
-            3000
-          )
-        );
-
-        const token = await Promise.race([tokenPromise, timeoutPromise]);
-
+        const token = await getValidAuthToken(user.id);
         if (token) {
           const tokenData = {
             value: token,
-            expiry: Date.now() + 7200 * 1000,
+            expiry: Date.now() + 7200 * 1000, // 2 hours default
           };
           localStorage.setItem('ebay_user_token', JSON.stringify(tokenData));
           setEbayToken(token);
           setNeedsConnection(false);
-          console.log('🏠 Home: ✅ Fresh token obtained from backend');
         } else {
-          console.log('🏠 Home: ❌ No token available, needs connection');
           setNeedsConnection(true);
         }
       } catch (err) {
-        console.warn('⚠️ Backend token fetch failed/timeout:', err.message);
-        console.log(
-          '🏠 Home: 🔗 Setting needs connection due to token failure'
-        );
+        console.warn('⚠️ Unable to fetch/refresh eBay token:', err);
         setNeedsConnection(true);
       }
     }
 
-    lightningTokenCheck();
-  }, [user]); // Keep user dependency but make it non-blocking with fallbacks
+    checkToken();
+  }, [user]);
 
-  // OPTIMIZED: Lightning-fast listings fetch
+  // 2) Once we have a valid ebayToken, fetch the user's active listings.
   useEffect(() => {
     if (!ebayToken) {
-      console.log('🏠 Home: ⏳ No eBay token yet, skipping listings fetch');
       return;
     }
 
-    async function lightningFetchListings() {
-      console.log('🏠 Home: ⚡ Starting LIGHTNING listings fetch...');
+    async function fetchListings() {
       setLoadingListings(true);
       setListingsError(null);
-
       try {
+        // Our interceptor attaches "Authorization: Bearer <ebayToken>"
         const data = await apiService.inventory.getActiveListings();
-
         if (!data.success) {
           // Check if token expired
           if (data.errors?.[0]?.errorId === 932) {
             console.warn('eBay token expired. Refreshing…');
-
-            const effectiveUserId = user?.id || localStorage.getItem('user_id');
-            if (effectiveUserId) {
-              const refreshed = await apiService.auth.refreshEbayUserToken(
-                effectiveUserId
+            const refreshed = await apiService.auth.refreshEbayUserToken(
+              user.id
+            );
+            if (refreshed?.success && refreshed.data?.access_token) {
+              const expires = refreshed.data.expires_in || 7200;
+              localStorage.setItem(
+                'ebay_user_token',
+                JSON.stringify({
+                  value: refreshed.data.access_token,
+                  expiry: Date.now() + expires * 1000,
+                })
               );
-
-              if (refreshed?.success && refreshed.data?.access_token) {
-                const expires = refreshed.data.expires_in || 7200;
-                localStorage.setItem(
-                  'ebay_user_token',
-                  JSON.stringify({
-                    value: refreshed.data.access_token,
-                    expiry: Date.now() + expires * 1000,
-                  })
-                );
-                setEbayToken(refreshed.data.access_token);
-                return; // re-trigger on next effect run
-              }
+              setEbayToken(refreshed.data.access_token);
+              return; // re-trigger fetchListings on next effect run
+            } else {
+              // Refresh failed, clear tokens and show connect page
+              localStorage.removeItem('ebay_user_token');
+              localStorage.removeItem('ebay_refresh_token');
+              setEbayToken(null);
+              setNeedsConnection(true);
+              return;
             }
-
-            // Refresh failed, clear tokens and show connect page
-            localStorage.removeItem('ebay_user_token');
-            localStorage.removeItem('ebay_refresh_token');
-            setEbayToken(null);
-            setNeedsConnection(true);
-            return;
           }
           setListingsError(data.error || 'Failed to load listings.');
         }
-
-        console.log('🏠 Home: ✅ Listings fetch completed successfully');
+        // TODO: store "data" (listings) into local state or a global store.
       } catch (err) {
         console.error('Error fetching listings:', err);
-
         // Check if it's a 401 error (token expired)
         if (err.response?.status === 401 || err.status === 401) {
           console.warn(
@@ -282,7 +197,7 @@ export default function Home({ handleLogout }) {
           localStorage.removeItem('ebay_refresh_token');
           setEbayToken(null);
           setNeedsConnection(true);
-          setListingsError(null);
+          setListingsError(null); // Clear error since we're handling it
         } else {
           setListingsError(err.message || 'Error loading listings.');
         }
@@ -291,7 +206,7 @@ export default function Home({ handleLogout }) {
       }
     }
 
-    lightningFetchListings();
+    fetchListings();
   }, [ebayToken, user]);
 
   // Handle global eBay token expiry events
@@ -308,12 +223,14 @@ export default function Home({ handleLogout }) {
         '⚠️ Authentication failure detected. Clearing storage and reloading...'
       );
 
+      // Clear all authentication-related data
       localStorage.removeItem('user-store');
       localStorage.removeItem('ebay_user_token');
       localStorage.removeItem('ebay_refresh_token');
       localStorage.removeItem('userId');
       localStorage.removeItem('user_id');
 
+      // Reload the page to redirect to login
       window.location.reload();
     };
 
@@ -329,22 +246,23 @@ export default function Home({ handleLogout }) {
   // 3) If the user never connected to eBay, show "Connect to eBay" UI.
   if (needsConnection) {
     const openEbayOAuthPopup = () => {
-      const effectiveUserId = user?.id || localStorage.getItem('user_id');
-
-      if (!effectiveUserId) {
+      if (!user || !user.id) {
         console.error('No user ID available – cannot start eBay OAuth.');
         alert('No user ID available. Please log in again.');
         return;
       }
 
+      // Get the backend URL from environment or use current domain
       const backendBase =
         import.meta.env.VITE_BACKEND_URL || window.location.origin;
+
+      // 3a) Open a small popup centered on the screen:
       const width = 600;
       const height = 700;
       const left = window.screenX + (window.innerWidth - width) / 2;
       const top = window.screenY + (window.innerHeight - height) / 2;
 
-      const authUrl = `${backendBase}/auth/ebay-login?userId=${effectiveUserId}`;
+      const authUrl = `${backendBase}/auth/ebay-login?userId=${user.id}`;
 
       const popup = window.open(
         authUrl,
@@ -360,8 +278,10 @@ export default function Home({ handleLogout }) {
         return;
       }
 
+      // Store reference to popup
       popupRef.current = popup;
 
+      // Optional: Monitor popup closure
       const checkClosed = setInterval(() => {
         if (popup.closed) {
           clearInterval(checkClosed);
@@ -404,7 +324,7 @@ export default function Home({ handleLogout }) {
         <button
           onClick={() => {
             setNeedsConnection(false);
-            setEbayToken('dummy');
+            setEbayToken('dummy'); // This will trigger a refresh attempt
           }}
           style={{
             padding: '0.5rem 1rem',
@@ -424,15 +344,17 @@ export default function Home({ handleLogout }) {
 
   // Handle eBay account logout
   const handleEbayLogout = async () => {
-    const effectiveUserId = user?.id || localStorage.getItem('user_id');
-    if (!effectiveUserId) return;
+    if (!user?.id) return;
 
     try {
-      const response = await apiService.auth.ebayLogout(effectiveUserId);
+      const response = await apiService.auth.ebayLogout(user.id);
 
       if (response.success) {
+        // Clear eBay tokens from localStorage
         localStorage.removeItem('ebay_user_token');
         localStorage.removeItem('ebay_refresh_token');
+
+        // Update component state
         setEbayToken(null);
         setNeedsConnection(true);
         setListingsError(null);
@@ -454,6 +376,7 @@ export default function Home({ handleLogout }) {
   // Reset to page 1 when switching views or reloading data
   const handleTotalPagesChange = (newTotalPages) => {
     setTotalPages(newTotalPages);
+    // If current page is beyond new total pages, reset to page 1
     if (page > newTotalPages) {
       setPage(1);
     }
@@ -464,6 +387,7 @@ export default function Home({ handleLogout }) {
       <Header handleLogout={handleLogout} handleEbayLogout={handleEbayLogout} />
       <NavTabs />
 
+      {/* If you have nested routes under /home, render them here: */}
       <Outlet />
 
       {isDashboard && (

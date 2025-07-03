@@ -1,4 +1,3 @@
-// middleware/rateLimitMiddleware.js
 import ebayUsageService from '../services/ebayUsageService.js';
 
 // In-memory rate limiting for immediate protection
@@ -17,21 +16,13 @@ const MAX_CALLS_PER_MINUTE = {
 export const ebayRateLimit = (callName = 'GetItem') => {
   return async (req, res, next) => {
     try {
-      // FIXED: Better userId extraction with multiple fallbacks
-      const userId =
-        req.user?.id || req.user?._id || req.query.userId || req.body.userId;
+      const userId = req.user?.id || req.query.userId || req.body.userId;
 
       if (!userId) {
-        console.warn(
-          `⚠️ No userId found for rate limiting ${callName}. Allowing request to proceed.`
-        );
-        // Don't block the request, just proceed without rate limiting
-        req.ebayUsage = {
-          apiCall: callName,
-          timestamp: new Date().toISOString(),
-          rateLimitStatus: 'no_user_id_bypassed',
-        };
-        return next();
+        return res.status(401).json({
+          success: false,
+          message: 'User authentication required for rate limiting',
+        });
       }
 
       // Check immediate rate limiting first (prevent spam)
@@ -118,18 +109,10 @@ export const logEbayUsage = (req, res, next) => {
   // Log the usage after response
   res.on('finish', () => {
     if (req.ebayUsage) {
-      // FIXED: Better userId extraction for logging with multiple fallbacks
-      const userId =
-        req.user?.id ||
-        req.user?._id ||
-        req.query.userId ||
-        req.body.userId ||
-        'unknown';
-
       console.log(`📊 eBay API Usage:`, {
         ...req.ebayUsage,
         statusCode: res.statusCode,
-        userId: userId,
+        userId: req.user?.id || req.query.userId || 'unknown',
       });
     }
   });
