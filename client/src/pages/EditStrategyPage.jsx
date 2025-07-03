@@ -30,6 +30,7 @@ import {
   Cancel as CancelIcon,
 } from '@mui/icons-material';
 import apiService from '../api/apiService';
+import { useProductStore } from '../store/productStore';
 
 export default function EditStrategyPage() {
   const { strategyName } = useParams();
@@ -229,32 +230,21 @@ export default function EditStrategyPage() {
         cleanFormData
       );
 
-       if (updateResponse.success) {
-         // 1) update local strategy details
-         setStrategy(updateResponse.data);
-         setIsEditing(false);
-         showAlert('Strategy updated successfully!', 'success');
+      if (updateResponse.success) {
+        // Update local strategy details
+        setStrategy(updateResponse.data);
+        setIsEditing(false);
+        showAlert('Strategy updated successfully!', 'success');
 
-         // 2) patch only that product in the table store
-         modifyProductsArray((products) =>
-           products.map((p) =>
-             p.productId === someListingId // <-- you’ll need to carry forward the listingId context
-               ? {
-                   ...p,
-                   strategy: updateResponse.data.strategyName,
-                   minPrice: updateResponse.data.minPrice,
-                   maxPrice: updateResponse.data.maxPrice,
-                   hasStrategy: updateResponse.data.isActive,
-                 }
-               : p
-           )
-         );
-       } else {
-         showAlert(
-           'Failed to update strategy: ' + updateResponse.error,
-           'error'
-         );
-       }
+        // Refresh the associated listings to show updated strategy
+        await fetchAssociatedListings(updateResponse.data);
+      } else {
+        showAlert(
+          'Failed to update strategy: ' +
+            (updateResponse.error || 'Unknown error'),
+          'error'
+        );
+      }
     } catch (err) {
       showAlert('Error updating strategy: ' + err.message, 'error');
     } finally {

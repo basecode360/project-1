@@ -149,9 +149,7 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     console.log(`📝 Updating strategy: ${req.params.id}`);
-
-    const updated = await updatePricingStrategy(req.params.id, req.body);
-    return res.json({ success: true, data: updated });
+    return await updatePricingStrategy(req, res);
   } catch (err) {
     console.error('Error in PUT /api/pricing-strategies/:id:', err.message);
     if (err.message.includes('not found')) {

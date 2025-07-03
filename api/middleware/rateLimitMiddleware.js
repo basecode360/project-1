@@ -6,9 +6,9 @@ const rateLimitStore = new Map();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const MAX_CALLS_PER_MINUTE = {
   GetItem: 10,
-  GetMyeBaySelling: 5,
+  GetMyeBaySelling: 30,
   ReviseInventoryStatus: 10,
-  default: 5,
+  default: 30,
 };
 
 /**

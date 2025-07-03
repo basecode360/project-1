@@ -590,7 +590,7 @@ export default function ListingsTable({
 
           // Force a complete refresh by clearing cache and refetching
           console.log('🔄 Detected strategy update, refreshing data...');
-          setLoading(true);
+          setListingsLoading(true);
 
           // Clear the current products array to force a complete reload
           modifyProductsArray([]);

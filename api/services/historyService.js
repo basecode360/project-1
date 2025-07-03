@@ -48,8 +48,8 @@ export async function recordPriceChange({
   success,
   error = null,
   metadata = {},
-  minPrice = null, // <-- ensure these are included
-  maxPrice = null, // <-- ensure these are included
+  minPrice = null,
+  maxPrice = null,
   repricingRule = null,
 }) {
   // Check MongoDB connection
@@ -116,8 +116,9 @@ export async function recordPriceChange({
     success,
     error,
     metadata,
-    minPrice, // <-- use these
-    maxPrice, // <-- use these
+    // Ensure min/max prices are properly stored
+    minPrice: minPrice != null ? Number(minPrice) : null,
+    maxPrice: maxPrice != null ? Number(maxPrice) : null,
     repricingRule,
   };
 

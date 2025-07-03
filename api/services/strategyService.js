@@ -506,6 +506,10 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
         console.warn('Could not fetch strategy info:', strategyError.message);
       }
 
+      // Get product info for min/max prices
+      const { default: Product } = await import('../models/Product.js');
+      const productDoc = await Product.findOne({ itemId });
+
       const historyRecord = {
         itemId: itemId,
         sku: executionData.sku || null,
@@ -519,8 +523,9 @@ async function recordStrategyExecution(strategyId, itemId, executionData) {
         competitorLowestPrice: executionData.competitorPrice || null,
         strategyName: strategyInfo?.strategyName || 'Unknown Strategy',
         repricingRule: strategyInfo?.repricingRule || null,
-        minPrice: strategyInfo?.minPrice || null,
-        maxPrice: strategyInfo?.maxPrice || null,
+        // Use min/max from product document (which gets set from form)
+        minPrice: productDoc?.minPrice || null,
+        maxPrice: productDoc?.maxPrice || null,
         userId: strategyInfo?.createdBy || null,
         source: 'strategy',
         status: 'completed',

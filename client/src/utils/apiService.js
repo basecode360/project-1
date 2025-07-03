@@ -203,19 +203,3 @@ class ApiService {
 
 const apiService = new ApiService();
 export default apiService;
-    try {
-      const response = await this.get(
-        `/competitor-rules?userId=${userId}`,
-        useCache
-      );
-      store.setCompetitorRules(response.rules || []);
-      return response;
-    } catch (error) {
-      store.setCompetitorRulesLoading(false);
-      throw error;
-    }
-  }
-}
-
-const apiService = new ApiService();
-export default apiService;

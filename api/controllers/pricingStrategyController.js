@@ -453,12 +453,19 @@ export async function setStrategyForItemController(req, res) {
         },
         $set: {
           strategy: strategy._id,
-          minPrice: minPrice != null ? +minPrice : null,
-          maxPrice: maxPrice != null ? +maxPrice : null,
+          // Ensure min/max prices are properly stored as numbers
+          minPrice: minPrice != null ? parseFloat(minPrice) : null,
+          maxPrice: maxPrice != null ? parseFloat(maxPrice) : null,
         },
       },
       { upsert: true, new: true }
     );
+
+    console.log(`📊 Product updated with min/max prices:`, {
+      itemId,
+      minPrice: updated.minPrice,
+      maxPrice: updated.maxPrice,
+    });
 
     // 3) immediately execute that strategy on eBay
     const execution = await executeStrategyForItem(itemId);
@@ -477,7 +484,6 @@ export async function setStrategyForItemController(req, res) {
   }
 }
 
-
 export {
   createPricingStrategy,
   getAllPricingStrategies,
@@ -490,5 +496,4 @@ export {
   getActivePricingStrategies,
   getStrategyDisplayForProductController,
   executeAllStrategiesController,
-  
 };

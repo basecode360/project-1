@@ -581,7 +581,20 @@ const pricingStrategies = {
     }
   },
 
-  // ...existing code...
+  updateStrategy: async (strategyId, strategyData) => {
+    try {
+      const resp = await pricingClient.put(`/${strategyId}`, strategyData);
+      return resp.data;
+    } catch (err) {
+      if (err.response?.status === 401) {
+        throw new Error('Authentication failed. Please log in again.');
+      }
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
+    }
+  },
 };
 
 /** ————————————— COMPETITOR RULES ————————————— **/
