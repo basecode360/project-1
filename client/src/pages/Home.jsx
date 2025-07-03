@@ -450,6 +450,7 @@ export default function Home({ handleLogout }) {
   const isDashboard = location.pathname === '/home';
   const isCompetitors = location.pathname === '/home/competitors';
   const isPricingStrategies = location.pathname === '/home/pricing-strategies';
+  const isPriceStrategy = location.pathname.startsWith('/home/price-strategy/');
 
   // Reset to page 1 when switching views or reloading data
   const handleTotalPagesChange = (newTotalPages) => {

@@ -10,32 +10,21 @@ import {
   Collapse,
   IconButton,
   CircularProgress,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Chip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useParams, useNavigate } from 'react-router-dom';
-import useProductStore from '../store/productStore';
 import apiService from '../api/apiService';
 
 export default function EditStrategy() {
-  const { productId } = useParams(); // Get dynamic ID from route
-  const { AllProducts } = useProductStore();
+  const { productId } = useParams();
+  const navigate = useNavigate();
+
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [oldPrice, setOldPrice] = useState(0);
   const [fetchingCompetitorPrice, setFetchingCompetitorPrice] = useState(false);
-  const [priceHistory, setPriceHistory] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const navigate = useNavigate();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -48,8 +37,6 @@ export default function EditStrategy() {
     notes: '',
   });
 
-  const { modifyProductsArray } = useProductStore();
-
   // Available strategies and rules (fetched from APIs)
   const [availableStrategies, setAvailableStrategies] = useState([]);
   const [availableRules, setAvailableRules] = useState([]);
@@ -59,40 +46,85 @@ export default function EditStrategy() {
   const [alertMessage, setAlertMessage] = useState('');
   const [alertSeverity, setAlertSeverity] = useState('info');
 
-  // Fetch product data
+  // Fetch product data directly from API
   useEffect(() => {
     const fetchData = async () => {
+      if (!productId) {
+        setError('No product ID provided');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
 
-        // Find product from AllProducts
-        const foundProduct = AllProducts.find((p) => p.productId === productId);
-        if (!foundProduct) {
-          setError('Product not found');
-          return;
+        // Fetch fresh listings data
+        const response = await apiService.inventory.getActiveListings();
+
+        if (response.success) {
+          let ebayListings = [];
+
+          if (response.data?.GetMyeBaySellingResponse?.ActiveList?.ItemArray) {
+            const itemArray =
+              response.data.GetMyeBaySellingResponse.ActiveList.ItemArray;
+            if (Array.isArray(itemArray.Item)) {
+              ebayListings = itemArray.Item;
+            } else if (itemArray.Item) {
+              ebayListings = [itemArray.Item];
+            }
+          }
+
+          // Find the specific product
+          const targetItem = ebayListings.find(
+            (item) => item.ItemID === productId
+          );
+
+          if (targetItem) {
+            // Format the product for use
+            const formattedProduct = {
+              productTitle: targetItem.Title,
+              productId: targetItem.ItemID,
+              sku: targetItem.SKU || ' ',
+              status: [
+                targetItem.SellingStatus?.ListingStatus || 'Active',
+                targetItem.ConditionDisplayName || 'New',
+              ],
+              price: `USD ${parseFloat(targetItem.BuyItNowPrice || 0).toFixed(
+                2
+              )}`,
+              qty: parseInt(targetItem.Quantity || '0', 10),
+              myPrice: `USD ${parseFloat(targetItem.BuyItNowPrice || 0).toFixed(
+                2
+              )}`,
+            };
+
+            setProduct(formattedProduct);
+
+            const priceString = formattedProduct.myPrice;
+            const priceValue = priceString.includes(' ')
+              ? priceString.split(' ')[1]
+              : priceString.replace(/[^0-9.]/g, '');
+            setOldPrice(priceValue);
+
+            // Set initial form data with default min/max
+            setFormData((prev) => ({
+              ...prev,
+              myLandedPrice: priceValue,
+              minPrice: (parseFloat(priceValue) * 0.1).toFixed(2),
+              maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2),
+            }));
+
+            // Strategy/Rule fetching
+            await fetchExistingData(productId);
+
+            // Fetch competitor prices
+            await fetchCompetitorPrice(productId);
+          } else {
+            setError(`Product ${productId} not found in your active listings`);
+          }
+        } else {
+          setError('Failed to fetch eBay listings');
         }
-
-        setProduct(foundProduct);
-
-        const priceString = foundProduct.myPrice;
-        const priceValue = priceString.includes(' ')
-          ? priceString.split(' ')[1]
-          : priceString.replace(/[^0-9.]/g, '');
-        setOldPrice(priceValue);
-
-        // Set initial form data with default min/max (will be overridden if strategy exists)
-        setFormData((prev) => ({
-          ...prev,
-          myLandedPrice: priceValue,
-          minPrice: (parseFloat(priceValue) * 0.1).toFixed(2), // Default fallback
-          maxPrice: (parseFloat(priceValue) * 1.5).toFixed(2), // Default fallback
-        }));
-
-        // Strategy/Rule fetching - this will override min/max if strategy exists
-        await fetchExistingData(productId);
-
-        // Fetch competitor prices to populate lowest price
-        await fetchCompetitorPrice(productId);
       } catch (err) {
         setError('Failed to load product: ' + err.message);
       } finally {
@@ -101,7 +133,7 @@ export default function EditStrategy() {
     };
 
     fetchData();
-  }, [productId, AllProducts]);
+  }, [productId]);
 
   // Fetch existing strategies and competitor rules
   const fetchExistingData = async (id) => {
@@ -144,15 +176,9 @@ export default function EditStrategy() {
             ? appliedStrategy.rawStrategy.maxPrice.toFixed(2)
             : prev.maxPrice,
         }));
-
-        console.log('📊 Strategy form populated:', {
-          selectedStrategy: matchingStrategy?.strategyName,
-          minPrice: appliedStrategy.rawStrategy?.minPrice,
-          maxPrice: appliedStrategy.rawStrategy?.maxPrice,
-        });
       }
 
-      // Fetch competitor rule (keep existing logic)
+      // Fetch competitor rule
       const { rule } = await apiService.combined.getProductRulesAndStrategies(
         id
       );
@@ -189,7 +215,6 @@ export default function EditStrategy() {
     try {
       setFetchingCompetitorPrice(true);
 
-      // Get only manual competitors
       const competitorData =
         await apiService.inventory.getManuallyAddedCompetitors(itemId);
 
@@ -198,7 +223,6 @@ export default function EditStrategy() {
         competitorData.competitors &&
         competitorData.competitors.length > 0
       ) {
-        // Extract prices and find the lowest
         const prices = competitorData.competitors
           .map((comp) => parseFloat(comp.price))
           .filter((price) => !isNaN(price));
@@ -243,30 +267,6 @@ export default function EditStrategy() {
     }
   };
 
-  // Fetch price history from MongoDB
-  const fetchPriceHistory = async () => {
-    try {
-      setLoadingHistory(true);
-
-      // Use the corrected API call
-      const historyData = await apiService.priceHistory.getProductHistory(
-        productId,
-        100
-      );
-
-      if (historyData.success && historyData.priceHistory) {
-        setPriceHistory(historyData.priceHistory);
-      } else {
-        setPriceHistory([]);
-      }
-    } catch (error) {
-      console.error('📊 ❌ Error fetching price history from MongoDB:', error);
-      setPriceHistory([]);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
   // Handle input changes
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -301,7 +301,7 @@ export default function EditStrategy() {
         return;
       }
 
-      // Call the new “assign strategy” endpoint:
+      // Call the strategy update endpoint
       const updateResponse =
         await apiService.pricingStrategies.updateStrategyOnProduct(productId, {
           strategyId: selectedStrategyObj._id,
@@ -310,29 +310,15 @@ export default function EditStrategy() {
         });
 
       if (updateResponse.success) {
-        const newMin = parseFloat(formData.minPrice).toFixed(2);
-        const newMax = parseFloat(formData.maxPrice).toFixed(2);
-        if (typeof modifyProductsArray === 'function') {
-          modifyProductsArray((products) =>
-            products.map((p) =>
-              p.productId === productId
-                ? {
-                    ...p,
-                    strategy: selectedStrategyObj.strategyName,
-                    minPrice: `$${newMin}`,
-                    maxPrice: `$${newMax}`,
-                    hasStrategy: true,
-                  }
-                : p
-            )
-          );
-        }
         showAlert('Strategy applied successfully!', 'success');
-        navigate('/home', { replace: true });
+
+        // Navigate back after a short delay
+        setTimeout(() => {
+          navigate('/home', { replace: true });
+        }, 1500);
         return;
       }
 
-      // If you want to know whether it triggered an eBay repricing:
       const priceUpdated = updateResponse.data?.priceUpdated;
 
       if (priceUpdated) {
@@ -344,29 +330,9 @@ export default function EditStrategy() {
         showAlert('Strategy applied successfully!', 'success');
       }
 
-      // Force immediate refresh with multiple signals
-      const timestamp = Date.now().toString();
-      localStorage.setItem('strategyUpdated', timestamp);
-      localStorage.setItem('priceUpdated', timestamp);
-      localStorage.setItem('forceRefresh', timestamp);
-      localStorage.setItem('lastStrategyUpdate', timestamp);
-
-      // Set a global flag for immediate detection
-      if (typeof window !== 'undefined') {
-        window.lastPriceUpdate = {
-          timestamp: Date.now(),
-          itemId: productId,
-          newPrice: parseFloat(formData.lowestPrice) || 5.27,
-        };
-      }
-
-      // Navigate back immediately
+      // Navigate back after success
       setTimeout(() => {
         navigate('/home', { replace: true });
-        // Force a page reload to ensure updates show
-        setTimeout(() => {
-          window.location.reload();
-        }, 100);
       }, 1500);
     } catch (err) {
       console.error('Strategy update error:', err);
@@ -375,13 +341,6 @@ export default function EditStrategy() {
       setSubmitting(false);
     }
   };
-
-  // Add useEffect to fetch price history for this product
-  useEffect(() => {
-    if (productId) {
-      fetchPriceHistory();
-    }
-  }, [productId]);
 
   if (loading) {
     return (
