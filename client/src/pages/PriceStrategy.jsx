@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import useProductStore from '../store/productStore';
+import { useProductStore } from '../store/productStore';
 import Form from '../componentsForEditListing/StrategyForm';
 import ListingsTable from '../componentsForEditListing/ListingsTable';
 
@@ -10,7 +10,7 @@ export default function PriceStrategy() {
 
   const products = Array.isArray(AllProducts) ? AllProducts : [];
   const safeList = Array.isArray(AllProducts) ? AllProducts : [];
-  const currentProduct = safeList.find((p) => p.productId === productId);
+  const currentProduct = safeList.find(p => p.productId === productId);
   // Optional: sync store state
   React.useEffect(() => {
     if (currentProduct) {

@@ -22,7 +22,7 @@ import {
 } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
 import apiService from '../api/apiService';
-import useProductStore from '../store/productStore';
+import { useProductStore } from '../store/productStore';
 
 export default function PriceChangeSubmissions() {
   const { productId } = useParams();

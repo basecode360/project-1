@@ -7,21 +7,17 @@ import {
   Typography,
   Container,
 } from '@mui/material';
-import useProductStore from '../store/productStore';
+import { useProductStore } from '../store/productStore';
 
 export default function EntriesAndSearchBar() {
-  const { searchTerm, entriesPerPage, modifySearch, getFilteredProducts } =
-    useProductStore();
+  const [entries, setEntries] = React.useState(5);
+  const [search, setSearch] = React.useState('');
+  const { modifySearch, performSearch, setEntriesLimit } = useProductStore();
 
-  const { totalItems } = getFilteredProducts();
-
-  const handleSearchChange = (e) => {
-    modifySearch({ searchTerm: e.target.value });
-  };
-
-  const handleEntriesChange = (e) => {
-    modifySearch({ entriesPerPage: parseInt(e.target.value) });
-  };
+  useEffect(() => {
+    modifySearch(search);
+    performSearch({ search, limit: entries });
+  }, [search, entries]);
 
   return (
     <Container sx={{ mt: 4, mb: 2 }}>
@@ -36,8 +32,11 @@ export default function EntriesAndSearchBar() {
           <Typography variant="body2">Show</Typography>
           <Select
             size="small"
-            value={entriesPerPage}
-            onChange={handleEntriesChange}
+            value={entries}
+            onChange={(e) => {
+              setEntries(e.target.value);
+              setEntriesLimit(e.target.value);
+            }}
             sx={{ minWidth: 70 }}
           >
             {[5, 10, 25, 50, 100].map((num) => (
@@ -48,11 +47,6 @@ export default function EntriesAndSearchBar() {
           </Select>
           <Typography variant="body2">Entries</Typography>
         </Box>
-
-        {/* Results count */}
-        <Typography variant="body2" color="textSecondary">
-          Showing {totalItems} result{totalItems !== 1 ? 's' : ''}
-        </Typography>
 
         {/* Search bar */}
         <Box
@@ -79,8 +73,8 @@ export default function EntriesAndSearchBar() {
           {/* Search Input */}
           <InputBase
             placeholder="Search..."
-            value={searchTerm}
-            onChange={handleSearchChange}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             sx={{
               backgroundColor: '#ffffff',
               color: '#333',
