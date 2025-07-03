@@ -649,7 +649,7 @@ export default function ListingsTable({
               }}
               onClick={() => {
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               Assign Rule
@@ -718,7 +718,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for product: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.strategy}
@@ -747,7 +747,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for min price: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.minPrice}
@@ -776,7 +776,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for max price: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.maxPrice}
@@ -849,7 +849,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for product: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.strategy}
@@ -878,7 +878,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for min price: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.minPrice}
@@ -907,7 +907,7 @@ export default function ListingsTable({
                   `🔀 Navigating to strategy form for max price: ${row.productId}`
                 );
                 modifyProductsId(row.productId);
-                navigate(`/home/price-strategy/${row.productId}`);
+                navigate(`/price-strategy/${row.productId}`);
               }}
             >
               {row.maxPrice}

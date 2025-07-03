@@ -1,4 +1,4 @@
-// src/AppRoutes.jsx - UPDATED with productId parameter for price-strategy
+// src/AppRoutes.jsx - FIXED to use proper imports
 import React, { useState, useEffect } from 'react';
 import {
   BrowserRouter as Router,
@@ -41,11 +41,7 @@ const EditCompetitorRulePage = React.lazy(() =>
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth(); // FIXED: Use named import
 
-  console.log('🛡️ ProtectedRoute check:', {
-    isAuthenticated,
-    loading,
-    timestamp: Date.now(),
-  });
+  console.log('🛡️ ProtectedRoute check:', { isAuthenticated, loading, timestamp: Date.now() });
 
   if (loading) {
     return (
@@ -72,35 +68,27 @@ export default function AppRoutes() {
     ) {
       return; // skip auto‐refresh on login or popup callback
     }
-
+    
     console.log('🔄 Attempting eBay token refresh for user:', user.id);
-
+    
     (async () => {
       try {
         await getValidAuthToken(user.id);
         console.log('✅ eBay token refresh successful');
       } catch (err) {
-        console.warn(
-          '⚠️ Could not refresh eBay token. User may need to reconnect:',
-          err.message
-        );
+        console.warn('⚠️ Could not refresh eBay token. User may need to reconnect:', err.message);
       }
     })();
   }, [user, location.pathname]);
 
   return (
-    <React.Suspense
-      fallback={
-        <div className="flex justify-center items-center min-h-screen">
-          <div>Loading application...</div>
-        </div>
-      }
-    >
+    <React.Suspense fallback={
+      <div className="flex justify-center items-center min-h-screen">
+        <div>Loading application...</div>
+      </div>
+    }>
       <Routes>
-        <Route
-          path="/login"
-          element={<Login handleLogin={() => setIsLoggedIn(true)} />}
-        />
+        <Route path="/login" element={<Login handleLogin={() => setIsLoggedIn(true)} />} />
         <Route
           path="/home"
           element={
@@ -108,13 +96,7 @@ export default function AppRoutes() {
               <Home />
             </ProtectedRoute>
           }
-        >
-          {/* Nested route for price strategy */}
-          <Route
-            path="price-strategy/:productId"
-            element={<PriceStrategy />}
-          />
-        </Route>
+        />
         <Route
           path="/edit-listing/:itemId"
           element={
@@ -136,6 +118,14 @@ export default function AppRoutes() {
           element={
             <ProtectedRoute>
               <CompetitorsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/price-strategy"
+          element={
+            <ProtectedRoute>
+              <PriceStrategy />
             </ProtectedRoute>
           }
         />
