@@ -34,9 +34,12 @@ router.use(requireAuth);
 //    POST /api/pricing-strategies
 router.post('/', async (req, res) => {
   try {
-    const strategy = await createPricingStrategy({
+    // Use the correct import - createStrategy is the service function
+    const { createStrategy } = await import('../services/strategyService.js');
+
+    const strategy = await createStrategy({
       ...req.body,
-      createdBy: req.user.id,
+      createdBy: req.user.id || req.user._id,
     });
 
     return res.status(201).json({
@@ -46,7 +49,10 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Error in POST /api/pricing-strategies:', err.message);
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(400).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 

@@ -62,6 +62,9 @@ const createPricingStrategy = async (req, res) => {
       });
     }
 
+    // Import the service function correctly
+    const { createStrategy } = await import('../services/strategyService.js');
+
     const strategy = await createStrategy({
       strategyName,
       repricingRule,
@@ -73,7 +76,7 @@ const createPricingStrategy = async (req, res) => {
       maxPrice,
       minPrice,
       isDefault: isDefault || false,
-      createdBy: req.user?._id,
+      createdBy: req.user?._id || req.user?.id,
     });
 
     return res.status(201).json({
@@ -82,7 +85,7 @@ const createPricingStrategy = async (req, res) => {
       data: strategy,
     });
   } catch (error) {
-    console.error('Error creating pricing strategy:', error.message);
+    console.error('Error creating pricing strategy:', error);
     return res.status(500).json({
       success: false,
       message: error.message.includes('already exists')
