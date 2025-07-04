@@ -248,16 +248,16 @@ router.post(
 
       // ONLY retrieve existing item specifics if absolutely necessary
       const getItemXml = `
-      <?xml version="1.0" encoding="utf-8"?>
-      <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${authToken}</eBayAuthToken>
-        </RequesterCredentials>
-        <ItemID>${itemId}</ItemID>
-        <DetailLevel>ItemSpecificsOnly</DetailLevel>
-        <IncludeItemSpecifics>true</IncludeItemSpecifics>
-      </GetItemRequest>
-    `;
+        <?xml version="1.0" encoding="utf-8"?>
+        <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${authToken}</eBayAuthToken>
+          </RequesterCredentials>
+          <ItemID>${itemId}</ItemID>
+          <DetailLevel>ItemSpecificsOnly</DetailLevel>
+          <IncludeItemSpecifics>true</IncludeItemSpecifics>
+        </GetItemRequest>
+      `;
 
       const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
       const getItemResult = await parseXMLResponse(getItemResponse);
@@ -277,63 +277,65 @@ router.post(
 
       // Build XML for the update with both sets of specifics
       const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-      <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${authToken}</eBayAuthToken>
-        </RequesterCredentials>
-        <Item>
-          <ItemID>${itemId}</ItemID>
-          <ItemSpecifics>
-            <!-- Include existing non-competitor rule specifics -->
-            ${nonCompetitorRuleSpecifics
-              .map(
-                (spec) => `
-              <NameValueList>
-                <Name>${spec.Name}</Name>
-                <Value>${spec.Value}</Value>
-              </NameValueList>
-            `
-              )
-              .join('')}
-            
-            <!-- Add new competitor rule specifics -->
-            ${competitorRuleSpecifics
-              .map(
-                (spec) => `
-              <NameValueList>
-                <Name>${spec.name}</Name>
-                <Value>${spec.value}</Value>
-              </NameValueList>
-            `
-              )
-              .join('')}
-            
-            <!-- Ensure Brand and Type are present -->
-            ${
-              !nonCompetitorRuleSpecifics.some((spec) => spec.Name === 'Brand')
-                ? `
-              <NameValueList>
-                <Name>Brand</Name>
-                <Value>YourBrandName</Value>
-              </NameValueList>
-            `
-                : ''
-            }
-            
-            ${
-              !nonCompetitorRuleSpecifics.some((spec) => spec.Name === 'Type')
-                ? `
-              <NameValueList>
-                <Name>Type</Name>
-                <Value>YourTypeName</Value>
-              </NameValueList>
-            `
-                : ''
-            }
-          </ItemSpecifics>
-        </Item>
-      </ReviseItemRequest>
-    `;
+        <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${authToken}</eBayAuthToken>
+          </RequesterCredentials>
+          <Item>
+            <ItemID>${itemId}</ItemID>
+            <ItemSpecifics>
+              <!-- Include existing non-competitor rule specifics -->
+              ${nonCompetitorRuleSpecifics
+                .map(
+                  (spec) => `
+                <NameValueList>
+                  <Name>${spec.Name}</Name>
+                  <Value>${spec.Value}</Value>
+                </NameValueList>
+              `
+                )
+                .join('')}
+              
+              <!-- Add new competitor rule specifics -->
+              ${competitorRuleSpecifics
+                .map(
+                  (spec) => `
+                <NameValueList>
+                  <Name>${spec.name}</Name>
+                  <Value>${spec.value}</Value>
+                </NameValueList>
+              `
+                )
+                .join('')}
+              
+              <!-- Ensure Brand and Type are present -->
+              ${
+                !nonCompetitorRuleSpecifics.some(
+                  (spec) => spec.Name === 'Brand'
+                )
+                  ? `
+                <NameValueList>
+                  <Name>Brand</Name>
+                  <Value>YourBrandName</Value>
+                </NameValueList>
+              `
+                  : ''
+              }
+              
+              ${
+                !nonCompetitorRuleSpecifics.some((spec) => spec.Name === 'Type')
+                  ? `
+                <NameValueList>
+                  <Name>Type</Name>
+                  <Value>YourTypeName</Value>
+                </NameValueList>
+              `
+                  : ''
+              }
+            </ItemSpecifics>
+          </Item>
+        </ReviseItemRequest>
+      `;
 
       const xmlResponse = await makeEBayAPICall(xmlRequest, 'ReviseItem');
       const result = await parseXMLResponse(xmlResponse);
@@ -403,21 +405,21 @@ router.post(
 
       // Get all active listings with pagination and limits
       const getActiveListingsXML = `
-      <?xml version="1.0" encoding="utf-8"?>
-      <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-        <RequesterCredentials>
-          <eBayAuthToken>${authToken}</eBayAuthToken>
-        </RequesterCredentials>
-        <ActiveList>
-          <Include>true</Include>
-          <Pagination>
-            <EntriesPerPage>20</EntriesPerPage>
-            <PageNumber>1</PageNumber>
-          </Pagination>
-        </ActiveList>
-        <DetailLevel>ReturnSummary</DetailLevel>
-      </GetMyeBaySellingRequest>
-    `;
+        <?xml version="1.0" encoding="utf-8"?>
+        <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+          <RequesterCredentials>
+            <eBayAuthToken>${authToken}</eBayAuthToken>
+          </RequesterCredentials>
+          <ActiveList>
+            <Include>true</Include>
+            <Pagination>
+              <EntriesPerPage>20</EntriesPerPage>
+              <PageNumber>1</PageNumber>
+            </Pagination>
+          </ActiveList>
+          <DetailLevel>ReturnSummary</DetailLevel>
+        </GetMyeBaySellingRequest>
+      `;
 
       const activeListingsResponse = await makeEBayAPICall(
         getActiveListingsXML,
@@ -479,28 +481,28 @@ router.post(
           const ruleSpecifics = createCompetitorRuleSpecifics(req.body);
 
           const xmlRequest = `
-          <?xml version="1.0" encoding="utf-8"?>
-          <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-            <RequesterCredentials>
-              <eBayAuthToken>${authToken}</eBayAuthToken>
-            </RequesterCredentials>
-            <Item>
-              <ItemID>${itemId}</ItemID>
-              <ItemSpecifics>
-                ${ruleSpecifics
-                  .map(
-                    (spec) => `
-                <NameValueList>
-                  <Name>${spec.name}</Name>
-                  <Value>${spec.value}</Value>
-                </NameValueList>
-                `
-                  )
-                  .join('')}
-              </ItemSpecifics>
-            </Item>
-          </ReviseItemRequest>
-        `;
+            <?xml version="1.0" encoding="utf-8"?>
+            <ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials>
+                <eBayAuthToken>${authToken}</eBayAuthToken>
+              </RequesterCredentials>
+              <Item>
+                <ItemID>${itemId}</ItemID>
+                <ItemSpecifics>
+                  ${ruleSpecifics
+                    .map(
+                      (spec) => `
+                  <NameValueList>
+                    <Name>${spec.name}</Name>
+                    <Value>${spec.value}</Value>
+                  </NameValueList>
+                  `
+                    )
+                    .join('')}
+                </ItemSpecifics>
+              </Item>
+            </ReviseItemRequest>
+          `;
 
           const xmlResponse = await makeEBayAPICall(xmlRequest, 'ReviseItem');
           const result = await parseXMLResponse(xmlResponse);
@@ -642,16 +644,16 @@ router.get('/products/:itemId', async (req, res) => {
       const authToken = user.ebay.accessToken;
 
       const xmlRequest = `
-        <?xml version="1.0" encoding="utf-8"?>
-        <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-          <RequesterCredentials>
-            <eBayAuthToken>${authToken}</eBayAuthToken>
-          </RequesterCredentials>
-          <ItemID>${itemId}</ItemID>
-          <DetailLevel>ItemSpecificsOnly</DetailLevel>
-          <IncludeItemSpecifics>true</IncludeItemSpecifics>
-        </GetItemRequest>
-      `;
+          <?xml version="1.0" encoding="utf-8"?>
+          <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+            <RequesterCredentials>
+              <eBayAuthToken>${authToken}</eBayAuthToken>
+            </RequesterCredentials>
+            <ItemID>${itemId}</ItemID>
+            <DetailLevel>ItemSpecificsOnly</DetailLevel>
+            <IncludeItemSpecifics>true</IncludeItemSpecifics>
+          </GetItemRequest>
+        `;
 
       const xmlResponse = await makeEBayAPICall(xmlRequest, 'GetItem');
       const result = await parseXMLResponse(xmlResponse);
@@ -756,15 +758,15 @@ router.post(
           }
 
           const getItemXml = `
-          <?xml version="1.0" encoding="utf-8"?>
-          <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-            <RequesterCredentials>
-              <eBayAuthToken>${authToken}</eBayAuthToken>
-            </RequesterCredentials>
-            <ItemID>${compItemId.trim()}</ItemID>
-            <DetailLevel>ReturnSummary</DetailLevel>
-          </GetItemRequest>
-        `;
+            <?xml version="1.0" encoding="utf-8"?>
+            <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials>
+                <eBayAuthToken>${authToken}</eBayAuthToken>
+              </RequesterCredentials>
+              <ItemID>${compItemId.trim()}</ItemID>
+              <DetailLevel>ReturnSummary</DetailLevel>
+            </GetItemRequest>
+          `;
 
           const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
           const getItemResult = await parseXMLResponse(getItemResponse);
@@ -806,16 +808,17 @@ router.post(
           }
 
           const competitorInfo = {
-            itemId: compItemId.trim(),
+            competitorItemId: compItemId.trim(), // Use competitorItemId for consistency
             title: itemData.Title || 'Unknown Title',
             price: price,
             currency: currency,
             condition: itemData.ConditionDisplayName || 'Unknown',
-            imageUrl: null, // Skip image extraction to reduce response size
+            imageUrl: itemData.PictureDetails?.PictureURL?.[0] || null,
             productUrl:
               itemData.ViewItemURL || `https://www.ebay.com/itm/${compItemId}`,
             locale: itemData.Country || 'US',
-            addedAt: new Date().toISOString(),
+            addedAt: new Date(),
+            source: 'Manual',
           };
 
           validCompetitors.push(competitorInfo);
@@ -834,8 +837,54 @@ router.post(
         }
       }
 
-      // Save to MongoDB and execute strategy as before
-      // ...existing MongoDB save logic...
+      // Save to MongoDB - THIS IS THE KEY ADDITION
+      if (validCompetitors.length > 0) {
+        try {
+          const result = await ManualCompetitor.findOneAndUpdate(
+            { userId, itemId },
+            {
+              $addToSet: {
+                competitors: { $each: validCompetitors },
+              },
+            },
+            {
+              upsert: true,
+              new: true,
+              setDefaultsOnInsert: true,
+            }
+          );
+
+          console.log(
+            `✅ Saved ${validCompetitors.length} competitors to MongoDB for item ${itemId}`
+          );
+
+          // Execute strategy if available
+          try {
+            const { executeStrategyForItem } = await import(
+              '../services/strategyService.js'
+            );
+            const strategyResult = await executeStrategyForItem(itemId, userId);
+
+            if (strategyResult.success) {
+              console.log(
+                `🎯 Strategy executed for ${itemId} after adding competitors`
+              );
+            }
+          } catch (strategyError) {
+            console.error(
+              `❌ Error executing strategy for ${itemId}:`,
+              strategyError
+            );
+          }
+        } catch (saveError) {
+          console.error('❌ Error saving competitors to MongoDB:', saveError);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to save competitors to database',
+            error: saveError.message,
+          });
+        }
+      }
 
       res.json({
         success: true,
@@ -1036,6 +1085,179 @@ router.delete(
 
 /**
  * ===============================
+ * 8. SEARCH COMPETITORS MANUALLY (NEW ENDPOINT)
+ * ===============================
+ */
+router.post(
+  '/search-competitors-manually/:itemId',
+  ebayRateLimit('GetItem'),
+  async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const { userId, competitorItemIds } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: 'userId is required in request body',
+        });
+      }
+
+      if (!competitorItemIds || !Array.isArray(competitorItemIds)) {
+        return res.status(400).json({
+          success: false,
+          message: 'competitorItemIds array is required',
+        });
+      }
+
+      // LIMIT competitor checks to prevent API abuse
+      const maxCompetitors = 10;
+      const limitedCompetitorIds = competitorItemIds.slice(0, maxCompetitors);
+
+      const user = await User.findById(userId);
+      if (!user || !user.ebay.accessToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'No eBay credentials found for this user',
+        });
+      }
+
+      const authToken = user.ebay.accessToken;
+      const foundCompetitors = [];
+      const notFoundCompetitors = [];
+
+      // Get existing competitors to check for duplicates
+      const existingDoc = await ManualCompetitor.findOne({ userId, itemId });
+      const existingCompetitorIds = existingDoc
+        ? existingDoc.competitors.map((c) => c.competitorItemId || c.itemId)
+        : [];
+
+      // Process competitors with rate limiting
+      for (const compItemId of limitedCompetitorIds) {
+        try {
+          // Check rate limits before each GetItem call
+          const permission = await ebayUsageService.canMakeAPICall(
+            userId,
+            'GetItem'
+          );
+          if (!permission.allowed) {
+            notFoundCompetitors.push({
+              itemId: compItemId.trim(),
+              error: 'Rate limit exceeded - stopping competitor search',
+            });
+            break;
+          }
+
+          const getItemXml = `
+            <?xml version="1.0" encoding="utf-8"?>
+            <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials>
+                <eBayAuthToken>${authToken}</eBayAuthToken>
+              </RequesterCredentials>
+              <ItemID>${compItemId.trim()}</ItemID>
+              <DetailLevel>ReturnSummary</DetailLevel>
+            </GetItemRequest>
+          `;
+
+          const getItemResponse = await makeEBayAPICall(getItemXml, 'GetItem');
+          const getItemResult = await parseXMLResponse(getItemResponse);
+          const item = isEBayResponseSuccessful(getItemResult, 'GetItem');
+
+          const itemData = item.Item;
+
+          // Extract price with enhanced logic
+          let price = 0;
+          let currency = 'USD';
+
+          const extractPrice = (priceObj) => {
+            if (!priceObj) return { price: 0, currency: 'USD' };
+
+            if (typeof priceObj === 'object') {
+              const priceValue = parseFloat(
+                priceObj.Value || priceObj.__value__ || priceObj._ || 0
+              );
+              const currencyValue =
+                priceObj.__attributes__?.currencyID ||
+                priceObj.currencyID ||
+                priceObj['@currencyID'] ||
+                'USD';
+              return { price: priceValue, currency: currencyValue };
+            } else {
+              return { price: parseFloat(priceObj) || 0, currency: 'USD' };
+            }
+          };
+
+          // Try different price fields
+          if (itemData.StartPrice) {
+            const extracted = extractPrice(itemData.StartPrice);
+            price = extracted.price;
+            currency = extracted.currency;
+          } else if (itemData.CurrentPrice) {
+            const extracted = extractPrice(itemData.CurrentPrice);
+            price = extracted.price;
+            currency = extracted.currency;
+          }
+
+          // Check if already added
+          const isAlreadyAdded = existingCompetitorIds.includes(
+            compItemId.trim()
+          );
+
+          const competitorInfo = {
+            itemId: compItemId.trim(),
+            title: itemData.Title || 'Unknown Title',
+            price: price,
+            currency: currency,
+            condition: itemData.ConditionDisplayName || 'Unknown',
+            imageUrl: itemData.PictureDetails?.PictureURL?.[0] || null,
+            productUrl:
+              itemData.ViewItemURL || `https://www.ebay.com/itm/${compItemId}`,
+            locale: itemData.Country || 'US',
+            isAlreadyAdded,
+          };
+
+          foundCompetitors.push(competitorInfo);
+
+          // Add delay between competitor checks (2 seconds)
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } catch (error) {
+          console.error(
+            `❌ Failed to search competitor ${compItemId}:`,
+            error.message
+          );
+          notFoundCompetitors.push({
+            itemId: compItemId.trim(),
+            error: error.message,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Found ${foundCompetitors.length} of ${limitedCompetitorIds.length} competitors`,
+        itemId,
+        foundCompetitors,
+        notFoundCompetitors,
+        summary: {
+          totalRequested: competitorItemIds.length,
+          processed: limitedCompetitorIds.length,
+          found: foundCompetitors.length,
+          notFound: notFoundCompetitors.length,
+          alreadyAdded: foundCompetitors.filter((c) => c.isAlreadyAdded).length,
+        },
+      });
+    } catch (error) {
+      console.error('Search Competitors Manually Error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * ===============================
  * MONITORING ROUTES
  * ===============================
  */
@@ -1197,8 +1419,10 @@ router.post('/trigger-monitoring', requireAuth, async (req, res) => {
     }
 
     // FIX: Import the function correctly
-    const competitorMonitoringService = await import('../services/competitorMonitoringService.js');
-    
+    const competitorMonitoringService = await import(
+      '../services/competitorMonitoringService.js'
+    );
+
     // Call the exported function
     const result = await competitorMonitoringService.updateCompetitorPrices();
 
@@ -1222,12 +1446,17 @@ router.post('/execute-strategies', requireAuth, async (req, res) => {
     const { userId, itemId } = req.body;
 
     // FIX: Import the functions correctly
-    const competitorMonitoringService = await import('../services/competitorMonitoringService.js');
+    const competitorMonitoringService = await import(
+      '../services/competitorMonitoringService.js'
+    );
 
     let result;
     if (itemId) {
       // Execute for specific item
-      result = await competitorMonitoringService.triggerStrategyForItem(itemId, userId);
+      result = await competitorMonitoringService.triggerStrategyForItem(
+        itemId,
+        userId
+      );
     } else {
       // Execute for all items WITHOUT changing competitor prices
       result = await competitorMonitoringService.executeStrategiesForAllItems();

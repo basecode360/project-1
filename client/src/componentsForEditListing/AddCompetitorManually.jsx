@@ -113,6 +113,16 @@ export default function AddCompetitorManually() {
           prev.filter((comp) => comp.itemId !== competitor.itemId)
         );
         setSuccess(`Successfully added competitor: ${competitor.title}`);
+
+        // Trigger refresh of competitor count and listings
+        window.dispatchEvent(
+          new CustomEvent('competitorAdded', {
+            detail: { itemId, competitorId: competitor.itemId },
+          })
+        );
+
+        // Also set a localStorage flag for other components to detect
+        localStorage.setItem('competitorUpdated', Date.now().toString());
       } else {
         setError(response.error || 'Failed to add competitor');
       }
